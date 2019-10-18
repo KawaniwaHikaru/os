@@ -1,5 +1,10 @@
 #!/bin/sh
-## Copyright (c) 2016 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2016 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -113,11 +118,11 @@ done
 
 sed "$SED_ARG" "$SRCROOT/os/lib/rtl/rtlp.h" > "$DEST/rtl/rtlp.h"
 
-RTLC="$DEST/rtl/rtlc"
+RTLC="$DEST/rtl/urtl/rtlc"
 mkdir -p "$RTLC/"
-RTLC_FILES="stubs.c"
+RTLC_FILES="stubs.c ../pdouble.c"
 for file in $RTLC_FILES; do
-    sed "$SED_ARG" "$LIB/rtl/rtlc/$file" > "$RTLC/$file"
+    sed "$SED_ARG" "$LIB/rtl/urtl/rtlc/$file" > "$RTLC/$file"
 done
 
 WINCSUP="$DEST/libc/wincsup"

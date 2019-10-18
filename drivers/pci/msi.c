@@ -106,11 +106,15 @@ Environment:
 // ------------------------------------------------------ Data Type Definitions
 //
 
+#pragma pack(push, 1)
+
 typedef struct _PCI_MSI_X_TABLE_ENTRY {
     ULONGLONG Address;
     ULONG Data;
     ULONG Control;
 } PACKED PCI_MSI_X_TABLE_ENTRY, *PPCI_MSI_X_TABLE_ENTRY;
+
+#pragma pack(pop)
 
 //
 // ----------------------------------------------- Internal Function Prototypes
@@ -387,7 +391,7 @@ Return Value:
                              PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_MASK) >>
                             PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_SHIFT;
 
-        MsiMaxVectorCount = 1 << MsiMaxVectorCount;
+        MsiMaxVectorCount = 1ULL << MsiMaxVectorCount;
     }
 
     //
@@ -685,7 +689,7 @@ Return Value:
                               PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_MASK) >>
                              PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_SHIFT;
 
-            Information->MaxVectorCount = 1 << MaxVectorCount;
+            Information->MaxVectorCount = 1ULL << MaxVectorCount;
 
             ASSERT(MsiContext->MsiMaxVectorCount ==
                    Information->MaxVectorCount);
@@ -694,7 +698,7 @@ Return Value:
                            PCI_MSI_CONTROL_MULTI_VECTOR_ENABLE_MASK) >>
                           PCI_MSI_CONTROL_MULTI_VECTOR_ENABLE_SHIFT;
 
-            Information->VectorCount = 1 << VectorCount;
+            Information->VectorCount = 1ULL << VectorCount;
             break;
 
         case PciMsiTypeExtended:
@@ -809,7 +813,7 @@ Return Value:
                               PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_MASK) >>
                              PCI_MSI_CONTROL_MULTI_VECTOR_CAPABLE_SHIFT;
 
-            MaxVectorCount = 1 << MaxVectorCount;
+            MaxVectorCount = 1ULL << MaxVectorCount;
 
             ASSERT(MsiContext->MsiMaxVectorCount == MaxVectorCount);
 

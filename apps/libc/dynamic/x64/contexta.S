@@ -26,29 +26,29 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------- Includes
-##
+//
+// ------------------------------------------------------------------- Includes
+//
 
 #include <minoca/kernel/x64.inc>
 
-##
-## ---------------------------------------------------------------- Definitions
-##
+//
+// ---------------------------------------------------------------- Definitions
+//
 
-##
-## ----------------------------------------------------------------------- Code
-##
+//
+// ----------------------------------------------------------------------- Code
+//
 
 ASSEMBLY_FILE_HEADER
 
-##
-## LIBC_API
-## int
-## getcontext (
-##     ucontext_t *Context
-##     )
-##
+//
+// LIBC_API
+// int
+// getcontext (
+//     ucontext_t *Context
+//     )
+//
 
 /*++
 
@@ -72,6 +72,7 @@ Return Value:
 --*/
 
 EXPORTED_FUNCTION(getcontext)
+    int     $3                      # TODO: Check this, it's never been run!
     movq    %rdi, %rax              # Get the context.
     addq    $SIGNAL_CONTEXT_SIZE, %rax  # Get to the TRAP_FRAME part.
     movq    %rcx, TRAP_RCX(%rax)    # Save rcx.
@@ -108,22 +109,22 @@ EXPORTED_FUNCTION(getcontext)
     movq    %rcx, TRAP_RIP(%rax)    # Save the instruction pointer.
     pushfq                          # Push eflags.
     popq    %rcx                    # Get eflags.
-    movq    %rcx, TRAP_EFLAGS(%rax) # Save eflags.
+    movq    %rcx, TRAP_RFLAGS(%rax) # Save eflags.
     leaq    4(%rsp), %rcx           # Get the stack pointer (w/o return addr).
-    movq    %rcx, TRAP_ESP(%rax)    # Save that as rsp.
+    movq    %rcx, TRAP_RSP(%rax)    # Save that as rsp.
     movq    %rsp, %rsi              # Set stack pointer as second arg.
     call    ClpGetContext           # Call the C helper.
     ret                             # Return whatever the C routine returned.
 
 END_FUNCTION(getcontext)
 
-##
-## LIBC_API
-## int
-## setcontext (
-##     const ucontext_t *Context
-##     )
-##
+//
+// LIBC_API
+// int
+// setcontext (
+//     const ucontext_t *Context
+//     )
+//
 
 /*++
 
@@ -145,6 +146,7 @@ Return Value:
 --*/
 
 EXPORTED_FUNCTION(setcontext)
+    int     $3                      # TODO: Check this, it's never been run!
     pushq   %rdi                    # Save the argument.
     call    ClpSetContext           # Call the C helper.
     popq    %rcx                    # Restore the argument.
@@ -172,32 +174,32 @@ EXPORTED_FUNCTION(setcontext)
     movq    TRAP_RSI(%rcx), %rsi    # Restore rsi.
     movq    TRAP_RDX(%rcx), %rdx    # Restore rdx.
     movq    TRAP_RBX(%rcx), %rbx    # Restore rbx.
-    movq    TRAP_EFLAGS(%rcx), %rax # Get eflags.
+    movq    TRAP_RFLAGS(%rcx), %rax # Get eflags.
     pushq   %rax                    # Push eflags.
     popfq                           # Pop eflags off the stack.
     movq    TRAP_RAX(%rcx), %rax    # Restore rax as return value.
 
-    ##
-    ## This last part gets a little fishy depending on where the context
-    ## structure is. If the new rsp is on the same stack but greater than this
-    ## one, then this code runs the risk of taking a signal, which might
-    ## clobber the context before restoring RIP can be done. Hopefully that
-    ## doesn't happen.
-    ##
+    //
+    // This last part gets a little fishy depending on where the context
+    // structure is. If the new rsp is on the same stack but greater than this
+    // one, then this code runs the risk of taking a signal, which might
+    // clobber the context before restoring RIP can be done. Hopefully that
+    // doesn't happen.
+    //
 
     movq    TRAP_RSP(%rcx), %rsp    # Restore stack pointer.
     jmp     *TRAP_RIP(%rcx)         # Return.
 
 END_FUNCTION(setcontext)
 
-##
-## __NO_RETURN
-## void
-## ClpContextStart (
-##     void (*StartFunction)(),
-##     ...
-##     )
-##
+//
+// __NO_RETURN
+// void
+// ClpContextStart (
+//     void (*StartFunction)(),
+//     ...
+//     )
+//
 
 /*++
 
@@ -219,6 +221,7 @@ Return Value:
 --*/
 
 FUNCTION(ClpContextStart)
+    int     $3                      # TODO: Check this, it's never been run!
     popq    %rax                    # Get the function to call.
     popq    %rdi                    # Pop argument 1.
     popq    %rsi                    # Pop argument 2.
@@ -233,12 +236,12 @@ FUNCTION(ClpContextStart)
 
 END_FUNCTION(ClpContextStart)
 
-##
-## VOID
-## ClpFxSave (
-##     PFPU_CONTEXT Buffer
-##     )
-##
+//
+// VOID
+// ClpFxSave (
+//     PFPU_CONTEXT Buffer
+//     )
+//
 
 /*++
 
@@ -264,12 +267,12 @@ FUNCTION(ClpFxSave)
 
 END_FUNCTION(ClpFxSave)
 
-##
-## VOID
-## ClpFxRestore (
-##     PFPU_CONTEXT Buffer
-##     )
-##
+//
+// VOID
+// ClpFxRestore (
+//     PFPU_CONTEXT Buffer
+//     )
+//
 
 /*++
 

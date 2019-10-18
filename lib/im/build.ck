@@ -26,31 +26,71 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary, staticLibrary;
+
 function build() {
-    sources = [
+    var arch = mconfig.arch;
+    var buildLib;
+    var entries;
+    var lib;
+    var lib32;
+    var nativeLib;
+    var nativeSources;
+    var universalSources;
+
+    universalSources = [
         "elf.c",
         "elf64.c",
         "elfcomm.c",
         "image.c",
+        "imuniv.c",
         "pe.c"
     ];
 
+    nativeSources = [
+        ":elfcomm.o",
+        "imnative.c",
+    ];
+
+    if ((arch == "armv6") || (arch == "armv7") || (arch == "x86")) {
+        nativeSources += [":elf.o"];
+
+    } else if (arch == "x64") {
+        nativeSources += [":elf64.o"];
+    }
+
     lib = {
-        "label": "im",
-        "inputs": sources,
+        "label": "imu",
+        "inputs": universalSources,
     };
 
-    build_lib = {
-        "label": "build_im",
-        "output": "im",
-        "inputs": sources,
-        "build": TRUE,
+    nativeLib = {
+        "label": "imn",
+        "inputs": nativeSources
+    };
+
+    buildLib = {
+        "label": "build_imu",
+        "output": "imu",
+        "inputs": universalSources,
+        "build": true,
         "prefix": "build"
     };
 
-    entries = static_library(lib);
-    entries += static_library(build_lib);
+    entries = kernelLibrary(lib);
+    entries += staticLibrary(buildLib);
+    entries += kernelLibrary(nativeLib);
+    if (arch == "x64") {
+        lib32 = {
+            "label": "imu32",
+            "inputs": universalSources,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(lib32);
+    }
+
     return entries;
 }
 
-return build();

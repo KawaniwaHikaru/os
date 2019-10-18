@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -25,7 +30,7 @@
 
 BINARY = io.a
 
-BINARYTYPE = library
+BINARYTYPE = klibrary
 
 OBJS = arb.o      \
        cachedio.o \
@@ -71,6 +76,8 @@ ARMV6_OBJS = $(ARMV7_OBJS)
 X86_OBJS = x86/archio.o   \
            x86/archpm.o   \
            x86/intelcst.o \
+
+X64_OBJS = $(X86_OBJS)
 
 EXTRA_SRC_DIRS = x86 armv7
 

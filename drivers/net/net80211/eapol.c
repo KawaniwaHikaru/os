@@ -313,6 +313,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _EAPOL_PACKET_HEADER {
     UCHAR ProtocolVersion;
     UCHAR Type;
@@ -421,6 +423,8 @@ typedef struct _EAPOL_KDE_GTK {
     UCHAR Reserved;
     UCHAR Gtk[ANYSIZE_ARRAY];
 } PACKED EAPOL_KDE_GTK, *PEAPOL_KDE_GTK;
+
+#pragma pack(pop)
 
 /*++
 
@@ -552,15 +556,7 @@ Net80211pEapolDestroyLink (
 
 VOID
 Net80211pEapolProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet
-    );
-
-ULONG
-Net80211pEapolPrintAddress (
-    PNETWORK_ADDRESS Address,
-    PSTR Buffer,
-    ULONG BufferLength
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 VOID
@@ -772,7 +768,6 @@ Return Value:
     NetworkEntry.Interface.ProcessReceivedData =
                                              Net80211pEapolProcessReceivedData;
 
-    NetworkEntry.Interface.PrintAddress = Net80211pEapolPrintAddress;
     Status = NetRegisterNetworkLayer(&NetworkEntry,
                                      &Net80211EapolNetworkHandle);
 
@@ -1164,8 +1159,7 @@ Return Value:
 
 VOID
 Net80211pEapolProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -1176,12 +1170,8 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space while this routine
-        executes and the packet travels up the stack, but will not be accessed
-        after this routine returns.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link and packet information.
 
 Return Value:
 
@@ -1195,6 +1185,8 @@ Return Value:
     PEAPOL_CONTEXT Context;
     PRED_BLACK_TREE_NODE FoundNode;
     PEAPOL_KEY_FRAME KeyFrame;
+    PNET_LINK Link;
+    PNET_PACKET_BUFFER Packet;
     USHORT PacketBodyLength;
     EAPOL_CONTEXT SearchEntry;
 
@@ -1205,6 +1197,8 @@ Return Value:
     //
 
     Context = NULL;
+    Link = ReceiveContext->Link;
+    Packet = ReceiveContext->Packet;
     SearchEntry.NetworkLink = Link;
     KeAcquireQueuedLock(Net80211EapolTreeLock);
     FoundNode = RtlRedBlackTreeSearch(&Net80211EapolTree,
@@ -1308,51 +1302,6 @@ ProcessReceivedDataEnd:
     }
 
     return;
-}
-
-ULONG
-Net80211pEapolPrintAddress (
-    PNETWORK_ADDRESS Address,
-    PSTR Buffer,
-    ULONG BufferLength
-    )
-
-/*++
-
-Routine Description:
-
-    This routine is called to convert a network address into a string, or
-    determine the length of the buffer needed to convert an address into a
-    string.
-
-Arguments:
-
-    Address - Supplies an optional pointer to a network address to convert to
-        a string.
-
-    Buffer - Supplies an optional pointer where the string representation of
-        the address will be returned.
-
-    BufferLength - Supplies the length of the supplied buffer, in bytes.
-
-Return Value:
-
-    Returns the maximum length of any address if no network address is
-    supplied.
-
-    Returns the actual length of the network address string if a network address
-    was supplied, including the null terminator.
-
---*/
-
-{
-
-    //
-    // There is no such thing as an EAPOL address. The packets destination is
-    // determined by the data link layer.
-    //
-
-    return 0;
 }
 
 VOID

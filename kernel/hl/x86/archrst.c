@@ -31,7 +31,17 @@ Environment:
 
 #include <minoca/kernel/kernel.h>
 #include <minoca/kernel/ioport.h>
+
+#if __SIZEOF_LONG__ == 8
+
+#include <minoca/kernel/x64.h>
+
+#else
+
 #include <minoca/kernel/x86.h>
+
+#endif
+
 #include "../hlp.h"
 
 //
@@ -86,48 +96,10 @@ Return Value:
 
     PFADT Fadt;
     TABLE_REGISTER IdtTable;
-    BOOL ResetRegisterSupported;
     ULONG Try;
     UCHAR Value;
 
     Fadt = AcpiFindTable(FADT_SIGNATURE, NULL);
-
-    //
-    // If there's an FADT, attempt to use the ACPI reset mechanism.
-    //
-
-    if (Fadt != NULL) {
-
-        //
-        // If the reset register is supported, use that. The ACPI spec says
-        // that though the reset register is a generic address, the address
-        // width must be 8. If the FADT is new enough, use the flag to
-        // indicate support. Otherwise, use the table size and reset value to
-        // determine support.
-        //
-
-        ResetRegisterSupported = FALSE;
-        if ((Fadt->Header.Revision >= 3) &&
-            ((Fadt->Flags & FADT_FLAG_RESET_REGISTER_SUPPORTED) != 0)) {
-
-            ResetRegisterSupported = TRUE;
-
-        } else if ((Fadt->Header.Revision == 1) &&
-                   (Fadt->Header.Length > FIELD_OFFSET(FADT, ResetValue)) &&
-                   (Fadt->ResetValue != 0)) {
-
-            ResetRegisterSupported = TRUE;
-        }
-
-        if (ResetRegisterSupported != FALSE) {
-            if (Fadt->ResetRegister.AddressSpaceId == AddressSpaceIo) {
-                HlIoPortOutByte((USHORT)(Fadt->ResetRegister.Address),
-                                Fadt->ResetValue);
-
-                HlBusySpin(RESET_SYSTEM_STALL);
-            }
-        }
-    }
 
     //
     // Attempt to reset via the keyboard controller, unless ACPI says there

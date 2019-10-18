@@ -33,7 +33,7 @@ Environment:
 #define _WIN32_WINNT 0x0600
 
 #include <windows.h>
-#include <shlwapi.h>
+#include <shlobj.h>
 
 #include <assert.h>
 #include <libgen.h>
@@ -61,6 +61,8 @@ ChalkAddSearchPath (
 //
 // -------------------------------------------------------------------- Globals
 //
+
+extern PSTR CkAppExecName;
 
 //
 // ------------------------------------------------------------------ Functions
@@ -96,17 +98,27 @@ Return Value:
 
     PSTR Copy;
     CHAR Directory[MAX_PATH];
+    PSTR DirName;
+    PSTR ExecName;
     PSTR Next;
     PSTR Path;
     HRESULT Result;
     PSTR ScriptBase;
+
+    Copy = NULL;
+    if (Script != NULL) {
+        Copy = strdup(Script);
+        if (Copy == NULL) {
+            return;
+        }
+    }
 
     //
     // If a script was supplied, add the directory of the script.
     //
 
     if (Script != NULL) {
-        ScriptBase = dirname(Script);
+        ScriptBase = dirname(Copy);
         ChalkAddSearchPath(Vm, ScriptBase, NULL);
 
     //
@@ -117,6 +129,11 @@ Return Value:
         if (GetCurrentDirectory(MAX_PATH, Directory) != 0) {
             ChalkAddSearchPath(Vm, Directory, NULL);
         }
+    }
+
+    if (Copy != NULL) {
+        free(Copy);
+        Copy = NULL;
     }
 
     //
@@ -144,6 +161,22 @@ Return Value:
         free(Copy);
 
     } else {
+
+        //
+        // Add the sysroot-like path relative to the executable.
+        //
+
+        if ((CkAppExecName != NULL) && (*CkAppExecName != '\0')) {
+            ExecName = strdup(CkAppExecName);
+            if (ExecName != NULL) {
+                DirName = dirname(ExecName);
+                if (DirName != NULL) {
+                    ChalkAddSearchPath(Vm, DirName, "../lib/chalk");
+                }
+
+                free(ExecName);
+            }
+        }
 
         //
         // Add the current user's application data directory.

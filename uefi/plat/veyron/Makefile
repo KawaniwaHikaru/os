@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2015 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -51,7 +56,7 @@ ARMV7_OBJS = armv7/entry.o   \
              armv7/minttbl.o \
              armv7/smpa.o    \
 
-TEXT_ADDRESS = 0x020000A4
+TEXT_ADDRESS := 0x020000A4
 
 TARGETLIBS += $(OBJROOT)/os/uefi/dev/gic/gic.a               \
               $(OBJROOT)/os/uefi/dev/ns16550/ns16550.a       \

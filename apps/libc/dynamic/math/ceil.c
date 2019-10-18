@@ -117,7 +117,7 @@ Return Value:
             // Return 0 * sign(Value) if |Value| < 1.
             //
 
-            if (ClHugeValue + Value > 0.0) {
+            if (ClDoubleHugeValue + Value > 0.0) {
                 if (HighWord < 0) {
                     HighWord = DOUBLE_SIGN_BIT >> DOUBLE_HIGH_WORD_SHIFT;
                     LowWord = 0;
@@ -143,7 +143,7 @@ Return Value:
             // Raise the inexact flag.
             //
 
-            if (ClHugeValue + Value > 0.0) {
+            if (ClDoubleHugeValue + Value > 0.0) {
                 if (HighWord > 0) {
                     HighWord += (1 << ExponentShift) >> Exponent;
                 }
@@ -185,7 +185,7 @@ Return Value:
         // Raise the inexact flag.
         //
 
-        if (ClHugeValue + Value > 0.0) {
+        if (ClDoubleHugeValue + Value > 0.0) {
             if (HighWord > 0) {
                 if (Exponent == 20) {
                     HighWord += 1;

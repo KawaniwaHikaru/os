@@ -58,7 +58,7 @@ KERNEL_API
 VOID
 KeCrashSystemEx (
     ULONG CrashCode,
-    PSTR CrashCodeString,
+    PCSTR CrashCodeString,
     ULONGLONG Parameter1,
     ULONGLONG Parameter2,
     ULONGLONG Parameter3,
@@ -148,7 +148,7 @@ Return Value:
     Status = STATUS_UNSUCCESSFUL;
     if (KSUCCESS(Status)) {
         KdDisconnect();
-        Status = HlResetSystem(SystemResetWarm);
+        Status = HlResetSystem(SystemResetWarm, NULL, 0);
         KdConnect();
         RtlDebugPrint("System reset unsuccessful: %d\n", Status);
     }

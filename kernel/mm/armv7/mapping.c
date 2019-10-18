@@ -789,7 +789,6 @@ Return Value:
 VOID
 MmSwitchAddressSpace (
     PVOID Processor,
-    PVOID CurrentStack,
     PADDRESS_SPACE AddressSpace
     )
 
@@ -803,10 +802,6 @@ Arguments:
 
     Processor - Supplies a pointer to the current processor block.
 
-    CurrentStack - Supplies the address of the current thread's kernel stack.
-        This routine will ensure this address is visible in the address space
-        being switched to. Stacks must not cross page directory boundaries.
-
     AddressSpace - Supplies a pointer to the address space to switch to.
 
 Return Value:
@@ -817,24 +812,12 @@ Return Value:
 
 {
 
-    ULONG FirstIndex;
-    PFIRST_LEVEL_TABLE FirstTable;
+    PPROCESSOR_BLOCK ProcessorBlock;
     PADDRESS_SPACE_ARM Space;
 
     Space = (PADDRESS_SPACE_ARM)AddressSpace;
-
-    //
-    // Make sure the current stack is visible. It might not be if this current
-    // thread is new and its stack pushed out into a new page table not in the
-    // destination context.
-    //
-
-    FirstIndex = FLT_INDEX(CurrentStack);
-    FirstTable = Space->PageDirectory;
-    if (!COMPARE_PTES(FirstTable, MmKernelFirstLevelTable, FirstIndex)) {
-        MmUpdatePageDirectory(AddressSpace, CurrentStack, PAGE_SIZE);
-    }
-
+    ProcessorBlock = KeGetCurrentProcessorBlock();
+    ProcessorBlock->Tss = Space->PageDirectory;
     ArSwitchTtbr0(Space->PageDirectoryPhysical);
     return;
 }
@@ -873,6 +856,7 @@ Return Value:
     BOOL FreePageTable;
     ULONG MultiprocessorIdRegister;
     PHYSICAL_ADDRESS PhysicalAddress;
+    PPROCESSOR_BLOCK ProcessorBlock;
     PHYSICAL_ADDRESS RunPhysicalAddress;
     UINTN RunSize;
     ULONG SecondIndex;
@@ -926,6 +910,14 @@ Return Value:
     //
 
     } else if (Phase == 1) {
+
+        //
+        // Initialize the pointer that has nothing to do with the TSS but
+        // stores a shortcut to the VA of the first level table.
+        //
+
+        ProcessorBlock = KeGetCurrentProcessorBlock();
+        ProcessorBlock->Tss = MmKernelFirstLevelTable;
         Status = STATUS_SUCCESS;
 
     //
@@ -1197,10 +1189,9 @@ Return Value:
 
 {
 
-    PADDRESS_SPACE_ARM AddressSpace;
     volatile FIRST_LEVEL_TABLE *CurrentFirstLevelTable;
-    PKPROCESS CurrentProcess;
     ULONG FirstIndex;
+    PPROCESSOR_BLOCK ProcessorBlock;
     BOOL Result;
     ULONG SecondIndex;
     volatile SECOND_LEVEL_TABLE *SecondLevelTable;
@@ -1215,9 +1206,16 @@ Return Value:
         return FALSE;
     }
 
-    CurrentProcess = PsGetCurrentProcess();
-    AddressSpace = (PADDRESS_SPACE_ARM)(CurrentProcess->AddressSpace);
-    CurrentFirstLevelTable = AddressSpace->PageDirectory;
+    //
+    // Get the virtual address of the first level table out of its hidden space
+    // in the processor block. Ideally this would instead reach through
+    // current thread -> process -> address space, but there is a region
+    // during context swap where the current thread is the new thread but the
+    // TTBR is from the old thread.
+    //
+
+    ProcessorBlock = KeGetCurrentProcessorBlock();
+    CurrentFirstLevelTable = ProcessorBlock->Tss;
     FirstIndex = FLT_INDEX(FaultingAddress);
 
     //
@@ -1759,6 +1757,10 @@ Return Value:
         ProcessFirstLevelTable = AddressSpace->PageDirectory;
     }
 
+    if (Attributes != NULL) {
+        *Attributes = MAP_FLAG_DIRTY;
+    }
+
     FirstIndex = FLT_INDEX(VirtualAddress);
     if (VirtualAddress >= KERNEL_VA_START) {
         FirstLevelTable = MmKernelFirstLevelTable;
@@ -1800,8 +1802,6 @@ Return Value:
 
             *Attributes |= MAP_FLAG_READ_ONLY;
         }
-
-        *Attributes |= MAP_FLAG_DIRTY;
     }
 
     return PhysicalAddress;
@@ -1875,7 +1875,7 @@ Return Value:
     ProcessorBlock = KeGetCurrentProcessorBlock();
     MmpMapPage(PageTablePhysical,
                ProcessorBlock->SwapPage,
-               MAP_FLAG_PRESENT | MAP_FLAG_READ_ONLY | MAP_FLAG_GLOBAL);
+               MAP_FLAG_PRESENT | MAP_FLAG_READ_ONLY);
 
     SecondLevelTable = (PSECOND_LEVEL_TABLE)(ProcessorBlock->SwapPage);
     SecondLevelTable = (PSECOND_LEVEL_TABLE)((UINTN)SecondLevelTable + Offset);
@@ -1975,7 +1975,7 @@ Return Value:
     ProcessorBlock = KeGetCurrentProcessorBlock();
     MmpMapPage(PageTablePhysical,
                ProcessorBlock->SwapPage,
-               MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+               MAP_FLAG_PRESENT);
 
     SecondLevelTable = (PSECOND_LEVEL_TABLE)(ProcessorBlock->SwapPage);
     SecondLevelTable = (PSECOND_LEVEL_TABLE)((UINTN)SecondLevelTable + Offset);
@@ -2033,7 +2033,7 @@ Return Value:
         *PageWasDirty = TRUE;
     }
 
-    ASSERT(VirtualAddress < KERNEL_VA_START);
+    ASSERT(VirtualAddress < USER_VA_END);
 
     MmpUpdateResidentSetCounter(&(Space->Common), -1);
 
@@ -2113,7 +2113,7 @@ Return Value:
     ProcessorBlock = KeGetCurrentProcessorBlock();
     MmpMapPage(PageTablePhysical,
                ProcessorBlock->SwapPage,
-               MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+               MAP_FLAG_PRESENT);
 
     SecondLevelTable = (PSECOND_LEVEL_TABLE)(ProcessorBlock->SwapPage);
     SecondLevelTable = (PSECOND_LEVEL_TABLE)((UINTN)SecondLevelTable + Offset);
@@ -2244,7 +2244,7 @@ Return Value:
                                 1);
     }
 
-    ASSERT(VirtualAddress < KERNEL_VA_START);
+    ASSERT(VirtualAddress < USER_VA_END);
 
     if (MappedCount != 0) {
         MmpUpdateResidentSetCounter(&(OtherAddressSpace->Common), MappedCount);
@@ -2537,14 +2537,14 @@ Return Value:
     Destination = DestinationSpace->PageDirectory;
     Source = SourceSpace->PageDirectory;
     Total = 0;
-    for (Index = 0; Index < FLT_INDEX(KERNEL_VA_START); Index += 4) {
+    for (Index = 0; Index < FLT_INDEX(USER_VA_END); Index += 4) {
         if (Source[Index].Entry == 0) {
             continue;
         }
 
         ASSERT(Destination[Index].Format != FLT_COARSE_PAGE_TABLE);
 
-        Physical = MmpAllocatePhysicalPages(1, 0);
+        Physical = MmpAllocatePhysicalPage();
         if (Physical == INVALID_PHYSICAL_ADDRESS) {
 
             //
@@ -2731,7 +2731,7 @@ Return Value:
             DestinationTable = ProcessorBlock->SwapPage;
             MmpMapPage(PageTable,
                        DestinationTable,
-                       MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+                       MAP_FLAG_PRESENT);
 
             if (TableIndexStart != 0) {
                 RtlZeroMemory(DestinationTable,
@@ -2852,7 +2852,7 @@ Return Value:
             DestinationTable = ProcessorBlock->SwapPage;
             MmpMapPage(PageTable,
                        DestinationTable,
-                       MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+                       MAP_FLAG_PRESENT);
 
             for (TableIndex = TableIndexStart;
                  TableIndex < TableIndexEnd;
@@ -2915,7 +2915,7 @@ Return Value:
         MmpCleanPageTableCacheRegion(CleanStart, CleanSize);
     }
 
-    ASSERT(VirtualAddress < KERNEL_VA_START);
+    ASSERT(VirtualAddress < USER_VA_END);
 
     if (MappedCount != 0) {
         MmpUpdateResidentSetCounter(&(DestinationSpace->Common), MappedCount);
@@ -2987,6 +2987,42 @@ Return Value:
 
         FirstIndex += 1;
     }
+
+    return;
+}
+
+VOID
+MmpTearDownPageTables (
+    PADDRESS_SPACE AddressSpace,
+    BOOL Terminated
+    )
+
+/*++
+
+Routine Description:
+
+    This routine tears down all the page tables for the given address space
+    in user mode while the process is still live (but exiting).
+
+Arguments:
+
+    AddressSpace - Supplies a pointer to the address space being torn down.
+
+    Terminated - Supplies a boolean indicating whether the process is being
+        terminated or just exec'ed.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    //
+    // The ARM page tables are only one level deep, so they can be torn down
+    // from outside the process. Consider moving that destruction in here.
+    //
 
     return;
 }
@@ -3110,11 +3146,11 @@ Return Value:
     // boundaries.
     //
 
-    ASSERT(ALIGN_RANGE_DOWN((UINTN)KERNEL_VA_START, (1 << (32 - 2))) ==
-           (UINTN)KERNEL_VA_START);
+    ASSERT(ALIGN_RANGE_DOWN((UINTN)USER_VA_END, (1 << (32 - 2))) ==
+           (UINTN)USER_VA_END);
 
     for (LoopIndex = 0;
-         LoopIndex < ((UINTN)KERNEL_VA_START >> (32 - 2));
+         LoopIndex < ((UINTN)USER_VA_END >> (32 - 2));
          LoopIndex += 1) {
 
         Entry = ((ULONG)SelfMapPageTablePhysical >> SLT_ALIGNMENT) + LoopIndex;
@@ -3184,7 +3220,7 @@ Return Value:
     FirstLevelTable = Space->PageDirectory;
     Total = 0;
     for (FirstIndex = 0;
-         FirstIndex < FLT_INDEX(KERNEL_VA_START);
+         FirstIndex < FLT_INDEX(USER_VA_END);
          FirstIndex += 4) {
 
         if (FirstLevelTable[FirstIndex].Entry != 0) {
@@ -3309,7 +3345,7 @@ Return Value:
         NewCount = 0;
 
     } else {
-        PageTablePhysical = MmpAllocatePhysicalPages(1, 0);
+        PageTablePhysical = MmpAllocatePhysicalPage();
         NewCount = 1;
     }
 
@@ -3357,7 +3393,7 @@ Return Value:
             ProcessorBlock = KeGetCurrentProcessorBlock();
             MmpMapPage(PageTablePhysical,
                        ProcessorBlock->SwapPage,
-                       MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+                       MAP_FLAG_PRESENT);
 
             RtlZeroMemory(ProcessorBlock->SwapPage, PAGE_SIZE);
             MmpUnmapPages(ProcessorBlock->SwapPage, 1, 0, NULL);
@@ -3462,7 +3498,7 @@ Return Value:
     // If a page table was allocated but not used, then free it.
     //
 
-    if (PageTablePhysical != INVALID_PHYSICAL_ADDRESS) {
+    if ((NewCount != 0) && (PageTablePhysical != INVALID_PHYSICAL_ADDRESS)) {
         MmFreePhysicalPage(PageTablePhysical);
     }
 

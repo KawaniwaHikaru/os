@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -21,13 +26,13 @@
 #
 ################################################################################
 
-BINARY = msetup.exe
+BINARY = msetup
 
 BINPLACE = tools/bin
 
 BUILD = yes
 
-BINARYTYPE = ntconsole
+BINARYTYPE = build
 
 VPATH += $(SRCDIR)/..:
 
@@ -44,7 +49,7 @@ TARGETLIBS = $(OBJROOT)/os/lib/partlib/build/partlib.a         \
              $(OBJROOT)/os/lib/fatlib/build/fat.a              \
              $(OBJROOT)/os/lib/bconflib/build/bconflib.a       \
              $(OBJROOT)/os/lib/rtl/base/build/basertl.a        \
-             $(OBJROOT)/os/lib/rtl/rtlc/build/rtlc.a           \
+             $(OBJROOT)/os/lib/rtl/urtl/rtlc/build/rtlc.a      \
              $(OBJROOT)/os/lib/yy/build/yy.a                   \
              $(OBJROOT)/os/apps/ck/lib/build/libchalk.a        \
 

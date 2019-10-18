@@ -123,7 +123,7 @@ Members:
 --*/
 
 typedef struct _PRINT_PARAMETERS {
-    PSTR FormatString;
+    PCSTR FormatString;
     va_list Arguments;
 } PRINT_PARAMETERS, *PPRINT_PARAMETERS;
 
@@ -306,12 +306,6 @@ KSTATUS
 KdpSendConnectionResponse (
     PCONNECTION_REQUEST ConnectionRequest,
     PBOOL BreakInRequested
-    );
-
-VOID
-KdpInternalPrint (
-    PSTR Format,
-    ...
     );
 
 VOID
@@ -509,7 +503,7 @@ Return Value:
 
 VOID
 KdPrint (
-    PSTR Format,
+    PCSTR Format,
     ...
     )
 
@@ -544,7 +538,7 @@ Return Value:
 
 VOID
 KdPrintWithArgumentList (
-    PSTR Format,
+    PCSTR Format,
     va_list ArgumentList
     )
 
@@ -577,8 +571,9 @@ Return Value:
         (KdInitialized != FALSE)) {
 
         PrintParameters.FormatString = Format;
-        PrintParameters.Arguments = ArgumentList;
+        va_copy(PrintParameters.Arguments, ArgumentList);
         RtlDebugService(EXCEPTION_PRINT, &PrintParameters);
+        va_end(PrintParameters.Arguments);
     }
 
     return;
@@ -2085,11 +2080,11 @@ Return Value:
     case DbgCommandRangeStep:
         RangeStep = (PRANGE_STEP)Packet->Payload;
         KdBreakRange.BreakRangeStart =
-                                    (PVOID)(ULONG)RangeStep->BreakRangeMinimum;
+                                    (PVOID)(UINTN)RangeStep->BreakRangeMinimum;
 
-        KdBreakRange.BreakRangeEnd = (PVOID)(ULONG)RangeStep->BreakRangeMaximum;
-        KdBreakRange.RangeHoleStart = (PVOID)(ULONG)RangeStep->RangeHoleMinimum;
-        KdBreakRange.RangeHoleEnd = (PVOID)(ULONG)RangeStep->RangeHoleMaximum;
+        KdBreakRange.BreakRangeEnd = (PVOID)(UINTN)RangeStep->BreakRangeMaximum;
+        KdBreakRange.RangeHoleStart = (PVOID)(UINTN)RangeStep->RangeHoleMinimum;
+        KdBreakRange.RangeHoleEnd = (PVOID)(UINTN)RangeStep->RangeHoleMaximum;
         KdBreakRange.Enabled = TRUE;
         KdUserRequestedSingleStep = FALSE;
         KdpSetSingleStepMode(Exception, TrapFrame, NULL);
@@ -3171,7 +3166,7 @@ Return Value:
     }
 
     KdpDisconnect();
-    Status = HlResetSystem(ResetType);
+    Status = HlResetSystem(ResetType, NULL, 0);
     KdpConnect(NULL);
     KdpInternalPrint("Reset system failed with status %d\n", Status);
     KdpInitializeBreakNotification(Exception, TrapFrame, &KdTxPacket);
@@ -3460,7 +3455,7 @@ SendConnectionResponseEnd:
 
 VOID
 KdpInternalPrint (
-    PSTR Format,
+    PCSTR Format,
     ...
     )
 
@@ -3553,7 +3548,7 @@ Return Value:
             KdNmiHandler(TrapFrame);
         }
 
-    } while (LockValue != ProcessorNumber);
+    } while ((LockValue != ProcessorNumber) && (LockValue != (ULONG)-1));
 
     return;
 }

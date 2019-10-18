@@ -105,6 +105,12 @@ Author:
 #define CK_CONFIGURATION_DEBUG_COMPILER 0x00000002
 
 //
+// Define the maximum UTF-8 value that can be encoded.
+//
+
+#define CK_MAX_UTF8 0x10FFFF
+
+//
 // ------------------------------------------------------ Data Type Definitions
 //
 
@@ -600,7 +606,8 @@ CkInterpret (
     PCSTR Path,
     PCSTR Source,
     UINTN Length,
-    LONG Line
+    LONG Line,
+    BOOL Interactive
     );
 
 /*++
@@ -625,6 +632,10 @@ Arguments:
 
     Line - Supplies the line number this code starts on. Supply 1 to start at
         the beginning.
+
+    Interactive - Supplies a boolean indicating whether this is an interactive
+        session or not. For interactive sessions, expression statements will be
+        printed.
 
 Return Value:
 
@@ -801,7 +812,30 @@ CkGetStackSize (
 
 Routine Description:
 
-    This routine gets the current stack size.
+    This routine returns the number of elements currently on the stack for the
+    current frame.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+Return Value:
+
+    Returns the number of stack slots occupied by the current frame.
+
+--*/
+
+CK_API
+UINTN
+CkGetStackRemaining (
+    PCK_VM Vm
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns the number of free slots remaining on the stack.
 
 Arguments:
 
@@ -1265,7 +1299,7 @@ Return Value:
 --*/
 
 CK_API
-VOID
+BOOL
 CkDictGet (
     PCK_VM Vm,
     INTN StackIndex
@@ -1275,10 +1309,10 @@ CkDictGet (
 
 Routine Description:
 
-    This routine pops a key value off the stack, and uses it to get the
-    corresponding value for the dictionary stored at the given stack index.
-    The resulting value is pushed onto the stack. If no value exists for the
-    given key, then null is pushed.
+    This routine pops a key off the stack, and uses it to get the corresponding
+    value for the dictionary stored at the given stack index. The resulting
+    value is pushed onto the stack. If no value exists for the given key, then
+    nothing is pushed.
 
 Arguments:
 
@@ -1290,9 +1324,9 @@ Arguments:
 
 Return Value:
 
-    Returns the integer value.
+    TRUE if there was a value for that key.
 
-    0 if the value at the stack is not an integer.
+    FALSE if the dictionary has no contents for that value.
 
 --*/
 
@@ -1309,6 +1343,35 @@ Routine Description:
 
     This routine pops a key and then a value off the stack, then sets that
     key-value pair in the dictionary at the given stack index.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    StackIndex - Supplies the stack index of the dictionary (before anything is
+        popped off). Negative values reference stack indices from the end of
+        the stack.
+
+Return Value:
+
+    None.
+
+--*/
+
+CK_API
+VOID
+CkDictRemove (
+    PCK_VM Vm,
+    INTN StackIndex
+    );
+
+/*++
+
+Routine Description:
+
+    This routine pops a key off the stack, and removes that key and
+    corresponding value from the dictionary. No error is raised if the key
+    did not previously exist in the dictionary.
 
 Arguments:
 
@@ -1365,7 +1428,7 @@ Routine Description:
 
     This routine advances a dictionary iterator at the top of the stack. It
     pushes the next key and then the next value onto the stack, if there are
-    more elements in the dictionary. Callers should pull a null values onto
+    more elements in the dictionary. Callers should push a null value onto
     the stack as the initial iterator before calling this routine for the first
     time. Callers are responsible for popping the value, key, and potentially
     finished iterator off the stack. Callers should not modify a dictionary
@@ -1679,7 +1742,7 @@ Arguments:
 
     Vm - Supplies a pointer to the virtual machine.
 
-    FieldIndex - Supplies the field index of the intance to get.
+    FieldIndex - Supplies the field index of the instance to get.
 
 Return Value:
 
@@ -1720,7 +1783,7 @@ VOID
 CkGetVariable (
     PCK_VM Vm,
     INTN StackIndex,
-    PSTR Name
+    PCSTR Name
     );
 
 /*++
@@ -1752,7 +1815,7 @@ VOID
 CkSetVariable (
     PCK_VM Vm,
     INTN StackIndex,
-    PSTR Name
+    PCSTR Name
     );
 
 /*++

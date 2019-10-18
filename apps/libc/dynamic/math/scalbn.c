@@ -169,8 +169,8 @@ Return Value:
         // Handle underflow.
         //
 
-        if (Exponent< -50000) {
-            return ClTinyValue * Value;
+        if (Exponent < -50000) {
+            return ClDoubleTinyValue * Value;
         }
     }
 
@@ -184,7 +184,7 @@ Return Value:
 
     ValueExponent = ValueExponent + Exponent;
     if (ValueExponent > DOUBLE_HUGE_VALUE_EXPONENT) {
-        return ClHugeValue * copysign(ClHugeValue, Value);
+        return ClDoubleHugeValue * copysign(ClDoubleHugeValue, Value);
     }
 
     //
@@ -206,10 +206,10 @@ Return Value:
             //
 
             if (Exponent > 50000) {
-                return ClHugeValue * copysign(ClHugeValue, Value);
+                return ClDoubleHugeValue * copysign(ClDoubleHugeValue, Value);
 
             } else {
-                return ClTinyValue * copysign(ClTinyValue, Value);
+                return ClDoubleTinyValue * copysign(ClDoubleTinyValue, Value);
             }
     }
 

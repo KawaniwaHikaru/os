@@ -45,13 +45,6 @@ Environment:
 //
 
 //
-// This macro aligns a value up to the COFF alignment.
-//
-
-#define ELFCONV_COFF_ALIGN(_Value) \
-    (((_Value) + (ELFCONV_COFF_ALIGNMENT - 1)) & ~(ELFCONV_COFF_ALIGNMENT - 1))
-
-//
 // This macro returns a pointer to the base of the section header array given
 // a pointer to the ELF header.
 //
@@ -94,12 +87,6 @@ Environment:
 //
 
 #define ELFCONV_PE_SECTION_COUNT 16
-
-//
-// Define the alignment used throughout the COFF file.
-//
-
-#define ELFCONV_COFF_ALIGNMENT 0x20
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -168,25 +155,25 @@ ElfconvCleanUp32 (
     );
 
 BOOLEAN
-ElfconvIsTextSection (
+ElfconvIsTextSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     );
 
 BOOLEAN
-ElfconvIsDataSection (
+ElfconvIsDataSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     );
 
 BOOLEAN
-ElfconvIsHiiRsrcSection (
+ElfconvIsHiiRsrcSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     );
 
 BOOLEAN
-ElfconvIsDebugSection (
+ElfconvIsDebugSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     );
@@ -198,7 +185,7 @@ ElfconvThumbMovtImmediatePatch (
     );
 
 BOOLEAN
-ElfconvConvertElfAddress (
+ElfconvConvertElfAddress32 (
     PELFCONV_CONTEXT Context,
     UINT32 *Address
     );
@@ -342,7 +329,7 @@ Return Value:
          SectionIndex += 1) {
 
         ElfSection = ELFCONV_ELF_SECTION(ElfHeader, SectionIndex);
-        if (ElfconvIsTextSection(ElfHeader, ElfSection) != FALSE) {
+        if (ElfconvIsTextSection32(ElfHeader, ElfSection) != FALSE) {
             if ((Context->Flags & ELFCONV_OPTION_VERBOSE) != 0) {
                 StringSection = ELFCONV_ELF_SECTION(ElfHeader,
                                                     ElfHeader->e_shstrndx);
@@ -418,7 +405,7 @@ Return Value:
          SectionIndex += 1) {
 
         ElfSection = ELFCONV_ELF_SECTION(ElfHeader, SectionIndex);
-        if (ElfconvIsDataSection(ElfHeader, ElfSection) != FALSE) {
+        if (ElfconvIsDataSection32(ElfHeader, ElfSection) != FALSE) {
             if ((Context->Flags & ELFCONV_OPTION_VERBOSE) != 0) {
                 StringSection = ELFCONV_ELF_SECTION(ElfHeader,
                                                     ElfHeader->e_shstrndx);
@@ -470,7 +457,7 @@ Return Value:
          SectionIndex += 1) {
 
         ElfSection = ELFCONV_ELF_SECTION(ElfHeader, SectionIndex);
-        if (ElfconvIsHiiRsrcSection(ElfHeader, ElfSection) != FALSE) {
+        if (ElfconvIsHiiRsrcSection32(ElfHeader, ElfSection) != FALSE) {
             if ((Context->Flags & ELFCONV_OPTION_VERBOSE) != 0) {
                 StringSection = ELFCONV_ELF_SECTION(ElfHeader,
                                                     ElfHeader->e_shstrndx);
@@ -697,15 +684,15 @@ Return Value:
 
     switch (FilterType) {
     case ElfconvSectionText:
-        FilterFunction = ElfconvIsTextSection;
+        FilterFunction = ElfconvIsTextSection32;
         break;
 
     case ElfconvSectionData:
-        FilterFunction = ElfconvIsDataSection;
+        FilterFunction = ElfconvIsDataSection32;
         break;
 
     case ElfconvSectionHii:
-        FilterFunction = ElfconvIsHiiRsrcSection;
+        FilterFunction = ElfconvIsHiiRsrcSection32;
         break;
 
     default:
@@ -737,10 +724,10 @@ Return Value:
                 if ((Context->Flags & ELFCONV_OPTION_VERBOSE) != 0) {
                     Difference = Destination - (VOID *)(Context->CoffFile);
                     printf("Copying section from ELF offset %x, size %x to "
-                           "COFF offset %tx.\n",
+                           "COFF offset %lx.\n",
                            ElfSection->sh_offset,
                            ElfSection->sh_size,
-                           Difference);
+                           (long)Difference);
 
                 }
 
@@ -753,8 +740,8 @@ Return Value:
             case SHT_NOBITS:
                 if ((Context->Flags & ELFCONV_OPTION_VERBOSE) != 0) {
                     Difference = Destination - (VOID *)(Context->CoffFile);
-                    printf("Zeroing COFF offset %tx, size %x",
-                           Difference,
+                    printf("Zeroing COFF offset %lx, size %x\n",
+                           (long)Difference,
                            ElfSection->sh_size);
                 }
 
@@ -854,10 +841,10 @@ Return Value:
                 Difference = (VOID *)Relocation - (VOID *)ElfHeader;
                 fprintf(stderr,
                         "Error: Invalid symbol definition %x, "
-                        "relocation section %d, offset %tx.\n",
+                        "relocation section %d, offset %lx.\n",
                         Symbol->st_shndx,
                         SectionIndex,
-                        Difference);
+                        (long)Difference);
 
                 return FALSE;
             }
@@ -1120,8 +1107,8 @@ Return Value:
         // Skip sections that are neither text nor data.
         //
 
-        if ((ElfconvIsTextSection(ElfHeader, SectionHeader) == FALSE) &&
-            (ElfconvIsDataSection(ElfHeader, SectionHeader) == FALSE)) {
+        if ((ElfconvIsTextSection32(ElfHeader, SectionHeader) == FALSE) &&
+            (ElfconvIsDataSection32(ElfHeader, SectionHeader) == FALSE)) {
 
             continue;
         }
@@ -1336,8 +1323,8 @@ Return Value:
                                (int)RelocationOffset);
                     }
 
-                    Result = ElfconvConvertElfAddress(Context,
-                                                      &RelocationOffset);
+                    Result = ElfconvConvertElfAddress32(Context,
+                                                        &RelocationOffset);
 
                     if (Result == FALSE) {
                         fprintf(stderr,
@@ -1390,13 +1377,6 @@ Return Value:
                        (UINT32)RelocationElementSize);
             }
 
-            if ((RelocationOffset == 0) || (RelocationSize == 0) ||
-                (RelocationElementSize == 0)) {
-
-                fprintf(stderr, "Error: Bad ARM relocations.\n");
-                return FALSE;
-            }
-
             for (RelocationIndex = 0;
                  RelocationIndex < RelocationSize;
                  RelocationIndex += RelocationElementSize) {
@@ -1418,8 +1398,8 @@ Return Value:
 
                     case R_386_RELATIVE:
                         TargetAddress = Relocation->r_offset;
-                        Result = ElfconvConvertElfAddress(Context,
-                                                          &TargetAddress);
+                        Result = ElfconvConvertElfAddress32(Context,
+                                                            &TargetAddress);
 
                         if (Result == FALSE) {
                             fprintf(stderr,
@@ -1430,8 +1410,8 @@ Return Value:
 
                         TargetPointer = Context->CoffFile + TargetAddress;
                         TargetValue = *(UINT32 *)TargetPointer;
-                        Result = ElfconvConvertElfAddress(Context,
-                                                          &TargetValue);
+                        Result = ElfconvConvertElfAddress32(Context,
+                                                            &TargetValue);
 
                         if (Result == FALSE) {
                             if ((Context->Flags &
@@ -1490,8 +1470,8 @@ Return Value:
 
                     case R_ARM_RELATIVE:
                         TargetAddress = Relocation->r_offset;
-                        Result = ElfconvConvertElfAddress(Context,
-                                                          &TargetAddress);
+                        Result = ElfconvConvertElfAddress32(Context,
+                                                            &TargetAddress);
 
                         if (Result == FALSE) {
                             fprintf(stderr,
@@ -1502,8 +1482,8 @@ Return Value:
 
                         TargetPointer = Context->CoffFile + TargetAddress;
                         TargetValue = *(UINT32 *)TargetPointer;
-                        Result = ElfconvConvertElfAddress(Context,
-                                                          &TargetValue);
+                        Result = ElfconvConvertElfAddress32(Context,
+                                                            &TargetValue);
 
                         if (Result == FALSE) {
                             if ((Context->Flags &
@@ -1648,7 +1628,7 @@ Return Value:
          SectionIndex += 1) {
 
         ElfSection = ELFCONV_ELF_SECTION(ElfHeader, SectionIndex);
-        if (ElfconvIsDebugSection(ElfHeader, ElfSection) == FALSE) {
+        if (ElfconvIsDebugSection32(ElfHeader, ElfSection) == FALSE) {
             continue;
         }
 
@@ -1785,7 +1765,7 @@ Return Value:
 }
 
 BOOLEAN
-ElfconvIsTextSection (
+ElfconvIsTextSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     )
@@ -1826,7 +1806,7 @@ Return Value:
 }
 
 BOOLEAN
-ElfconvIsDataSection (
+ElfconvIsDataSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     )
@@ -1853,7 +1833,7 @@ Return Value:
 
 {
 
-    if (ElfconvIsHiiRsrcSection(ElfHeader, SectionHeader) != FALSE) {
+    if (ElfconvIsHiiRsrcSection32(ElfHeader, SectionHeader) != FALSE) {
         return FALSE;
     }
 
@@ -1874,7 +1854,7 @@ Return Value:
 }
 
 BOOLEAN
-ElfconvIsHiiRsrcSection (
+ElfconvIsHiiRsrcSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     )
@@ -1916,7 +1896,7 @@ Return Value:
 }
 
 BOOLEAN
-ElfconvIsDebugSection (
+ElfconvIsDebugSection32 (
     Elf32_Ehdr *ElfHeader,
     Elf32_Shdr *SectionHeader
     )
@@ -2016,7 +1996,7 @@ Return Value:
 }
 
 BOOLEAN
-ElfconvConvertElfAddress (
+ElfconvConvertElfAddress32 (
     PELFCONV_CONTEXT Context,
     UINT32 *Address
     )

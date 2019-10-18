@@ -81,9 +81,6 @@ ClpCallDestructors (
 
 int
 main (
-    int argc,
-    char **argv,
-    char **envp
     );
 
 //
@@ -148,7 +145,6 @@ Return Value:
     void **CurrentPointer;
     INT Result;
 
-    ClInitialize(Environment);
     atexit(ClpCallDestructors);
 
     //

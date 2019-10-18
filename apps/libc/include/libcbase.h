@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -43,7 +42,6 @@ extern "C" {
 // inclusion of any POSIX header.
 //
 
-#define POSIX
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 
@@ -128,31 +126,6 @@ extern "C" {
 //
 // -------------------------------------------------------- Function Prototypes
 //
-
-LIBC_API
-void
-ClInitialize (
-    void *Environment
-    );
-
-/*++
-
-Routine Description:
-
-    This routine initializes the Minoca C library. This routine is normally
-    called by statically linked assembly within a program, and unless developing
-    outside the usual paradigm should not need to call this routine directly.
-
-Arguments:
-
-    Environment - Supplies a pointer to the environment information to be passed
-        on to the OS Base library.
-
-Return Value:
-
-    None.
-
---*/
 
 #ifdef __cplusplus
 

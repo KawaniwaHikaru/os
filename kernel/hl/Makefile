@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -27,7 +32,7 @@
 
 BINARY = hl.a
 
-BINARYTYPE = library
+BINARYTYPE = klibrary
 
 OBJS = cache.o    \
        calendar.o \
@@ -92,24 +97,32 @@ ARMV6_OBJS = armv6/archcach.o \
              armv7/regacces.o \
              armv7/uartpl11.o \
 
-X86_OBJS = ns16550.o      \
-           x86/apic.o     \
-           x86/apictimr.o \
-           x86/apinit.o   \
-           x86/apstart.o  \
-           x86/archcach.o \
-           x86/archdbg.o  \
-           x86/archintr.o \
-           x86/archsup.o  \
-           x86/archrst.o  \
-           x86/archtimr.o \
-           x86/ioport.o   \
-           x86/pmtimer.o  \
-           x86/regacces.o \
-           x86/rtc.o      \
-           x86/tsc.o      \
+X86_COMMON_OBJS = ns16550.o      \
+                  x86/apic.o     \
+                  x86/apictimr.o \
+                  x86/archcach.o \
+                  x86/archdbg.o  \
+                  x86/archintr.o \
+                  x86/archrst.o  \
+                  x86/archtimr.o \
+                  x86/pmtimer.o  \
+                  x86/regacces.o \
+                  x86/rtc.o      \
+                  x86/tsc.o      \
 
-EXTRA_SRC_DIRS = x86 armv7 armv6
+X86_OBJS = $(X86_COMMON_OBJS)  \
+           x86/ioport.o   \
+           x86/apinit.o        \
+           x86/apstart.o       \
+           x86/archsup.o       \
+
+X64_OBJS = $(X86_COMMON_OBJS)  \
+           x64/ioport.o   \
+           x64/apinit.o        \
+           x64/apstart.o       \
+           x64/archsup.o       \
+
+EXTRA_SRC_DIRS = x86 x64 armv7 armv6
 
 DIRS = boot
 

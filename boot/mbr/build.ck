@@ -26,29 +26,31 @@ Environment:
 
 --*/
 
+from menv import staticApplication, flattenedBinary;
+
 function build() {
+    var entries;
+    var flattened;
+    var image;
+    var linkConfig;
+    var sources;
+
     sources = [
         "mbr.S"
     ];
 
-    link_ldflags = [
-        "-nostdlib",
-        "-Wl,-zmax-page-size=1",
-        "-static"
-    ];
-
-    link_config = {
-        "LDFLAGS": link_ldflags
+    linkConfig = {
+        "LDFLAGS": ["-Wl,-zmax-page-size=1"]
     };
 
     image = {
         "label": "mbr.elf",
         "inputs": sources,
-        "config": link_config,
+        "config": linkConfig,
         "text_address": "0x600",
     };
 
-    entries = executable(image);
+    entries = staticApplication(image);
 
     //
     // Flatten the binary so it can be written directly to disk and loaded by
@@ -58,13 +60,12 @@ function build() {
     flattened = {
         "label": "mbr.bin",
         "inputs": [":mbr.elf"],
-        "binplace": TRUE,
-        "nostrip": TRUE
+        "binplace": "bin",
+        "nostrip": true
     };
 
-    flattened = flattened_binary(flattened);
+    flattened = flattenedBinary(flattened);
     entries += flattened;
     return entries;
 }
 
-return build();

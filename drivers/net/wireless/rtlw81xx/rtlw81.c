@@ -186,6 +186,7 @@ NET80211_RATE_INFORMATION RtlwDefaultRateInformation = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -241,7 +242,7 @@ Rtlw81AddDevice (
 
 Routine Description:
 
-    This routine is called when a device is detected for which the SMSC95xx
+    This routine is called when a device is detected for which the RTLW81xx
     driver acts as the function driver. The driver will attach itself to the
     stack.
 
@@ -623,13 +624,14 @@ Return Value:
     Properties.Device = Device->OsDevice;
     Properties.DeviceContext = Device;
     Properties.MaxChannel = RTLW81_MAX_CHANNEL;
-    Properties.Capabilities = NET80211_CAPABILITY_FLAG_SHORT_PREAMBLE |
-                              NET80211_CAPABILITY_FLAG_SHORT_SLOT_TIME;
+    Properties.Net80211Capabilities = NET80211_CAPABILITY_SHORT_PREAMBLE |
+                                      NET80211_CAPABILITY_SHORT_SLOT_TIME;
 
     Properties.PacketSizeInformation.MaxPacketSize = RTLW81_MAX_PACKET_SIZE;
     Properties.PacketSizeInformation.HeaderSize = RTLW81_TRANSMIT_HEADER_SIZE;
     Properties.MaxPhysicalAddress = MAX_ULONG;
     Properties.PhysicalAddress.Domain = NetDomain80211;
+    Properties.LinkCapabilities = Device->SupportedCapabilities;
     RtlCopyMemory(&(Properties.PhysicalAddress.Address),
                   &(Device->MacAddress),
                   sizeof(Device->MacAddress));
@@ -753,6 +755,12 @@ Return Value:
 
     Device->BulkOutListLock = KeCreateQueuedLock();
     if (Device->BulkOutListLock == NULL) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto InitializeDeviceStructuresEnd;
+    }
+
+    Device->ConfigurationLock = KeCreateQueuedLock();
+    if (Device->ConfigurationLock == NULL) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto InitializeDeviceStructuresEnd;
     }
@@ -918,6 +926,10 @@ Return Value:
     Rtlw81pDestroyBulkOutTransfers(Device);
     if (Device->BulkOutListLock != NULL) {
         KeDestroyQueuedLock(Device->BulkOutListLock);
+    }
+
+    if (Device->ConfigurationLock != NULL) {
+        KeDestroyQueuedLock(Device->ConfigurationLock);
     }
 
     MmFreePagedPool(Device);

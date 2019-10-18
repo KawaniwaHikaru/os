@@ -34,7 +34,6 @@ Environment:
 
 #include <windows.h>
 #include <psapi.h>
-
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -65,7 +64,7 @@ Environment:
 #define RUBOUT_CHARACTER 0x7F
 
 //
-// Define the number of times to retry a remove directory.
+// Define the number of times to retry an unlink.
 //
 
 #define UNLINK_RETRY_COUNT 20
@@ -1230,6 +1229,15 @@ Return Value:
                 NewArguments[0] = NewCommand;
                 if (SheBangArgument != NULL) {
                     NewArguments[1] = SheBangArgument;
+                }
+
+                //
+                // Also replace the original argv[0] with the command path so
+                // it can be found by whatever is interpreting.
+                //
+
+                if (ArgumentCount >= InsertCount) {
+                    NewArguments[InsertCount] = Command;
                 }
 
                 errno = 0;
@@ -3711,14 +3719,18 @@ Return Value:
 
     Console = GetStdHandle(STD_INPUT_HANDLE);
     if (SwConsoleModeSaved == FALSE) {
-        SwSaveTerminalMode();
+        if (!SwSaveTerminalMode()) {
+            return 0;
+        }
     }
 
     OriginalMode = SwOriginalConsoleMode;
     RawMode = OriginalMode;
-    RawMode &= ~(ENABLE_ECHO_INPUT | ENABLE_INSERT_MODE | ENABLE_LINE_INPUT);
-    RawMode |= ENABLE_EXTENDED_FLAGS | ENABLE_PROCESSED_INPUT |
-               ENABLE_QUICK_EDIT_MODE | ENABLE_INSERT_MODE;
+    RawMode &= ~(ENABLE_ECHO_INPUT | ENABLE_INSERT_MODE |
+                 ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
+
+    RawMode |= ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE |
+               ENABLE_INSERT_MODE;
 
     Result = SetConsoleMode(Console, RawMode);
     if (Result == FALSE) {
@@ -3842,6 +3854,138 @@ Return Value:
     }
 
     return 0;
+}
+
+int
+SwOpen (
+    const char *Path,
+    int OpenFlags,
+    mode_t Mode
+    )
+
+/*++
+
+Routine Description:
+
+    This routine opens a file and connects it to a file descriptor.
+
+Arguments:
+
+    Shell - Supplies a pointer to the shell.
+
+    Path - Supplies a pointer to a null terminated string containing the path
+        of the file to open.
+
+    OpenFlags - Supplies a set of flags ORed together. See O_* definitions.
+
+    Mode - Supplies an optional integer representing the permission mask to set
+        if the file is to be created by this open call.
+
+Return Value:
+
+    Returns a file descriptor on success.
+
+    -1 on failure. The errno variable will be set to indicate the error.
+
+--*/
+
+{
+
+    DWORD CreationDisposition;
+    DWORD DesiredAccess;
+    INT FileDescriptor;
+    HANDLE FileHandle;
+    DWORD FlagsAndAttributes;
+    DWORD ShareMode;
+
+    //
+    // Translate the access flags to the Win32 bits. If the file is to be
+    // opened in append mode, do not set the write flags. For whatever reason,
+    // the write flags take precedence over the append flag.
+    //
+
+    if ((OpenFlags & O_APPEND) != 0) {
+        DesiredAccess = FILE_APPEND_DATA;
+
+    } else {
+        DesiredAccess = GENERIC_READ;
+        if (((OpenFlags & O_WRONLY) != 0) || ((OpenFlags & O_RDWR) != 0)) {
+            DesiredAccess |= GENERIC_WRITE;
+        }
+    }
+
+    //
+    // Convert the create flags to the Win32 version bits.
+    //
+
+    CreationDisposition = OPEN_EXISTING;
+    if ((OpenFlags & O_CREAT) != 0) {
+        if ((OpenFlags & O_EXCL) != 0) {
+            CreationDisposition = CREATE_NEW;
+
+        } else if ((OpenFlags & O_TRUNC) != 0) {
+            CreationDisposition = CREATE_ALWAYS;
+
+        } else {
+            CreationDisposition = OPEN_ALWAYS;
+        }
+
+    } else if ((OpenFlags & O_TRUNC) != 0) {
+        CreationDisposition = TRUNCATE_EXISTING;
+    }
+
+    //
+    // Default to normal file attributes. If this is a create and write
+    // permissions are not specified, set the attributes to read-only.
+    //
+
+    FlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+    if ((OpenFlags & O_CREAT) != 0) {
+        if ((Mode & S_IWUSR) == 0) {
+            FlagsAndAttributes = FILE_ATTRIBUTE_READONLY;
+        }
+    }
+
+    //
+    // Always open the file in read/write share mode for now.
+    //
+
+    ShareMode = FILE_SHARE_WRITE | FILE_SHARE_READ | FILE_SHARE_DELETE;
+    FileHandle = CreateFile(Path,
+                            DesiredAccess,
+                            ShareMode,
+                            NULL,
+                            CreationDisposition,
+                            FlagsAndAttributes,
+                            NULL);
+
+    if (FileHandle == INVALID_HANDLE_VALUE) {
+
+        //
+        // Try to open the file again so that errno gets set correctly.
+        //
+
+        FileDescriptor = open(Path, OpenFlags, Mode);
+        return FileDescriptor;
+    }
+
+    //
+    // Swiss assumes that the default translation mode is text mode, but
+    // CreateFile defaults to binary mode. If binary mode is not explicitly
+    // specified, OR in the text mode bit.
+    //
+
+    if ((OpenFlags & O_BINARY) == 0) {
+        OpenFlags |= O_TEXT;
+    }
+
+    FileDescriptor = _open_osfhandle((intptr_t)FileHandle, OpenFlags);
+    if (FileDescriptor == -1) {
+        CloseHandle(FileHandle);
+        return -1;
+    }
+
+    return FileDescriptor;
 }
 
 //

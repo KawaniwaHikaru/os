@@ -27,25 +27,43 @@ Environment:
 
 --*/
 
+from menv import application, driver;
+
 function build() {
+    var app;
+    var driverDynlibs;
+    var driverSources;
+    var dynlibs;
+    var entries;
+    var includes;
+    var ktestDriver;
+    var sources;
+
     sources = [
         "ktest.c"
     ];
 
-    driver_sources = [
-        "driver/ktestdrv.c"
+    driverSources = [
+        "driver/ktestdrv.c",
+        "driver/tblock.c",
+        "driver/tdesc.c",
+        "driver/testsup.c",
+        "driver/tpool.c",
+        "driver/tthread.c",
+        "driver/twork.c"
     ];
 
     dynlibs = [
-        "//apps/osbase:libminocaos"
+        "apps/osbase:libminocaos"
     ];
 
-    driver_dynlibs = [
-        "//kernel:kernel"
+    driverDynlibs = [
+        "kernel:kernel"
     ];
 
     includes = [
-        "$//apps/libc/include"
+        "$S/apps/libc/include",
+        "$S/apps/testapps/ktest"
     ];
 
     app = {
@@ -55,15 +73,14 @@ function build() {
         "includes": includes
     };
 
-    ktest_driver = {
+    ktestDriver = {
         "label": "ktestdrv",
-        "inputs": driver_sources + driver_dynlibs,
+        "inputs": driverSources + driverDynlibs,
         "includes": includes
     };
 
     entries = application(app);
-    entries += driver(ktest_driver);
+    entries += driver(ktestDriver);
     return entries;
 }
 
-return build();

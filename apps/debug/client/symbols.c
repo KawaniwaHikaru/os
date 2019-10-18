@@ -56,6 +56,13 @@ Environment:
 // ----------------------------------------------- Internal Function Prototypes
 //
 
+PFUNCTION_SYMBOL
+DbgpMatchFunctionAddress (
+    PDEBUG_SYMBOLS Module,
+    ULONGLONG Address,
+    PFUNCTION_SYMBOL Function
+    );
+
 BOOL
 DbgpStringMatch (
     PSTR Query,
@@ -184,21 +191,48 @@ PSTR DbgX64RegisterSymbolNames[] = {
     "st5",
     "st6",
     "st7",
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    "eflags",
+    "mm0",
+    "mm1",
+    "mm2",
+    "mm3",
+    "mm4",
+    "mm5",
+    "mm6",
+    "mm7",
+    "rflags",
     "es",
     "cs",
     "ss",
     "ds",
     "fs",
     "gs",
+    NULL,
+    NULL,
+    "fsbase",
+    "gsbase",
+    NULL,
+    NULL,
+    "tr",
+    "ldtr",
+    "mxcsr",
+    "fcw",
+    "fsw",
+    "xmm16",
+    "xmm17",
+    "xmm18",
+    "xmm19",
+    "xmm20",
+    "xmm21",
+    "xmm22",
+    "xmm23",
+    "xmm24",
+    "xmm25",
+    "xmm26",
+    "xmm27",
+    "xmm28",
+    "xmm29",
+    "xmm30",
+    "xmm31"
 };
 
 PSTR DbgArmRegisterSymbolNames[] = {
@@ -1724,16 +1758,22 @@ Return Value:
 
             //
             // For address based searching, determine if the function is within
-            // range, and return if a match is found.
+            // range, and scoop out the deepest inline function if so.
             //
 
             if (Address != (INTN)NULL) {
                 if ((Address >= CurrentFunction->StartAddress) &&
                     (Address < CurrentFunction->EndAddress)) {
 
-                    Input->Variety = SymbolResultFunction;
-                    Input->U.FunctionResult = CurrentFunction;
-                    return Input;
+                    CurrentFunction = DbgpMatchFunctionAddress(Module,
+                                                               Address,
+                                                               CurrentFunction);
+
+                    if (CurrentFunction != FALSE) {
+                        Input->Variety = SymbolResultFunction;
+                        Input->U.FunctionResult = CurrentFunction;
+                        return Input;
+                    }
                 }
 
             } else {
@@ -1802,6 +1842,16 @@ Return Value:
 
         break;
 
+    case ImageMachineTypeX64:
+        Count = sizeof(DbgX64RegisterSymbolNames) /
+                sizeof(DbgX64RegisterSymbolNames[0]);
+
+        if (Register < Count) {
+            Name = DbgX64RegisterSymbolNames[Register];
+        }
+
+        break;
+
     case ImageMachineTypeArm32:
         Count = sizeof(DbgArmRegisterSymbolNames) /
                 sizeof(DbgArmRegisterSymbolNames[0]);
@@ -1836,6 +1886,91 @@ Return Value:
 //
 // --------------------------------------------------------- Internal Functions
 //
+
+PFUNCTION_SYMBOL
+DbgpMatchFunctionAddress (
+    PDEBUG_SYMBOLS Module,
+    ULONGLONG Address,
+    PFUNCTION_SYMBOL Function
+    )
+
+/*++
+
+Routine Description:
+
+    This routine determines the function corresponding to the given address.
+    It may end up returning a nested (inlined) function.
+
+Arguments:
+
+    Module - Supplies a pointer to the module which contains the symbols to
+        search through.
+
+    Address - Supplies the search address.
+
+    Function - Supplies the function to search within.
+
+Return Value:
+
+    Returns a pointer to the function containing the given address on success.
+
+    NULL if the given function does not contain the given address, nor do any
+    of its sub-functions.
+
+--*/
+
+{
+
+    PSYMBOLS_CHECK_RANGE CheckRange;
+    PLIST_ENTRY CurrentEntry;
+    BOOL InRange;
+    PFUNCTION_SYMBOL Subfunction;
+
+    if ((Address < Function->StartAddress) ||
+        (Address >= Function->EndAddress)) {
+
+        return NULL;
+    }
+
+    if (Function->Ranges != NULL) {
+        CheckRange = Module->Interface->CheckRange;
+        InRange = CheckRange(Module,
+                             Function->ParentSource,
+                             Address,
+                             Function->Ranges);
+
+        if (InRange == FALSE) {
+            return NULL;
+        }
+    }
+
+    if (LIST_EMPTY(&(Function->FunctionsHead))) {
+        return Function;
+    }
+
+    //
+    // Traverse the inlined functions and see if any of them matches. Return
+    // the deepest inline possible, or this function if none match.
+    //
+
+    CurrentEntry = Function->FunctionsHead.Next;
+    while (CurrentEntry != &(Function->FunctionsHead)) {
+        Subfunction = LIST_VALUE(CurrentEntry, FUNCTION_SYMBOL, ListEntry);
+        Subfunction = DbgpMatchFunctionAddress(Module, Address, Subfunction);
+        if (Subfunction != NULL) {
+            return Subfunction;
+        }
+
+        CurrentEntry = CurrentEntry->Next;
+    }
+
+    //
+    // This function matches but none of the inner inlines do, so just return
+    // this one.
+    //
+
+    return Function;
+}
 
 BOOL
 DbgpStringMatch (

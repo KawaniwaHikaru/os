@@ -1,5 +1,10 @@
 ##
-## Copyright (c) 2014 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2014 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -100,13 +105,13 @@ cd "$OLDPWD"
 
 mkdir -p $WORKING/Minoca/Image
 if test "x$ARCH" = "xx86"; then
-    cp -pv ./distribute/pc.img "$WORKING/Minoca/Image"
+    cp -pv ./pc.img "$WORKING/Minoca/Image"
 
 elif test "x$ARCH" = "xarmv7"; then
-    cp -pv ./distribute/integ.img "$WORKING/Minoca/Image"
+    cp -pv ./integ.img "$WORKING/Minoca/Image"
 
 elif test "x$ARCH" = "xarmv6"; then
-    cp -pv ./distribute/rpi.img "$WORKING/Minoca/Image"
+    cp -pv ./rpi.img "$WORKING/Minoca/Image"
 fi
 
 ##
@@ -122,7 +127,7 @@ Python*
 pagefile.sys
 *.zip
 tools
-distribute
+client.py
 packages'
 
 for file in $REMOVE; do
@@ -216,20 +221,8 @@ size.
 
 License
 =======
-The contents of this archive are licensed under the Creative Commons
-Non-Commercial Share-Alike license, which can be found at
-http://creativecommons.org/licenses/by-nc-sa/4.0/
-
-
-Limitations
-============
-This is the free edition of Minoca OS. It is licensed for non-commercial use.
-It was compiled with the -O1 flag and with debug checks enabled. Additionally,
-it will automatically reboot itself every 72 hours. An optimized non-debug
-edition of the operating system is available. If you've got a project idea,
-even a hobby project, let us know at info@minocacorp.com; we can help. Minoca
-can also create custom builds of the operating system, and can be hired to
-write device drivers.
+The contents of this archive are licensed under the GNU General Public License
+version 3.
 
 
 Troubleshooting

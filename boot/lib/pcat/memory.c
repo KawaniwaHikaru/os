@@ -44,6 +44,20 @@ Environment:
 #define E820_MAGIC 0x534D4150    // 'SMAP'
 #define MAX_E820_DESCRIPTORS 100
 
+#if __SIZEOF_LONG__ == 8
+
+//
+// Keep things to the first 8GB since that's what's mapped by default on x64.
+//
+
+#define PCAT_MAX_ALLOCATION_ADDRESS ((8ULL * _1GB) - 1)
+
+#else
+
+#define PCAT_MAX_ALLOCATION_ADDRESS MAX_UINTN
+
+#endif
+
 //
 // ----------------------------------------------- Internal Function Prototypes
 //
@@ -144,7 +158,7 @@ Return Value:
 
     Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x15);
     if (!KSUCCESS(Status)) {
-        goto GetMemoryMapEnd;
+        return Status;
     }
 
     E820Descriptor = (PE820_DESCRIPTOR)RealModeContext.DataPage.Page;
@@ -296,7 +310,6 @@ Return Value:
         Status = FwpPcatReserveKnownRegions(MdlOut);
     }
 
-GetMemoryMapEnd:
     FwpRealModeDestroyBiosCallContext(&RealModeContext);
     return Status;
 }
@@ -347,7 +360,7 @@ Return Value:
                                  Size,
                                  Alignment,
                                  0,
-                                 MAX_UINTN,
+                                 PCAT_MAX_ALLOCATION_ADDRESS,
                                  MemoryType,
                                  AllocationStrategyLowestAddress);
 

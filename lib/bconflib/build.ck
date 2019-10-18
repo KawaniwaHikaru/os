@@ -25,27 +25,46 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary, staticLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var bconfLib;
+    var bconfLib32;
+    var buildBconfLib;
+    var entries;
+    var sources;
+
     sources = [
         "bconf.c"
     ];
 
-    bconf_lib = {
+    bconfLib = {
         "label": "bconf",
         "inputs": sources,
     };
 
-    build_bconf_lib = {
+    buildBconfLib = {
         "label": "build_bconf",
         "output": "bconf",
         "inputs": sources,
-        "build": TRUE,
+        "build": true,
         "prefix": "build"
     };
 
-    entries = static_library(bconf_lib);
-    entries += static_library(build_bconf_lib);
+    entries = kernelLibrary(bconfLib);
+    entries += staticLibrary(buildBconfLib);
+    if (arch == "x64") {
+        bconfLib32 = {
+            "label": "bconf32",
+            "inputs": sources,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": "-m32"}
+        };
+
+        entries += kernelLibrary(bconfLib32);
+    }
+
     return entries;
 }
 
-return build();

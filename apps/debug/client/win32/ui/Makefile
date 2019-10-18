@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -21,9 +26,9 @@
 #
 ################################################################################
 
-BINARY = debugui.exe
+BINARY = debugui
 
-BINARYTYPE = win32
+BINARYTYPE = build
 
 BUILD = yes
 
@@ -33,27 +38,25 @@ INCLUDES += $(SRCDIR)/../..;
 INCLUDES += $(SRCROOT)/os/lib/im;
 
 TARGETLIBS = $(OBJROOT)/os/lib/rtl/base/build/basertl.a      \
-             $(OBJROOT)/os/lib/rtl/rtlc/build/rtlc.a         \
-             $(OBJROOT)/os/lib/im/build/im.a                 \
+             $(OBJROOT)/os/lib/rtl/urtl/rtlc/build/rtlc.a    \
+             $(OBJROOT)/os/lib/im/build/imu.a                \
 
 DYNLIBS = -lpsapi -lws2_32 -lmswsock -ladvapi32 -lshlwapi
 
-VPATH += $(SRCDIR)/..:$(SRCDIR)/../..:
+EXTRA_LDFLAGS += -mwindows
 
-ifeq ($(ARCH), x86)
+VPATH += $(SRCDIR)/..:$(SRCDIR)/../..:
 
 include $(SRCDIR)/../../sources
 
-X86_OBJS += $(COMMON_OBJS)   \
-            debugres.rsc \
-            ntcomm.o     \
-            ntdbgui.o    \
-            ntextsup.o   \
-            ntsock.o     \
-            ntusrdbg.o   \
-            ntusrsup.o   \
-
-endif
+OBJS = $(COMMON_OBJS) \
+       debugres.rsc   \
+       ntcomm.o       \
+       ntdbgui.o      \
+       ntextsup.o     \
+       ntsock.o       \
+       ntusrdbg.o     \
+       ntusrsup.o     \
 
 include $(SRCROOT)/os/minoca.mk
 

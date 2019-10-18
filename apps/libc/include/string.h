@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -423,6 +422,34 @@ Return Value:
 --*/
 
 LIBC_API
+size_t
+strnlen (
+    const char *String,
+    size_t MaxLength
+    );
+
+/*++
+
+Routine Description:
+
+    This routine computes the length of the given string, not including the
+    null terminator, but will only examine up to the given maximum number of
+    bytes.
+
+Arguments:
+
+    String - Supplies a pointer to the string whose length should be computed.
+
+    MaxLength - Supplies the maximum number of bytes to examine.
+
+Return Value:
+
+    Returns the length of the string, not including the null terminator, or
+    the maximum length provided if no null terminator was found.
+
+--*/
+
+LIBC_API
 char *
 strcpy (
     char *DestinationString,
@@ -799,6 +826,36 @@ Return Value:
 
 LIBC_API
 char *
+strndup (
+    const char *String,
+    size_t Size
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns a pointer to a newly allocated string which is a
+    duplicate of the given input string. This returned pointer must be passed
+    to the free function when the caller is done with it.
+
+Arguments:
+
+    String - Supplies a pointer to the string to duplicate.
+
+    Size - Supplies the maximum number of bytes to copy before terminating the
+        string.
+
+Return Value:
+
+    Returns a pointer to the newly allocated duplicate string on success.
+
+    NULL on failure.
+
+--*/
+
+LIBC_API
+char *
 strpbrk (
     const char *String,
     const char *Characters
@@ -919,6 +976,35 @@ Return Value:
 
 LIBC_API
 char *
+strcasestr (
+    const char *InputString,
+    const char *QueryString
+    );
+
+/*++
+
+Routine Description:
+
+    This routine attempts to find the first occurrence of the query string in
+    the given input string. This routine is case insensitive.
+
+Arguments:
+
+    InputString - Supplies a pointer to the input string to search.
+
+    QueryString - Supplies a pointer to the query string to search for.
+
+Return Value:
+
+    Returns a pointer within the input string to the first instance of the
+    query string.
+
+    NULL if no instances of the query string were found in the input string.
+
+--*/
+
+LIBC_API
+char *
 strtok (
     char *InputString,
     const char *Separators
@@ -994,6 +1080,42 @@ Return Value:
     Returns a pointer to the next token on success.
 
     NULL if there are no more tokens.
+
+--*/
+
+LIBC_API
+char *
+strsep (
+    char **InputString,
+    const char *Delimiters
+    );
+
+/*++
+
+Routine Description:
+
+    This routine breaks a string into a series of tokens delimited by any
+    character from the given delimiter set. It scans looking for a delimiter
+    character and sets that byte to the null terminator to delimit the first
+    token. This may result in an empty field where the returned token is made
+    up of just the null terminator. This routine is thread safe and re-entrant
+    so long as the input string is not used by multiple threads.
+
+Arguments:
+
+    InputString - Supplies a pointer to a pointer to the input string to
+        tokenize. On output, this will point to the character after the
+        modified delimiter or NULL if the end of the string was reached without
+        finding a delimiter.
+
+    Delimiters - Supplies a pointer to a null terminated string containing the
+        set of characters that delimit tokens.
+
+Return Value:
+
+    Returns a pointer to the the original input string (now delimited).
+
+    NULL if there are no more tokens or no string was supplied.
 
 --*/
 

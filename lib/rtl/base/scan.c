@@ -61,6 +61,7 @@ RtlpScanInteger (
     PULONG CharactersConsumed
     );
 
+__NOINLINE
 KSTATUS
 RtlpScanDouble (
     PSCAN_INPUT Input,
@@ -1446,8 +1447,6 @@ Return Value:
 
     CHAR Character;
     ULONG CharacterCount;
-    CHAR MaxDigit;
-    CHAR MaxLetter;
     BOOL Negative;
     ULONGLONG NewValue;
     BOOL Result;
@@ -1569,21 +1568,6 @@ Return Value:
         }
     }
 
-    //
-    // Compute the maximum digit or letter value.
-    //
-
-    ASSERT(Base != 0);
-
-    if (Base <= 10) {
-        MaxDigit = '0' + Base - 1;
-        MaxLetter = 'A' - 1;
-
-    } else {
-        MaxDigit = '9';
-        MaxLetter = 'A' + Base - 1 - 10;
-    }
-
     Status = STATUS_SUCCESS;
     Value = 0;
 
@@ -1594,19 +1578,11 @@ Return Value:
     while (TRUE) {
 
         //
-        // Uppercase any letters.
-        //
-
-        if ((Character >= 'a') && (Character <= 'z')) {
-            Character = 'A' + Character - 'a';
-        }
-
-        //
         // Potentially add the next digit.
         //
 
         if ((Character >= '0') && (Character <= '9')) {
-            if (Character > MaxDigit) {
+            if (Character > '0' + Base - 1) {
                 break;
             }
 
@@ -1617,11 +1593,18 @@ Return Value:
         //
 
         } else if ((Character >= 'A') && (Character <= 'Z')) {
-            if (Character > MaxLetter) {
+            if (Character > 'A' + Base - 0xA - 1) {
                 break;
             }
 
             Character -= 'A' - 0xA;
+
+        } else if ((Character >= 'a') && (Character <= 'z')) {
+            if (Character > 'a' + Base - 0xA - 1) {
+                break;
+            }
+
+            Character -= 'a' - 0xA;
 
         //
         // Or it could be something entirely different, in which case the
@@ -1708,6 +1691,13 @@ ScanIntegerEnd:
     return Status;
 }
 
+//
+// This function cannot be inlined because doing so runs the risk of adding
+// floating point register prologue/epilogus code in common paths used by the
+// kernel.
+//
+
+__NOINLINE
 KSTATUS
 RtlpScanDouble (
     PSCAN_INPUT Input,

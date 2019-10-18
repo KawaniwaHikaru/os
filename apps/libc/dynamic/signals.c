@@ -34,6 +34,7 @@ Environment:
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -73,7 +74,8 @@ Environment:
 
 BOOL
 ClpHandleSignal (
-    PSIGNAL_PARAMETERS SignalInformation
+    PSIGNAL_PARAMETERS SignalInformation,
+    PSIGNAL_CONTEXT Context
     );
 
 int
@@ -963,7 +965,7 @@ sigwait (
 Routine Description:
 
     This routine waits for a signal from the given set and returns the number
-    of the recieved signal.
+    of the received signal.
 
 Arguments:
 
@@ -1688,6 +1690,26 @@ Return Value:
 
 {
 
+    PPROCESS_ENVIRONMENT Environment;
+    SIGNAL_SET IgnoredSignals;
+    ULONG Signal;
+
+    //
+    // Mark the signals that were left ignored by the parent process.
+    //
+
+    Environment = OsGetCurrentEnvironment();
+    IgnoredSignals = Environment->StartData->IgnoredSignals;
+    Signal = 1;
+    while ((!IS_SIGNAL_SET_EMPTY(IgnoredSignals)) && (Signal < SIGNAL_COUNT)) {
+        if (IS_SIGNAL_SET(IgnoredSignals, Signal)) {
+            ClSignalHandlers[Signal].sa_handler = SIG_IGN;
+            REMOVE_SIGNAL(IgnoredSignals, Signal);
+        }
+
+        Signal += 1;
+    }
+
     OsSetSignalHandler(ClpHandleSignal);
     return;
 }
@@ -1787,7 +1809,8 @@ Return Value:
 
 BOOL
 ClpHandleSignal (
-    PSIGNAL_PARAMETERS SignalInformation
+    PSIGNAL_PARAMETERS SignalInformation,
+    PSIGNAL_CONTEXT Context
     )
 
 /*++
@@ -1800,6 +1823,9 @@ Routine Description:
 Arguments:
 
     SignalInformation - Supplies a pointer to the signal information.
+
+    Context - Supplies a pointer to the signal context, including the machine
+        state before the signal was applied.
 
 Return Value:
 
@@ -1887,7 +1913,7 @@ Return Value:
             HandlerInformation.si_fd =
                           (int)(UINTN)SignalInformation->FromU.Poll.Descriptor;
 
-            Action->sa_sigaction(Signal, &HandlerInformation, NULL);
+            Action->sa_sigaction(Signal, &HandlerInformation, Context);
 
         } else {
             Action->sa_handler(Signal);

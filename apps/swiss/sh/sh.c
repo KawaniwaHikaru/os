@@ -96,6 +96,11 @@ typedef struct _SHELL_OPTION_STRING {
 //
 
 VOID
+ShRunProfile (
+    PSHELL Shell
+    );
+
+VOID
 ShRunEnvVariable (
     PSHELL Shell
     );
@@ -162,6 +167,8 @@ Return Value:
     UINTN ArgumentSize;
     INT InputDescriptor;
     INT InputDescriptorHigh;
+    PSTR NewInputBuffer;
+    UINTN NewInputBufferSize;
     BOOL Result;
     INT ReturnValue;
     BOOL Set;
@@ -292,15 +299,18 @@ Return Value:
         }
 
         Argument = Arguments[ArgumentIndex];
-        Shell->Lexer.InputBufferSize = strlen(Argument) + 1;
-        Shell->Lexer.InputBuffer = SwStringDuplicate(
-                                                 Argument,
-                                                 Shell->Lexer.InputBufferSize);
-
-        if (Shell->Lexer.InputBuffer == NULL) {
+        NewInputBufferSize = strlen(Argument) + 1;
+        NewInputBuffer = SwStringDuplicate(Argument, NewInputBufferSize);
+        if (NewInputBuffer == NULL) {
             goto MainEnd;
         }
 
+        if (Shell->Lexer.InputBuffer != NULL) {
+            free(Shell->Lexer.InputBuffer);
+        }
+
+        Shell->Lexer.InputBuffer = NewInputBuffer;
+        Shell->Lexer.InputBufferSize = NewInputBufferSize;
         Shell->Lexer.InputBufferCapacity = Shell->Lexer.InputBufferSize;
         ArgumentIndex += 1;
 
@@ -340,7 +350,7 @@ Return Value:
 
         } else {
             Argument = Arguments[ArgumentIndex];
-            InputDescriptor = open(Argument, O_RDONLY | O_BINARY);
+            InputDescriptor = SwOpen(Argument, O_RDONLY | O_BINARY, 0);
             if (InputDescriptor < 0) {
                 SwPrintError(errno, Argument, "Unable to open script");
                 ReturnValue = SHELL_ERROR_OPEN;
@@ -431,8 +441,8 @@ Return Value:
         InputDescriptor = fileno(Shell->Lexer.InputFile);
     }
 
-    if ((InputDescriptor != -1) && (isatty(InputDescriptor) != 0)) {
-        Shell->Options |= SHELL_INTERACTIVE_OPTIONS;
+    if ((InputDescriptor >= 0) && (isatty(InputDescriptor) != 0)) {
+        Shell->Options |= SHELL_INTERACTIVE_OPTIONS | SHELL_OPTION_RAW_INPUT;
     }
 
     InputDescriptor = -1;
@@ -451,6 +461,14 @@ Return Value:
     }
 
     ShInitializeSignals(Shell);
+
+    //
+    // If this is a login shell, read the profile.
+    //
+
+    if (Arguments[0][0] == '-') {
+        ShRunProfile(Shell);
+    }
 
     //
     // Run the contents of the ENV environment variable if appropriate.
@@ -655,6 +673,67 @@ Return Value:
 //
 
 VOID
+ShRunProfile (
+    PSHELL Shell
+    )
+
+/*++
+
+Routine Description:
+
+    This routine runs the global profile script /etc/profile, and the user
+    profile script at $HOME/.profile.
+
+Arguments:
+
+    Shell - Supplies a pointer to the shell.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    PSTR Home;
+    PSTR HomeProfile;
+    size_t Length;
+
+    if (access(SHELL_GLOBAL_PROFILE_PATH, R_OK) == 0) {
+        ShRunScriptInContext(Shell,
+                             SHELL_GLOBAL_PROFILE_PATH,
+                             sizeof(SHELL_GLOBAL_PROFILE_PATH));
+    }
+
+    Home = getenv(SHELL_HOME);
+    if (Home != NULL) {
+        Length = strlen(Home) + 1 + sizeof(SHELL_USER_PROFILE_PATH);
+        HomeProfile = malloc(Length);
+        if (HomeProfile != NULL) {
+            snprintf(HomeProfile,
+                     Length,
+                     "%s/%s",
+                     Home,
+                     SHELL_USER_PROFILE_PATH);
+
+            if (access(HomeProfile, R_OK) == 0) {
+                ShRunScriptInContext(Shell, HomeProfile, Length);
+            }
+
+            free(HomeProfile);
+        }
+
+    } else {
+        ShRunScriptInContext(Shell,
+                             SHELL_USER_PROFILE_PATH,
+                             sizeof(SHELL_USER_PROFILE_PATH));
+    }
+
+    return;
+}
+
+VOID
 ShRunEnvVariable (
     PSHELL Shell
     )
@@ -678,19 +757,13 @@ Return Value:
 
 {
 
-    int DescriptorAnywhere;
-    int EnvironmentDescriptor;
-    FILE *EnvironmentFile;
     PSTR ExpandedScript;
     UINTN ExpandedScriptSize;
-    SHELL_LEXER_STATE OriginalLexer;
-    ULONG OriginalOptions;
     BOOL Result;
     INT ReturnValue;
     PSTR Value;
     UINTN ValueSize;
 
-    EnvironmentFile = NULL;
     ExpandedScript = NULL;
 
     //
@@ -738,81 +811,16 @@ Return Value:
     assert(Shell->Lexer.UnputCharacterValid == FALSE);
     assert(Shell->Lexer.LineNumber == 1);
 
-    //
-    // Open up the env file.
-    //
+    ReturnValue = ShRunScriptInContext(Shell,
+                                       ExpandedScript,
+                                       ExpandedScriptSize);
 
-    DescriptorAnywhere = open(ExpandedScript, O_RDONLY | O_BINARY);
-    if (DescriptorAnywhere == -1) {
-        PRINT_ERROR("Warning: Unable to open ENV file %s: %s.\n",
-                    ExpandedScript,
-                    strerror(errno));
-
-        goto RunEnvVariableEnd;
-    }
-
-    EnvironmentDescriptor = ShDup(Shell, DescriptorAnywhere, TRUE);
-    close(DescriptorAnywhere);
-    if (EnvironmentDescriptor < 0) {
-        goto RunEnvVariableEnd;
-    }
-
-    EnvironmentFile = fdopen(EnvironmentDescriptor, "rb");
-    if (EnvironmentFile == NULL) {
-        close(EnvironmentDescriptor);
-        goto RunEnvVariableEnd;
-    }
-
-    assert((Shell->Options & SHELL_OPTION_INPUT_BUFFER_ONLY) == 0);
-
-    //
-    // Copy the original lexer state over and reinitialize the lexer
-    // for this string.
-    //
-
-    memcpy(&OriginalLexer, &(Shell->Lexer), sizeof(SHELL_LEXER_STATE));
-    Result = ShInitializeLexer(&(Shell->Lexer),
-                               EnvironmentFile,
-                               NULL,
-                               0);
-
-    if (Result == FALSE) {
-        goto RunEnvVariableEnd;
-    }
-
-    EnvironmentFile = NULL;
-
-    //
-    // Run the env script.
-    //
-
-    OriginalOptions = Shell->Options;
-    Shell->Options &= ~(SHELL_OPTION_RAW_INPUT |
-                        SHELL_OPTION_PRINT_PROMPTS |
-                        SHELL_OPTION_NO_COMMAND_HISTORY |
-                        SHELL_OPTION_READ_FROM_STDIN);
-
-    Result = ShExecute(Shell, &ReturnValue);
-    Shell->Options = OriginalOptions;
-    if (Result == FALSE) {
+    if (ReturnValue != 0) {
         PRINT_ERROR("Warning: Failed to execute ENV script %s.\n",
                     ExpandedScript);
     }
 
-    //
-    // Clean up this lexer (which includes closing the file) and
-    // restore the original lexer.
-    //
-
-    ShDestroyLexer(&(Shell->Lexer));
-    memcpy(&(Shell->Lexer), &OriginalLexer, sizeof(SHELL_LEXER_STATE));
-    Result = TRUE;
-
 RunEnvVariableEnd:
-    if (EnvironmentFile != NULL) {
-        fclose(EnvironmentFile);
-    }
-
     if (ExpandedScript != NULL) {
         free(ExpandedScript);
     }

@@ -83,6 +83,12 @@ CkpDictSetPrimitive (
     );
 
 BOOL
+CkpDictRemovePrimitive (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpDictSlice (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -113,6 +119,12 @@ CkpDictLength (
     );
 
 BOOL
+CkpDictKeys (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpDictIteratePrimitive (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -120,6 +132,12 @@ CkpDictIteratePrimitive (
 
 BOOL
 CkpDictIteratorValue (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpDictCopy (
     PCK_VM Vm,
     PCK_VALUE Arguments
     );
@@ -162,6 +180,7 @@ CkpHashObject (
 CK_PRIMITIVE_DESCRIPTION CkDictPrimitives[] = {
     {"get@1", 1, CkpDictGetPrimitive},
     {"set@2", 2, CkpDictSetPrimitive},
+    {"remove@1", 1, CkpDictRemovePrimitive},
     {"__get@1", 1, CkpDictSlice},
     {"__set@2", 2, CkpDictSliceAssign},
     {"__slice@1", 1, CkpDictSlice},
@@ -169,8 +188,10 @@ CK_PRIMITIVE_DESCRIPTION CkDictPrimitives[] = {
     {"clear@0", 0, CkpDictClearPrimitive},
     {"containsKey@1", 1, CkpDictContainsKey},
     {"length@0", 0, CkpDictLength},
+    {"keys@0", 0, CkpDictKeys},
     {"iterate@1", 1, CkpDictIteratePrimitive},
     {"iteratorValue@1", 1, CkpDictIteratorValue},
+    {"copy@0", 0, CkpDictCopy},
     {NULL, 0, NULL}
 };
 
@@ -371,7 +392,7 @@ Return Value:
     Entry->Value = CK_TRUE_VALUE;
     Dict->Count -= 1;
     if ((Dict->Capacity > DICT_MIN_CAPACITY) &&
-        (Dict->Count /
+        (Dict->Count <
          (Dict->Capacity / DICT_SHRINK_FACTOR * DICT_LOAD_FACTOR / 1024))) {
 
         if (CK_IS_OBJECT(Value)) {
@@ -568,6 +589,43 @@ Return Value:
 }
 
 BOOL
+CkpDictRemovePrimitive (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine removes the given key and value from the dictionary. The
+    original value at that entry is returned, or null if no value was set for
+    the given key.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PCK_DICT Dict;
+
+    Dict = CK_AS_DICT(Arguments[0]);
+    Arguments[0] = CkpDictRemove(Vm, Dict, Arguments[1]);
+    return TRUE;
+}
+
+BOOL
 CkpDictSlice (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -758,6 +816,68 @@ Return Value:
 }
 
 BOOL
+CkpDictKeys (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine implements the dictionary keys method primitive, which returns
+    a list of dictionary keys.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PCK_DICT Dict;
+    PCK_DICT_ENTRY Entry;
+    UINTN Index;
+    PCK_LIST List;
+    UINTN ListIndex;
+
+    Dict = CK_AS_DICT(Arguments[0]);
+    List = CkpListCreate(Vm, Dict->Count);
+    if (List == NULL) {
+        return FALSE;
+    }
+
+    //
+    // Go through the entire dictionary and add all keys that are not undefined.
+    //
+
+    ListIndex = 0;
+    Entry = Dict->Entries;
+    for (Index = 0; Index < Dict->Capacity; Index += 1) {
+        if (!CK_IS_UNDEFINED(Entry->Key)) {
+            List->Elements.Data[ListIndex] = Entry->Key;
+            ListIndex += 1;
+        }
+
+        Entry += 1;
+    }
+
+    CK_ASSERT(ListIndex == Dict->Count);
+
+    CK_OBJECT_VALUE(Arguments[0], List);
+    return TRUE;
+}
+
+BOOL
 CkpDictIteratePrimitive (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -878,6 +998,58 @@ Return Value:
     return TRUE;
 }
 
+BOOL
+CkpDictCopy (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine implements the primitive for copying a dict.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PCK_DICT Dict;
+    PCK_DICT NewDict;
+
+    Dict = CK_AS_DICT(Arguments[0]);
+    NewDict = CkpDictCreate(Vm);
+    if (NewDict == NULL) {
+        return FALSE;
+    }
+
+    CkpPushRoot(Vm, &(NewDict->Header));
+    CkpDictResize(Vm, NewDict, Dict->Capacity);
+    if (NewDict->Capacity == Dict->Capacity) {
+        CkCopy(NewDict->Entries,
+               Dict->Entries,
+               sizeof(CK_DICT_ENTRY) * NewDict->Capacity);
+
+        NewDict->Count = Dict->Count;
+    }
+
+    CkpPopRoot(Vm);
+    CK_OBJECT_VALUE(Arguments[0], NewDict);
+    return TRUE;
+}
+
 //
 // Support functions
 //
@@ -984,7 +1156,7 @@ Return Value:
     PCK_DICT_ENTRY NewEntries;
     PCK_DICT_ENTRY OldEntry;
 
-    CK_ASSERT(NewCapacity > Dict->Count);
+    CK_ASSERT(NewCapacity >= Dict->Count);
 
     NewEntries = CkAllocate(Vm, NewCapacity * sizeof(CK_DICT_ENTRY));
     if (NewEntries == NULL) {

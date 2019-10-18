@@ -59,7 +59,7 @@ Environment:
 
 Structure Description:
 
-    This structure defines the context for an BC27xx GPIO controller.
+    This structure defines the context for a BC27xx GPIO controller.
 
 Members:
 
@@ -246,6 +246,7 @@ ULONG Bcm27GpioPullDownDefaults[2] = {0xCFFFFE00, 0x00000FE3};
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver

@@ -1,5 +1,10 @@
 #!/bin/sh
-## Copyright (c) 2016 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2016 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -54,8 +59,10 @@ if [ -z "$serial" ]; then
         ##
 
         os_init_rev=1598fc5f1734f7d7ee01e014ee64e131601b78a7
-        serial=`git rev-list --count HEAD`
-        if [ x`git rev-list --max-parents=0 HEAD` = x$os_init_rev ]; then
+        serial=`git rev-list --count HEAD 2>/dev/null`
+        if [ x`git rev-list --max-parents=0 HEAD 2>/dev/null` = \
+             x$os_init_rev ]; then
+
             serial=$(($serial + 1000))
         else
             serial=$(($serial + 1))
@@ -80,13 +87,13 @@ if [ -z "$build_string" ]; then
         branch=`cat $SRCROOT/os/branch`
 
     else
-        branch=`git rev-parse --abbrev-ref HEAD`
+        branch=`git rev-parse --abbrev-ref HEAD 2>/dev/null`
     fi
 
     if [ -r "$SRCROOT/os/commit" ]; then
         commit=`cat $SRCROOT/os/commit`
     else
-        commit=`git rev-parse HEAD`
+        commit=`git rev-parse HEAD 2>/dev/null`
     fi
 
     commit_abbrev=`echo $commit | cut -c1-7`
@@ -97,7 +104,7 @@ if [ -z "$build_string" ]; then
     [ "$user" = root ] && user=
     [ $VARIANT ] && build_string="${VARIANT}-"
     [ $user ] && build_string="${build_string}${user}-"
-    [ $branch != "master" ] && build_string="${build_string}${branch}-"
+    [ "$branch" != "master" ] && build_string="${build_string}${branch}-"
     build_string="${build_string}${commit_abbrev}"
     build_string="$build_string $build_time_string"
 fi

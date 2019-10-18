@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -39,7 +44,7 @@ TARGETLIBS = $(OBJROOT)/os/lib/partlib/partlib.a            \
              $(OBJROOT)/os/lib/fatlib/fat.a                 \
              $(OBJROOT)/os/lib/bconflib/bconflib.a          \
              $(OBJROOT)/os/lib/rtl/base/basertl.a           \
-             $(OBJROOT)/os/apps/osbase/urtl/urtl.a          \
+             $(OBJROOT)/os/lib/rtl/urtl/urtl.a              \
              $(OBJROOT)/os/apps/ck/lib/libchalk.a           \
              $(OBJROOT)/os/lib/yy/yy.a                      \
 

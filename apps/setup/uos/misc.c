@@ -35,6 +35,7 @@ Environment:
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -138,7 +139,45 @@ Return Value:
 
 {
 
-    return ENOSYS;
+    SETUP_RECIPE_ID FallbackValue;
+
+    //
+    // TODO: Consider common-izing the Minoca code that looks through the
+    // SMBIOS tables, which can be accessed at on Linux with root access at
+    // /sys/firmware/dmi/tables/DMI.
+    //
+
+    FallbackValue = SetupRecipeNone;
+    if (access("/sys/firmware/efi", F_OK) != F_OK) {
+        if (sizeof(PVOID) == 8) {
+            *Name = strdup("x86-64 PC");
+            FallbackValue = SetupRecipePc64;
+
+        } else {
+            *Name = strdup("x86 PC");
+            FallbackValue = SetupRecipePc32;
+        }
+
+    } else {
+        if (sizeof(PVOID) == 8) {
+            *Name = strdup("x86-64 UEFI-based PC");
+            FallbackValue = SetupRecipePc64Efi;
+
+        } else {
+            *Name = strdup("x86 UEFI-based PC");
+            FallbackValue = SetupRecipePc32Efi;
+        }
+    }
+
+    if (Fallback != NULL) {
+        *Fallback = FallbackValue;
+    }
+
+    if (*Name == NULL) {
+        return ENOMEM;
+    }
+
+    return 0;
 }
 
 INT

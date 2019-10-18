@@ -1,6 +1,11 @@
 /*++
 
-Copyright (c) 2015 Minoca Corp. All Rights Reserved.
+Copyright (c) 2015 Minoca Corp.
+
+    This file is licensed under the terms of the GNU General Public License
+    version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details. See the LICENSE file at the root of this
+    project for complete licensing information..
 
 Module Name:
 
@@ -524,6 +529,24 @@ DefinitionBlock (
 
                 GpioInt(Level, ActiveLow, Shared, PullUp, ,
                         "\\_SB_GPI0") {4}
+            })
+        }
+    }
+
+    Scope(\_SB.I2C4) {
+        Device(MOUS) {
+            Name(_HID, "ELAN0000")
+            Name(_UID, 0)
+            Method(_STA, 0, NotSerialized) {
+                Return(0x0F)
+            }
+
+            Name(_CRS, ResourceTemplate() {
+                I2CSerialBus(0x15, ControllerInitiated, 400000,
+                             AddressingMode7Bit, "\\_SB_I2C4", , , , )
+
+                GpioInt(Edge, ActiveLow, Shared, PullUp, ,
+                        "\\_SB_GPI7") {3}
             })
         }
     }

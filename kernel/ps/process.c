@@ -79,7 +79,7 @@ PspLoaderThread (
 
 KSTATUS
 PspLoadExecutable (
-    PSTR BinaryName,
+    PCSTR BinaryName,
     PIMAGE_FILE_INFORMATION File,
     PIMAGE_BUFFER Buffer,
     PPROCESS_START_DATA StartData
@@ -117,6 +117,11 @@ PspCreateDebugDataIfNeeded (
     );
 
 VOID
+PspDestroyDebugData (
+    PPROCESS_DEBUG_DATA DebugData
+    );
+
+VOID
 PspDebugGetLoadedModules (
     PSYSTEM_CALL_DEBUG Command
     );
@@ -129,14 +134,14 @@ PspDebugGetThreadList (
 KSTATUS
 PspGetAllProcessInformation (
     PVOID Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     );
 
 KSTATUS
 PspGetProcessInformation (
     PKPROCESS Process,
     PPROCESS_INFORMATION Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     );
 
 VOID
@@ -185,7 +190,7 @@ KSTATUS
 PsGetAllProcessInformation (
     ULONG AllocationTag,
     PVOID *Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     )
 
 /*++
@@ -224,7 +229,7 @@ Return Value:
 {
 
     PVOID Allocation;
-    ULONG Size;
+    UINTN Size;
     KSTATUS Status;
     ULONG Try;
 
@@ -275,7 +280,7 @@ KSTATUS
 PsGetProcessInformation (
     PROCESS_ID ProcessId,
     PPROCESS_INFORMATION Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     )
 
 /*++
@@ -396,13 +401,16 @@ Return Value:
     PKTHREAD CurrentThread;
     PKPROCESS NewProcess;
     INTN NewProcessId;
+    PSYSTEM_CALL_FORK Parameters;
     KSTATUS Status;
 
     CurrentThread = KeGetCurrentThread();
     NewProcess = NULL;
+    Parameters = (PSYSTEM_CALL_FORK)SystemCallParameter;
     Status = PspCopyProcess(CurrentThread->OwningProcess,
                             CurrentThread,
                             CurrentThread->TrapFrame,
+                            Parameters->Flags,
                             &NewProcess);
 
     if (!KSUCCESS(Status)) {
@@ -459,12 +467,17 @@ Return Value:
 {
 
     IMAGE_BUFFER Buffer;
+    PSTR CurrentDirectory;
+    UINTN CurrentDirectorySize;
     IMAGE_FILE_INFORMATION File;
+    CHAR FirstCharacter;
     IMAGE_FORMAT Format;
     PPROCESS_ENVIRONMENT NewEnvironment;
     PSTR NewName;
     UINTN NewNameSize;
     PPROCESS_ENVIRONMENT OldEnvironment;
+    PSTR OverrideName;
+    UINTN OverrideNameSize;
     PSYSTEM_CALL_EXECUTE_IMAGE Parameters;
     BOOL PastPointOfNoReturn;
     PKPROCESS Process;
@@ -481,6 +494,9 @@ Return Value:
     ReturnValue = 0;
     Thread = KeGetCurrentThread();
     Process = Thread->OwningProcess;
+    OverrideName = NULL;
+    OverrideNameSize = 0;
+    CurrentDirectory = NULL;
 
     ASSERT(Process != PsGetKernelProcess());
 
@@ -495,13 +511,68 @@ Return Value:
     }
 
     //
+    // Check to see if the image name is a relative path. If so, create an
+    // absolute path and pass that as an override to copy environment.
+    //
+
+    if (Parameters->Environment.ImageNameLength != 0) {
+        Status = MmCopyFromUserMode(&FirstCharacter,
+                                    Parameters->Environment.ImageName,
+                                    sizeof(CHAR));
+
+        if (!KSUCCESS(Status)) {
+            goto SysExecuteProcessEnd;
+        }
+
+        if (FirstCharacter != PATH_SEPARATOR) {
+            Status = IoGetCurrentDirectory(TRUE,
+                                           FALSE,
+                                           &CurrentDirectory,
+                                           &CurrentDirectorySize);
+
+            if (!KSUCCESS(Status)) {
+                goto SysExecuteProcessEnd;
+            }
+
+            OverrideNameSize = CurrentDirectorySize +
+                               Parameters->Environment.ImageNameLength;
+
+            OverrideName = MmAllocatePagedPool(OverrideNameSize,
+                                               PS_ALLOCATION_TAG);
+
+            if (OverrideName == NULL) {
+                Status = STATUS_INSUFFICIENT_RESOURCES;
+                goto SysExecuteProcessEnd;
+            }
+
+            //
+            // Copy the current directory up to but not including the NULL
+            // terminator. Set '/' where the NULL terminator using the space
+            // for the NULL terminator and then copy in the image name from
+            // user mode, which includes a NULL terminator.
+            //
+
+            RtlCopyMemory(OverrideName,
+                          CurrentDirectory,
+                          CurrentDirectorySize - 1);
+
+            OverrideName[CurrentDirectorySize - 1] = PATH_SEPARATOR;
+            MmCopyFromUserMode(OverrideName + CurrentDirectorySize,
+                               Parameters->Environment.ImageName,
+                               Parameters->Environment.ImageNameLength);
+        }
+    }
+
+    //
     // Create the new environment in kernel mode.
     //
 
     Status = PsCopyEnvironment(&(Parameters->Environment),
                                &NewEnvironment,
                                TRUE,
-                               NULL);
+                               NULL,
+                               OverrideName,
+                               OverrideNameSize);
 
     if (!KSUCCESS(Status)) {
         goto SysExecuteProcessEnd;
@@ -546,7 +617,7 @@ Return Value:
     INITIALIZE_SIGNAL_SET(Process->HandledSignals);
     PspSetThreadUserStackSize(Thread, 0);
     PspImUnloadAllImages(Process);
-    MmCleanUpProcessMemory(Process);
+    MmCleanUpProcessMemory(Process->AddressSpace, FALSE);
     NewName = RtlStringFindCharacterRight(NewEnvironment->ImageName,
                                           '/',
                                           NewEnvironment->ImageNameLength);
@@ -654,6 +725,14 @@ Return Value:
 SysExecuteProcessEnd:
     if (File.Handle != INVALID_HANDLE) {
         IoClose(File.Handle);
+    }
+
+    if (CurrentDirectory != NULL) {
+        MmFreePagedPool(CurrentDirectory);
+    }
+
+    if (OverrideName != NULL) {
+        MmFreePagedPool(OverrideName);
     }
 
     if (!KSUCCESS(Status)) {
@@ -905,9 +984,7 @@ Return Value:
             Request->Command.Status = STATUS_TOO_LATE;
 
         } else {
-            Request->Command.Status = PspDebugEnable(CurrentProcess,
-                                                     CurrentProcess->Parent);
-
+            Request->Command.Status = PspDebugEnable(CurrentProcess, Parent);
             ObReleaseReference(Parent);
         }
 
@@ -1189,7 +1266,7 @@ Return Value:
 
 PKPROCESS
 PsCreateProcess (
-    PSTR CommandLine,
+    PCSTR CommandLine,
     ULONG CommandLineSize,
     PVOID RootDirectoryPathPoint,
     PVOID WorkingDirectoryPathPoint,
@@ -1234,6 +1311,7 @@ Return Value:
     PSTR *EnvironmentArray;
     UINTN EnvironmentCount;
     PKERNEL_ARGUMENT KernelArgument;
+    PKPROCESS KernelProcess;
     PKPROCESS NewProcess;
     KSTATUS Status;
     THREAD_CREATION_PARAMETERS ThreadParameters;
@@ -1329,6 +1407,9 @@ Return Value:
     }
 
     NewProcess->Umask = PS_DEFAULT_UMASK;
+    KernelProcess = PsGetKernelProcess();
+    NewProcess->Realm.Uts = KernelProcess->Realm.Uts;
+    PspUtsRealmAddReference(NewProcess->Realm.Uts);
 
     //
     // Give this process it's own new session.
@@ -1671,6 +1752,7 @@ PspCopyProcess (
     PKPROCESS Process,
     PKTHREAD MainThread,
     PTRAP_FRAME TrapFrame,
+    ULONG Flags,
     PKPROCESS *CreatedProcess
     )
 
@@ -1692,6 +1774,9 @@ Arguments:
     TrapFrame - Supplies a pointer to the trap frame of the interrupted main
         thread.
 
+    Flags - Supplies a bitfield of flags governing the creation of the new
+        process. See FORK_FLAG_* definitions.
+
     CreatedProcess - Supplies an optional pointer that will receive a pointer to
         the created process on success.
 
@@ -1705,6 +1790,7 @@ Return Value:
 
     PPATH_POINT CurrentDirectory;
     PATH_POINT CurrentDirectoryCopy;
+    PVOID KernelStack;
     PKTHREAD NewMainThread;
     PKPROCESS NewProcess;
     PPATH_POINT RootDirectory;
@@ -1712,12 +1798,32 @@ Return Value:
     PPATH_POINT SharedMemoryDirectory;
     PATH_POINT SharedMemoryDirectoryCopy;
     KSTATUS Status;
+    PKPROCESS TracingProcess;
 
     ASSERT(KeGetRunLevel() == RunLevelLow);
 
     CurrentDirectory = NULL;
+    KernelStack = NULL;
+    NewProcess = NULL;
     RootDirectory = NULL;
     SharedMemoryDirectory = NULL;
+    TracingProcess = NULL;
+
+    //
+    // Create the kernel stack before creating the process so that the top
+    // level PDE for the new stack will definitely be in the new process page
+    // directory. If it were created later, then the new processes page
+    // directory would need to be mapped and poked to ensure it had the entry
+    // for the new stack.
+    //
+
+    ASSERT(MainThread->KernelStackSize == DEFAULT_KERNEL_STACK_SIZE);
+
+    KernelStack = MmAllocateKernelStack(DEFAULT_KERNEL_STACK_SIZE);
+    if (KernelStack == NULL) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto CopyProcessEnd;
+    }
 
     //
     // Get the processes root and current directories. Add references in case a
@@ -1791,6 +1897,19 @@ Return Value:
     NewProcess->IgnoredSignals = Process->IgnoredSignals;
     NewProcess->Umask = Process->Umask;
     INSERT_BEFORE(&(NewProcess->SiblingListEntry), &(Process->ChildListHead));
+
+    //
+    // Check for a tracing process while the lock is held. An exiting tracer
+    // sets this pointer to NULL with the tracee's lock held.
+    //
+
+    if ((Process->DebugData != NULL) &&
+        (Process->DebugData->TracingProcess != NULL)) {
+
+        TracingProcess = Process->DebugData->TracingProcess;
+        ObAddReference(TracingProcess);
+    }
+
     KeReleaseQueuedLock(Process->QueuedLock);
     PspAddProcessToParentProcessGroup(NewProcess);
 
@@ -1805,13 +1924,27 @@ Return Value:
     }
 
     //
+    // Copy the realms or create new ones if specified.
+    //
+
+    if ((Flags & FORK_FLAG_REALM_UTS) != 0) {
+        NewProcess->Realm.Uts = PspCreateUtsRealm(Process->Realm.Uts);
+        if (NewProcess->Realm.Uts == NULL) {
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto CopyProcessEnd;
+        }
+
+    } else {
+        NewProcess->Realm.Uts = Process->Realm.Uts;
+        PspUtsRealmAddReference(NewProcess->Realm.Uts);
+    }
+
+    //
     // Add the tracing process if needed.
     //
 
-    if ((Process->DebugData != NULL) &&
-        (Process->DebugData->TracingProcess != NULL)) {
-
-        Status = PspDebugEnable(NewProcess, Process->DebugData->TracingProcess);
+    if (TracingProcess != NULL) {
+        Status = PspDebugEnable(NewProcess, TracingProcess);
         if (!KSUCCESS(Status)) {
             goto CopyProcessEnd;
         }
@@ -1850,13 +1983,24 @@ Return Value:
     // Clone the main thread, which will kick off the new process.
     //
 
-    NewMainThread = PspCloneThread(NewProcess, MainThread, TrapFrame);
+    NewMainThread = PspCloneThread(NewProcess,
+                                   MainThread,
+                                   KernelStack,
+                                   DEFAULT_KERNEL_STACK_SIZE,
+                                   TrapFrame);
+
     if (NewMainThread == NULL) {
         Status = STATUS_UNSUCCESSFUL;
         goto CopyProcessEnd;
     }
 
+    KernelStack = NULL;
+
 CopyProcessEnd:
+    if (KernelStack != NULL) {
+        MmFreeKernelStack(KernelStack, DEFAULT_KERNEL_STACK_SIZE);
+    }
+
     if (!KSUCCESS(Status)) {
         if (NewProcess != NULL) {
 
@@ -1865,6 +2009,7 @@ CopyProcessEnd:
             // nothing will clean up the new process. "Terminate" it now.
             //
 
+            PspRemoveProcessFromLists(NewProcess);
             PspProcessTermination(NewProcess);
             ObReleaseReference(NewProcess);
             NewProcess = NULL;
@@ -1875,12 +2020,16 @@ CopyProcessEnd:
         *CreatedProcess = NewProcess;
     }
 
+    if (TracingProcess != NULL) {
+        ObReleaseReference(TracingProcess);
+    }
+
     return Status;
 }
 
 PKPROCESS
 PspCreateProcess (
-    PSTR CommandLine,
+    PCSTR CommandLine,
     ULONG CommandLineSize,
     PPROCESS_ENVIRONMENT SourceEnvironment,
     PPROCESS_IDENTIFIERS Identifiers,
@@ -1936,7 +2085,7 @@ Return Value:
 
 {
 
-    PSTR BinaryName;
+    PCSTR BinaryName;
     ULONG BinaryNameSize;
     PPROCESS_ENVIRONMENT Environment;
     PSTR FoundName;
@@ -1963,7 +2112,9 @@ Return Value:
             Status = PsCopyEnvironment(SourceEnvironment,
                                        &Environment,
                                        FALSE,
-                                       NULL);
+                                       NULL,
+                                       NULL,
+                                       0);
 
         } else {
             Status = PsCreateEnvironment(CommandLine,
@@ -2272,7 +2423,7 @@ Return Value:
     FoundProcess = NULL;
     CurrentEntry = Parent->ChildListHead.Next;
     while (CurrentEntry != &(Parent->ChildListHead)) {
-        Process = LIST_VALUE(CurrentEntry, KPROCESS, ListEntry);
+        Process = LIST_VALUE(CurrentEntry, KPROCESS, SiblingListEntry);
         if (Process->Identifiers.ProcessId == ProcessId) {
             FoundProcess = Process;
             ObAddReference(FoundProcess);
@@ -2526,7 +2677,10 @@ Return Value:
             }
 
             Command->PreviousCommand = Command->Command;
-            Command->Command = DebugCommandInvalid;
+            if (BreakOut == FALSE) {
+                Command->Command = DebugCommandInvalid;
+            }
+
             KeSignalEvent(DebugData->DebugCommandCompleteEvent,
                           SignalOptionSignalAll);
         }
@@ -2824,7 +2978,7 @@ Return Value:
     PspDestroyProcessTimers(Process);
     PspImUnloadAllImages(Process);
     IoCloseProcessHandles(Process, 0);
-    MmCleanUpProcessMemory(Process);
+    MmCleanUpProcessMemory(Process->AddressSpace, TRUE);
     if (PsIsSessionLeader(Process)) {
         IoTerminalDisassociate(Process);
     }
@@ -2860,6 +3014,8 @@ Return Value:
     if (Process->Environment != NULL) {
         PsDestroyEnvironment(Process->Environment);
         Process->Environment = NULL;
+        Process->BinaryName = NULL;
+        Process->BinaryNameSize = 0;
     }
 
     if (Process->HandleTable != NULL) {
@@ -2867,12 +3023,17 @@ Return Value:
         Process->HandleTable = NULL;
     }
 
+    if (Process->Realm.Uts != NULL) {
+        PspUtsRealmReleaseReference(Process->Realm.Uts);
+        Process->Realm.Uts = NULL;
+    }
+
     //
     // There should only be one remaining page mapped: the shared user data
     // page.
     //
 
-    ASSERT(Process->AddressSpace->ResidentSet == 1);
+    ASSERT(Process->AddressSpace->ResidentSet <= 1);
 
     return;
 }
@@ -2979,6 +3140,7 @@ Return Value:
 {
 
     PKPROCESS Parent;
+    PKPROCESS TracingProcess;
 
     //
     // Remove the process from the global list of processes so that it can no
@@ -2997,13 +3159,22 @@ Return Value:
     //
     // Remove the process from the parent's list. Acquire the process lock
     // to synchronize with the parent dying and trying to null out the parent
-    // pointer.
+    // pointer. Also synchronize with the tracer and attempt to get a reference
+    // on it.
     //
 
+    TracingProcess = NULL;
     KeAcquireQueuedLock(Process->QueuedLock);
     Parent = Process->Parent;
     if (Parent != NULL) {
         ObAddReference(Parent);
+    }
+
+    if ((Process->DebugData != NULL) &&
+        (Process->DebugData->TracingProcess != NULL)) {
+
+        TracingProcess = Process->DebugData->TracingProcess;
+        ObAddReference(TracingProcess);
     }
 
     KeReleaseQueuedLock(Process->QueuedLock);
@@ -3028,6 +3199,32 @@ Return Value:
         //
 
         ObReleaseReference(Parent);
+    }
+
+    //
+    // Remove the process from the tracer's list. If the tracer is detaching
+    // itself from the tracee, it will have set the tracee's tracing process
+    // pointer to NULL and removed it from the list.
+    //
+
+    if (TracingProcess != NULL) {
+        KeAcquireQueuedLock(TracingProcess->QueuedLock);
+        if (Process->DebugData->TracingProcess != NULL) {
+
+            ASSERT(Process->DebugData->TracerListEntry.Next != NULL);
+
+            LIST_REMOVE(&(Process->DebugData->TracerListEntry));
+            Process->DebugData->TracerListEntry.Next = NULL;
+            Process->DebugData->TracingProcess = NULL;
+        }
+
+        KeReleaseQueuedLock(TracingProcess->QueuedLock);
+
+        //
+        // Release the reference added above when the tracer was grabbed.
+        //
+
+        ObReleaseReference(TracingProcess);
     }
 
     return;
@@ -3112,9 +3309,7 @@ Return Value:
 
 {
 
-    PPROCESS_DEBUG_DATA DebugData;
     PKPROCESS Process;
-    PKPROCESS TracingProcess;
 
     //
     // This routine must not touch paged objects (including freeing paged pool),
@@ -3153,42 +3348,12 @@ Return Value:
     //
 
     if (Process->DebugData != NULL) {
-        DebugData = Process->DebugData;
-        TracingProcess = DebugData->TracingProcess;
-        if (TracingProcess != NULL) {
 
-            //
-            // Acquire the tracing process lock to remove this process from its
-            // list.
-            //
+        ASSERT(LIST_EMPTY(&(Process->DebugData->TraceeListHead)) != FALSE);
+        ASSERT(Process->DebugData->TracingProcess == NULL);
+        ASSERT(Process->DebugData->TracerListEntry.Next == NULL);
 
-            KeAcquireQueuedLock(TracingProcess->QueuedLock);
-
-            ASSERT(Process->DebugData->TracerListEntry.Next != NULL);
-
-            LIST_REMOVE(&(Process->DebugData->TracerListEntry));
-            Process->DebugData->TracerListEntry.Next = NULL;
-            DebugData->TracingProcess = NULL;
-            KeReleaseQueuedLock(TracingProcess->QueuedLock);
-
-            //
-            // Release the reference added when the debug connection was made.
-            //
-
-            ObReleaseReference(TracingProcess);
-        }
-
-        if (DebugData->AllStoppedEvent != NULL) {
-            KeDestroyEvent(DebugData->AllStoppedEvent);
-            DebugData->AllStoppedEvent = NULL;
-        }
-
-        if (DebugData->DebugCommandCompleteEvent != NULL) {
-            KeDestroyEvent(DebugData->DebugCommandCompleteEvent);
-            DebugData->DebugCommandCompleteEvent = NULL;
-        }
-
-        MmFreeNonPagedPool(Process->DebugData);
+        PspDestroyDebugData(Process->DebugData);
         Process->DebugData = NULL;
     }
 
@@ -3253,9 +3418,10 @@ Return Value:
 {
 
     PKPROCESS Child;
-    PPROCESS_DEBUG_DATA ChildDebugData;
     PLIST_ENTRY CurrentEntry;
+    PPROCESS_DEBUG_DATA DebugData;
     PROCESS_DEBUG_COMMAND TerminateCommand;
+    PKPROCESS Tracee;
 
     //
     // Disassociate the children from their dying parent.
@@ -3279,43 +3445,88 @@ Return Value:
         KeReleaseQueuedLock(Child->QueuedLock);
     }
 
+    KeReleaseQueuedLock(Process->QueuedLock);
+
     //
-    // Also release and continue any processes this process is tracing.
+    // Disassociate the tracees from the dying tracer. The process should have
+    // no threads, meaning that no new tracees should be added to the list. A
+    // tracee may remove itself (under the protection of the tracer's lock), so
+    // annoyingly grab the lock on each removal attempt. It should also be
+    // noted that this lock dance is done because debug commands cannot be
+    // issued while the tracer's process lock is held; the system may deadlock
+    // between the process lock and the debug command completion event.
     //
 
     if (Process->DebugData != NULL) {
-        CurrentEntry = Process->DebugData->TraceeListHead.Next;
-        while (CurrentEntry != &(Process->DebugData->TraceeListHead)) {
-            ChildDebugData = LIST_VALUE(CurrentEntry,
-                                        PROCESS_DEBUG_DATA,
-                                        TracerListEntry);
 
-            Child = ChildDebugData->Process;
-            CurrentEntry = CurrentEntry->Next;
+        ASSERT(Process->ThreadCount == 0);
+
+        while (LIST_EMPTY(&(Process->DebugData->TraceeListHead)) == FALSE) {
+            Tracee = NULL;
+            KeAcquireQueuedLock(Process->QueuedLock);
+            if (LIST_EMPTY(&(Process->DebugData->TraceeListHead)) == FALSE) {
+                DebugData = LIST_VALUE(Process->DebugData->TraceeListHead.Next,
+                                       PROCESS_DEBUG_DATA,
+                                       TracerListEntry);
+
+                Tracee = DebugData->Process;
+                KeAcquireQueuedLock(Tracee->QueuedLock);
+
+                //
+                // The tracing process pointer should not be NULL.
+                //
+
+                ASSERT(DebugData->TracingProcess == Process);
+
+                LIST_REMOVE(&(DebugData->TracerListEntry));
+                DebugData->TracerListEntry.Next = NULL;
+                DebugData->TracingProcess = NULL;
+
+                //
+                // Add a reference to the tracee so it does not disappear when
+                // the lock is released.
+                //
+
+                ObAddReference(Tracee);
+                KeReleaseQueuedLock(Tracee->QueuedLock);
+            }
+
+            KeReleaseQueuedLock(Process->QueuedLock);
 
             //
-            // Only the child process can detach itself from the tracer (though
-            // it can't go through with that until acquiring the process lock
-            // already held here). Coerce the process into doing this by sending
-            // a kill signal. Additionally, if the child is already waiting on
-            // this process for tracing, then continue it with the kill signal.
+            // If there was a tracee, kill it. The owning tracer is dead and it
+            // likely shouldn't be alive without the tracer.
             //
 
-            PspSetProcessExitStatus(Child,
-                                    CHILD_SIGNAL_REASON_KILLED,
-                                    SIGNAL_ABORT);
+            if (Tracee != NULL) {
+                PspSetProcessExitStatus(Tracee,
+                                        CHILD_SIGNAL_REASON_KILLED,
+                                        SIGNAL_ABORT);
 
-            PsSignalProcess(Child, SIGNAL_KILL, NULL);
-            if (KeIsSpinLockHeld(&(ChildDebugData->TracerLock)) != FALSE) {
-                RtlZeroMemory(&TerminateCommand, sizeof(PROCESS_DEBUG_COMMAND));
-                TerminateCommand.Command = DebugCommandContinue;
-                TerminateCommand.SignalToDeliver = SIGNAL_KILL;
-                PspDebugIssueCommand(Process, Child, &TerminateCommand);
+                PsSignalProcess(Tracee, SIGNAL_KILL, NULL);
+
+                //
+                // If the tracee is already waiting on this tracer, then
+                // continue it so it can run head first into the kill signal.
+                // Cruel.
+                //
+
+                if (KeIsSpinLockHeld(&(DebugData->TracerLock)) != FALSE) {
+                    RtlZeroMemory(&TerminateCommand,
+                                  sizeof(PROCESS_DEBUG_COMMAND));
+
+                    TerminateCommand.Command = DebugCommandContinue;
+                    TerminateCommand.SignalToDeliver =
+                               DebugData->TracerSignalInformation.SignalNumber;
+
+                    PspDebugIssueCommand(Process, Tracee, &TerminateCommand);
+                }
+
+                ObReleaseReference(Tracee);
             }
         }
     }
 
-    KeReleaseQueuedLock(Process->QueuedLock);
     return;
 }
 
@@ -3420,7 +3631,7 @@ LoaderThreadEnd:
 
 KSTATUS
 PspLoadExecutable (
-    PSTR BinaryName,
+    PCSTR BinaryName,
     PIMAGE_FILE_INFORMATION File,
     PIMAGE_BUFFER Buffer,
     PPROCESS_START_DATA StartData
@@ -3630,23 +3841,33 @@ Return Value:
 
     DebugData = Process->DebugData;
     KeAcquireQueuedLock(TracingProcess->QueuedLock);
-    KeAcquireSpinLock(&(Process->DebugData->TracerLock));
     LockHeld = TRUE;
-    if (DebugData->TracingProcess != NULL) {
-        KeReleaseSpinLock(&(Process->DebugData->TracerLock));
-        Status = STATUS_RESOURCE_IN_USE;
-        goto DebugEnableEnd;
 
-    } else {
+    //
+    // If the tracing process is actually dead (no threads), then do not add
+    // another tracee to its list. The new tracee likely missed the kill
+    // signals sent by the tracer.
+    //
+
+    if (TracingProcess->ThreadCount == 0) {
+        Status = STATUS_TOO_LATE;
+        goto DebugEnableEnd;
+    }
+
+    Status = STATUS_RESOURCE_IN_USE;
+    KeAcquireQueuedLock(Process->QueuedLock);
+    if (DebugData->TracingProcess == NULL) {
+
+        ASSERT(Process->DebugData->TracerListEntry.Next == NULL);
+
         INSERT_BEFORE(&(Process->DebugData->TracerListEntry),
                       &(TracingProcess->DebugData->TraceeListHead));
 
         DebugData->TracingProcess = TracingProcess;
-        ObAddReference(DebugData->TracingProcess);
+        Status = STATUS_SUCCESS;
     }
 
-    KeReleaseSpinLock(&(Process->DebugData->TracerLock));
-    Status = STATUS_SUCCESS;
+    KeReleaseQueuedLock(Process->QueuedLock);
 
 DebugEnableEnd:
     if (LockHeld != FALSE) {
@@ -3791,7 +4012,9 @@ Return Value:
 
     //
     // Fail if that process is not stopped at a tracer break, indicated by the
-    // lock being held.
+    // lock being held. If the target process just died, it should not be
+    // holding this lock. If it does have the lock, it should not die before
+    // the command completes.
     //
 
     if (KeIsSpinLockHeld(&(TargetProcess->DebugData->TracerLock)) == FALSE) {
@@ -4047,11 +4270,7 @@ CreateDebugDataIfNeededEnd:
         ASSERT(Process->DebugData == NULL);
 
         if (DebugData != NULL) {
-            if (DebugData->AllStoppedEvent != NULL) {
-                KeDestroyEvent(DebugData->AllStoppedEvent);
-            }
-
-            MmFreePagedPool(DebugData);
+            PspDestroyDebugData(DebugData);
         }
     }
 
@@ -4060,6 +4279,41 @@ CreateDebugDataIfNeededEnd:
     }
 
     return Status;
+}
+
+VOID
+PspDestroyDebugData (
+    PPROCESS_DEBUG_DATA DebugData
+    )
+
+/*++
+
+Routine Description:
+
+    This routine destroys the given process debug data structure.
+
+Arguments:
+
+    DebugData - Supplies a pointer to the debug data to destroy.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    if (DebugData->AllStoppedEvent != NULL) {
+        KeDestroyEvent(DebugData->AllStoppedEvent);
+    }
+
+    if (DebugData->DebugCommandCompleteEvent != NULL) {
+        KeDestroyEvent(DebugData->DebugCommandCompleteEvent);
+    }
+
+    MmFreeNonPagedPool(DebugData);
+    return;
 }
 
 VOID
@@ -4119,7 +4373,9 @@ Return Value:
 
     //
     // Fail if that process is not stopped at a tracer break, indicated by the
-    // lock being held.
+    // lock being held. If the process just died, it should not be holding this
+    // lock. If it does have the lock, it should not die before the calling
+    // process continues it.
     //
 
     if (KeIsSpinLockHeld(&(Process->DebugData->TracerLock)) == FALSE) {
@@ -4319,7 +4575,9 @@ Return Value:
 
     //
     // Fail if that process is not stopped at a tracer break, indicated by the
-    // lock being held.
+    // lock being held. If the process just died, it should not be holding this
+    // lock. If it does have the lock, it should not die before the calling
+    // process continues it.
     //
 
     if (KeIsSpinLockHeld(&(Process->DebugData->TracerLock)) == FALSE) {
@@ -4415,7 +4673,7 @@ DebugGetThreadListEnd:
 KSTATUS
 PspGetAllProcessInformation (
     PVOID Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     )
 
 /*++
@@ -4448,7 +4706,7 @@ Return Value:
     PKPROCESS *Processes;
     ULONG ProcessIndex;
     PPROCESS_INFORMATION ProcessInformation;
-    ULONG ProcessSize;
+    UINTN ProcessSize;
     KSTATUS ProcessStatus;
     ULONG RemainingSize;
     ULONG Size;
@@ -4495,7 +4753,7 @@ KSTATUS
 PspGetProcessInformation (
     PKPROCESS Process,
     PPROCESS_INFORMATION Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     )
 
 /*++

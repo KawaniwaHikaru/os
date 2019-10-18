@@ -63,6 +63,7 @@ extern INT8 __executable_start;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 VOID
 EfiRpiMain (
     VOID *TopOfStack,
@@ -147,6 +148,12 @@ Return Value:
         }
 
         Status = EfipRpiCreateSmbiosTables();
+        if (EFI_ERROR(Status)) {
+            return Status;
+        }
+
+    } else if (Phase == 2) {
+        Status = EfipBcm2709PwmInitialize();
         if (EFI_ERROR(Status)) {
             return Status;
         }

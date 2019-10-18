@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2014 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2014 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -27,19 +32,43 @@ VPATH += $(SRCDIR)/..:
 
 OBJS += bootxfr.o   \
         main.o      \
+        paging.o    \
 
 X86_OBJS = x86/entry.o  \
+           x86/xferc.o  \
 
-TEXT_ADDRESS = 0x100000
+X64_OBJS = x86/entry.o  \
+           x64/xfera.o  \
+           x64/xferc.o  \
 
 LDFLAGS += -nodefaultlibs -nostartfiles -nostdlib
 
+##
+## The PCAT boot manager is always compiled for 32-bits, even for AMD64.
+##
+
+ifeq ($(ARCH),x64)
+EXTRA_CPPFLAGS += -m32
+EXTRA_LDFLAGS += -m32
+endif
+
+TEXT_ADDRESS := 0x100000
+
 INCLUDES += $(SRCROOT)/os/boot/lib/include;$(SRCDIR)/..;
+
+ifeq ($(ARCH),x64)
+
+TARGETLIBS += $(OBJROOT)/os/boot/lib/pcat/x6432/bootpcat.a \
+              $(OBJROOT)/os/lib/partlib/x6432/partlib.a    \
+
+else
 
 TARGETLIBS += $(OBJROOT)/os/boot/lib/pcat/bootpcat.a \
               $(OBJROOT)/os/lib/partlib/partlib.a    \
 
-EXTRA_SRC_DIRS = x86
+endif
+
+EXTRA_SRC_DIRS = x86 x64
 
 include $(SRCROOT)/os/minoca.mk
 

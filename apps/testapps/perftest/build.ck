@@ -25,7 +25,16 @@ Environment:
 
 --*/
 
+from menv import application, sharedLibrary;
+
 function build() {
+    var app;
+    var entries;
+    var includes;
+    var libSources;
+    var perfLib;
+    var sources;
+
     sources = [
         "copy.c",
         "create.c",
@@ -44,38 +53,34 @@ function build() {
         "pthread.c",
         "read.c",
         "rename.c",
+        "signal.c",
         "stat.c",
         "write.c"
     ];
 
-    lib_sources = [
+    libSources = [
         "perflib/perflib.c"
     ];
 
-    dynlibs = [
-        "//apps/osbase:libminocaos"
-    ];
-
     includes = [
-        "$//apps/libc/include"
+        "$S/apps/libc/include"
     ];
 
     app = {
         "label": "perftest",
-        "inputs": sources + dynlibs,
+        "inputs": sources,
         "orderonly": [":perflib"],
         "includes": includes
     };
 
-    perf_lib = {
+    perfLib = {
         "label": "perflib",
-        "inputs": lib_sources,
+        "inputs": libSources,
         "includes": includes
     };
 
     entries = application(app);
-    entries += shared_library(perf_lib);
+    entries += sharedLibrary(perfLib);
     return entries;
 }
 
-return build();

@@ -38,8 +38,9 @@ Environment:
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <termios.h>
 #include <unistd.h>
+
+#include <minoca/lib/tty.h>
 
 #include "swlib.h"
 
@@ -157,28 +158,6 @@ typedef struct _STTY_MEMBER {
     tcflag_t Mask;
     ULONG Flags;
 } STTY_MEMBER, *PSTTY_MEMBER;
-
-/*++
-
-Structure Description:
-
-    This structure stores an stty baud rate speed conversion.
-
-Members:
-
-    Name - Stores the name of the speed.
-
-    Value - Stores the value to set in the baud rate member.
-
-    Rate - Stores the actual baud rate as a decimal value.
-
---*/
-
-typedef struct _STTY_BAUD_RATE {
-    PSTR Name;
-    speed_t Value;
-    ULONG Rate;
-} STTY_BAUD_RATE, *PSTTY_BAUD_RATE;
 
 //
 // ----------------------------------------------- Internal Function Prototypes
@@ -302,25 +281,57 @@ STTY_MEMBER SttyOptions[] = {
     {"onlcr", SttyTermiosOutput, ONLCR, 0, STTY_SANE_SET},
     {"onocr", SttyTermiosOutput, ONOCR, 0, STTY_SANE_CLEAR},
     {"onlret", SttyTermiosOutput, ONLRET, 0, STTY_SANE_CLEAR},
+#ifdef OFILL
     {"ofill", SttyTermiosOutput, OFILL, 0, STTY_SANE_CLEAR},
+#endif
+#ifdef OFDEL
     {"ofdel", SttyTermiosOutput, OFDEL, 0, STTY_SANE_CLEAR},
+#endif
+#ifdef CR0
     {"cr0", SttyTermiosOutput, CR0, CRDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#endif
+#ifdef CR1
     {"cr1", SttyTermiosOutput, CR1, CRDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef CR2
     {"cr2", SttyTermiosOutput, CR2, CRDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef CR3
     {"cr3", SttyTermiosOutput, CR3, CRDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef NL0
     {"nl0", SttyTermiosOutput, NL0, NLDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#endif
+#ifdef NL1
     {"nl1", SttyTermiosOutput, NL1, NLDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
     {"tab0", SttyTermiosOutput, TAB0, TABDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#ifdef TAB1
     {"tab1", SttyTermiosOutput, TAB1, TABDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef TAB2
     {"tab2", SttyTermiosOutput, TAB2, TABDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
     {"tab3", SttyTermiosOutput, TAB3, TABDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
     {"tabs", SttyTermiosOutput, TAB0, TABDLY, STTY_NO_NEGATE | STTY_HIDDEN},
+#ifdef BS0
     {"bs0", SttyTermiosOutput, BS0, BSDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#endif
+#ifdef BS1
     {"bs1", SttyTermiosOutput, BS1, BSDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef FF0
     {"ff0", SttyTermiosOutput, FF0, FFDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#endif
+#ifdef FF1
     {"ff1", SttyTermiosOutput, FF1, FFDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
+#ifdef VT0
     {"vt0", SttyTermiosOutput, VT0, VTDLY, STTY_NO_NEGATE | STTY_SANE_SET},
+#endif
+#ifdef VT1
     {"vt1", SttyTermiosOutput, VT1, VTDLY, STTY_NO_NEGATE | STTY_SANE_CLEAR},
+#endif
     {"parenb", SttyTermiosControl, PARENB, 0, 0},
     {"parodd", SttyTermiosControl, PARODD, 0, 0},
     {"cs5", SttyTermiosControl, CS5, CSIZE, STTY_NO_NEGATE},
@@ -368,78 +379,6 @@ STTY_MEMBER SttyOptions[] = {
     {"crt", SttyTermiosCombination, 0, STTY_NO_NEGATE},
     {"dec", SttyTermiosCombination, 0, STTY_NO_NEGATE},
     {NULL, SttyTermiosInvalid, 0, 0, 0},
-};
-
-STTY_BAUD_RATE SttyBaudRates[] = {
-    {"0", B0, 0},
-    {"50", B50, 50},
-    {"75", B75, 75},
-    {"110", B110, 110},
-    {"134", B134, 134},
-    {"150", B150, 150},
-    {"200", B200, 200},
-    {"300", B300, 300},
-    {"600", B600, 600},
-    {"1200", B1200, 1200},
-    {"1800", B1800, 1800},
-    {"2400", B2400, 2400},
-    {"4800", B4800, 4800},
-    {"9600", B9600, 9600},
-    {"19200", B19200, 19200},
-    {"38400", B38400, 38400},
-    {"57600", B57600, 57600},
-    {"115200", B115200, 115200},
-    {"230400", B230400, 230400},
-
-#ifdef B460800
-    {"460800", B460800, 460800},
-#endif
-
-#ifdef B500000
-    {"500000", B500000, 500000},
-#endif
-
-#ifdef B576000
-    {"576000", B576000, 576000},
-#endif
-
-#ifdef B921600
-    {"921600", B921600, 921600},
-#endif
-
-#ifdef B1000000
-    {"1000000", B1000000, 1000000},
-#endif
-
-#ifdef B152000
-    {"1152000", B1152000, 1152000},
-#endif
-
-#ifdef B1500000
-    {"1500000", B1500000, 1500000},
-#endif
-
-#ifdef B2000000
-    {"2000000", B2000000, 2000000},
-#endif
-
-#ifdef B2500000
-    {"2500000", B2500000, 2500000},
-#endif
-
-#ifdef B3000000
-    {"3000000", B3000000, 3000000},
-#endif
-
-#ifdef B3500000
-    {"3500000", B3500000, 3500000},
-#endif
-
-#ifdef B4000000
-    {"4000000", B4000000, 4000000},
-#endif
-
-    {NULL, 0, 0}
 };
 
 //
@@ -524,7 +463,7 @@ Return Value:
             break;
 
         case 'F':
-            Terminal = open(optarg, O_RDONLY | O_NONBLOCK);
+            Terminal = SwOpen(optarg, O_RDONLY | O_NONBLOCK, 0);
             if (Terminal < 0) {
                 Status = 1;
                 SwPrintError(errno, optarg, "Unable to open");
@@ -576,7 +515,7 @@ Return Value:
     //
 
     if (Terminal < 0) {
-        Terminal = open("/dev/tty", O_RDWR);
+        Terminal = SwOpen("/dev/tty", O_RDWR, 0);
         if (Terminal < 0) {
             Terminal = STDIN_FILENO;
         }
@@ -1542,9 +1481,9 @@ Return Value:
 
 {
 
-    PSTTY_BAUD_RATE Entry;
+    PTTY_BAUD_RATE Entry;
 
-    Entry = SttyBaudRates;
+    Entry = TtyBaudRates;
     while (Entry->Name != NULL) {
         if (Entry->Value == Value) {
             return Entry->Rate;
@@ -1581,9 +1520,9 @@ Return Value:
 
 {
 
-    PSTTY_BAUD_RATE Entry;
+    PTTY_BAUD_RATE Entry;
 
-    Entry = SttyBaudRates;
+    Entry = TtyBaudRates;
     while (Entry->Name != NULL) {
         if (strcmp(String, Entry->Name) == 0) {
             return Entry->Value;

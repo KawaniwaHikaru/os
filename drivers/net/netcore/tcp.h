@@ -341,6 +341,7 @@ Author:
 #define TCP_SOCKET_FLAG_RECEIVE_MISSING_SEGMENTS     0x00000200
 #define TCP_SOCKET_FLAG_NO_DELAY                     0x00000400
 #define TCP_SOCKET_FLAG_WINDOW_SCALING               0x00000800
+#define TCP_SOCKET_FLAG_CONNECT_INTERRUPTED          0x00001000
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -353,6 +354,7 @@ Author:
 
 typedef enum _TCP_USER_CONTROL_CODE {
     TcpUserControlAtUrgentMark = 0x7300,
+    TcpUserControlGetInputQueueSize = 0x741B,
 } TCP_USER_CONTROL_CODE, *PTCP_USER_CONTROL_CODE;
 
 //
@@ -375,7 +377,7 @@ typedef enum _TCP_USER_CONTROL_CODE {
 //     received.
 //
 // FinWait1 - Represents waiting for a connection termination request from the
-//     remote host, or an acknowledgment of the connection termition request
+//     remote host, or an acknowledgment of the connection termination request
 //     previously sent.
 //
 // FinWait2 - Represents waiting for a connection termination request from the
@@ -429,6 +431,9 @@ Members:
         list.
 
     State - Stores the connection state of the socket.
+
+    PreviousState - Stores the previous state of the socket, to debug where
+        transitions are coming from.
 
     Flags - Stores a bitmask of TCP flags. See TCP_SOCKET_FLAG_* for
         definitions.
@@ -516,7 +521,7 @@ Members:
     Lock - Store a pointer to a queued lock used to synchronize access to
         various parts of the structure.
 
-    ReceivedSegmentList - Stores the head of the list of recieved segments that
+    ReceivedSegmentList - Stores the head of the list of received segments that
         have not yet been read by the user. This list contains objects of type
         TCP_RECEIVED_SEGMENT, and is in order by sequence number.
 
@@ -601,6 +606,7 @@ typedef struct _TCP_SOCKET {
     NET_SOCKET NetSocket;
     LIST_ENTRY ListEntry;
     TCP_STATE State;
+    TCP_STATE PreviousState;
     ULONG Flags;
     LONG TimerReferenceCount;
     ULONG SendInitialSequence;
@@ -805,6 +811,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _TCP_HEADER {
     USHORT SourcePort;
     USHORT DestinationPort;
@@ -816,6 +824,8 @@ typedef struct _TCP_HEADER {
     USHORT Checksum;
     USHORT NonUrgentOffset;
 } PACKED TCP_HEADER, *PTCP_HEADER;
+
+#pragma pack(pop)
 
 //
 // -------------------------------------------------------------------- Globals
@@ -1031,7 +1041,7 @@ NetpTcpTransmissionTimeout (
 
 Routine Description:
 
-    This routine is called when an acknowledge is not recieved for a sent
+    This routine is called when an acknowledge is not received for a sent
     packet in a timely manner (the packet timed out).
 
 Arguments:

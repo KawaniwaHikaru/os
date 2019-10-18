@@ -755,7 +755,7 @@ Author:
 
 #define ATL_RECEIVED_PACKET_FLAG_CHECKSUM_ERROR 0x00100000
 #define ATL_RECEIVED_PACKET_FLAG_802_3_LENGTH_ERROR 0x40000000
-#define ATL_RECIEVED_PACKET_FLAG_VALID 0x80000000
+#define ATL_RECEIVED_PACKET_FLAG_VALID 0x80000000
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -862,6 +862,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _ATL1C_TRANSMIT_DESCRIPTOR {
     USHORT BufferLength;
     USHORT VlanTag;
@@ -918,6 +920,8 @@ Members:
 typedef struct _ATL1C_RECEIVE_SLOT {
     ULONGLONG PhysicalAddress;
 } PACKED ATL1C_RECEIVE_SLOT, *PATL1C_RECEIVE_SLOT;
+
+#pragma pack(pop)
 
 /*++
 
@@ -1000,6 +1004,15 @@ Members:
 
     EepromMacAddress - Stores the default MAC address of the device.
 
+    SupportedCapabilities - Stores the set of capabilities that this device
+        supports. See NET_LINK_CAPABILITY_* for definitions.
+
+    EnabledCapabilities - Stores the currently enabled capabilities on the
+        devices. See NET_LINK_CAPABILITY_* for definitions.
+
+    ConfigurationLock - Stores a queued lock that synchronizes changes to the
+        enabled capabilities field and their supporting hardware registers.
+
 --*/
 
 typedef struct _ATL1C_DEVICE {
@@ -1029,6 +1042,9 @@ typedef struct _ATL1C_DEVICE {
     ATL_SPEED Speed;
     ATL_DUPLEX_MODE Duplex;
     BYTE EepromMacAddress[ETHERNET_ADDRESS_SIZE];
+    ULONG SupportedCapabilities;
+    ULONG EnabledCapabilities;
+    PQUEUED_LOCK ConfigurationLock;
 } ATL1C_DEVICE, *PATL1C_DEVICE;
 
 //

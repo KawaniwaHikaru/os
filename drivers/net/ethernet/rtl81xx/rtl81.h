@@ -351,16 +351,14 @@ Author:
 #define RTL81_RECEIVE_CONFIGURATION_ACCEPT_BROADCAST_PACKETS        (1 << 3)
 #define RTL81_RECEIVE_CONFIGURATION_ACCEPT_MULTICAST_PACKETS        (1 << 2)
 #define RTL81_RECEIVE_CONFIGURATION_ACCEPT_PHYSICAL_MATCH_PACKETS   (1 << 1)
-#define RTL81_RECEIVE_CONFIGURATION_ACCEPT_PHYSICAL_ADDRESS_PACKETS (0 << 1)
+#define RTL81_RECEIVE_CONFIGURATION_ACCEPT_ALL_PHYSICAL_PACKETS     (1 << 0)
 
-#define RTL81_RECEIVE_CONFIGURATION_DEFAULT_OPTIONS             \
-    (RTL81_RECEIVE_CONFIGURATION_ACCEPT_PHYSICAL_MATCH_PACKETS | \
-     RTL81_RECEIVE_CONFIGURATION_ACCEPT_BROADCAST_PACKETS |      \
-     (RTL81_RECEIVE_CONFIGURATION_MAX_DMA_BURST_UNLIMITED <<     \
-      RTL81_RECEIVE_CONFIGURATION_MAX_DMA_BURST_SHIFT) |         \
-     (RTL81_RECEIVE_CONFIGURATION_BUFFER_LENGTH_64K <<           \
-      RTL81_RECEIVE_CONFIGURATION_BUFFER_LENGTH_SHIFT) |         \
-     (RTL81_RECEIVE_CONFIGURATION_FIFO_NO_THRESHOLD <<           \
+#define RTL81_RECEIVE_CONFIGURATION_DEFAULT_OPTIONS          \
+    ((RTL81_RECEIVE_CONFIGURATION_MAX_DMA_BURST_UNLIMITED << \
+      RTL81_RECEIVE_CONFIGURATION_MAX_DMA_BURST_SHIFT) |     \
+     (RTL81_RECEIVE_CONFIGURATION_BUFFER_LENGTH_64K <<       \
+      RTL81_RECEIVE_CONFIGURATION_BUFFER_LENGTH_SHIFT) |     \
+     (RTL81_RECEIVE_CONFIGURATION_FIFO_NO_THRESHOLD <<       \
       RTL81_RECEIVE_CONFIGURATION_FIFO_THRESHOLD_SHIFT))
 
 //
@@ -837,6 +835,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _RTL81_TRANSMIT_DESCRIPTOR {
     ULONG Command;
     ULONG VlanTag;
@@ -866,6 +866,8 @@ typedef struct _RTL81_RECEIVE_DESCRIPTOR {
     ULONG VlanTag;
     ULONGLONG PhysicalAddress;
 } PACKED RTL81_RECEIVE_DESCRIPTOR, *PRTL81_RECEIVE_DESCRIPTOR;
+
+#pragma pack(pop)
 
 /*++
 
@@ -989,11 +991,20 @@ Members:
     ReceiveLock - Stores a queued lock that protects access to the receive
         descriptors.
 
+    ConfigurationLock - Stores a queued lock that synchronizes changes to the
+        enabled capabilities field and their supporting hardware registers.
+
     TransmitInterruptMask - Stores a mask of interrupt status bits that trigger
         the processing of the transmit descriptors.
 
     ReceiveInterruptMask - Stores a mask of interrupt status bits that trigger
         the processing of received frames.
+
+    PciMsiFlags - Stores a bitmask of flags indicating whether or not MSI/MSI-X
+        interrupts should be used. See RTL81_PCI_MSI_FLAG_* for definitions.
+
+    PciMsiInterface - Stores the interface to enable PCI message signaled
+        interrupts.
 
     PendingInterrupts - Stores the bitmask of pending interrupts. See
         RTL81_INTERRUPT_* for definitions.
@@ -1005,10 +1016,14 @@ Members:
     MaxTransmitPacketListCount - Stores the maximum number of packets to remain
         on the list of packets waiting to be sent.
 
-    ChecksumFlags - Stores a bitmask of checksum feature flags. See
-        NET_LINK_CHECKSUM_FLAG_* for definitions. Updates to this flag are
-        protected by the receive lock. There is nothing for the RTL81xx devices
-        to do when the transmit bits change.
+    SupportedCapabilities - Stores the set of capabilities that this device
+        supports. See NET_LINK_CAPABILITY_* for definitions.
+
+    EnabledCapabilities - Stores the currently enabled capabilities on the
+        devices. See NET_LINK_CAPABILITY_* for definitions.
+
+    ReceiveConfiguration - Stores the receive configuration register state to
+        use during a reset. See RTL81_RECEIVE_CONFIGURATION_* for definitions.
 
     LegacyData - Stores the extra data required to transmit and receive packets
         on a legacy device.
@@ -1029,6 +1044,7 @@ typedef struct _RTL81_DEVICE {
     HANDLE InterruptHandle;
     PQUEUED_LOCK TransmitLock;
     PQUEUED_LOCK ReceiveLock;
+    PQUEUED_LOCK ConfigurationLock;
     USHORT TransmitInterruptMask;
     USHORT ReceiveInterruptMask;
     ULONG PciMsiFlags;
@@ -1037,7 +1053,9 @@ typedef struct _RTL81_DEVICE {
     BYTE MacAddress[ETHERNET_ADDRESS_SIZE];
     NET_PACKET_LIST TransmitPacketList;
     ULONG MaxTransmitPacketListCount;
-    ULONG ChecksumFlags;
+    ULONG SupportedCapabilities;
+    ULONG EnabledCapabilities;
+    ULONG ReceiveConfiguration;
     union {
         RTL81_LEGACY_DATA LegacyData;
         RTL81_DEFAULT_DATA DefaultData;

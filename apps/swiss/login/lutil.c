@@ -39,6 +39,8 @@ Environment:
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <paths.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/utsname.h>
@@ -64,6 +66,10 @@ Environment:
 
 #define PASSWORD_ROUNDS_MIN 1000
 #define PASSWORD_ROUNDS_MAX 999999999
+
+#ifndef _PATH_WTMPX
+#define _PATH_WTMPX _PATH_WTMP
+#endif
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -156,7 +162,7 @@ PSTR SwDangerousEnvironmentVariables[] = {
 
 const struct spwd SwShadowTemplate = {
     NULL,
-    "*",
+    "!",
     0,
     0,
     99999,
@@ -479,9 +485,9 @@ Return Value:
 
     NewFileDescriptor = -1;
     for (Stall = 0; Stall < UPDATE_PASSWORD_WAIT; Stall += 1) {
-        NewFileDescriptor = open(AppendedPath,
-                                 O_WRONLY | O_CREAT | O_EXCL,
-                                 S_IRUSR | S_IWUSR);
+        NewFileDescriptor = SwOpen(AppendedPath,
+                                   O_WRONLY | O_CREAT | O_EXCL,
+                                   S_IRUSR | S_IWUSR);
 
         if (NewFileDescriptor >= 0) {
             break;
@@ -753,7 +759,7 @@ Return Value:
         URandom = RandomSource;
 
     } else {
-        URandom = open(URANDOM_PATH, O_RDONLY);
+        URandom = SwOpen(URANDOM_PATH, O_RDONLY, 0);
         if (URandom < 0) {
             SwPrintError(errno, URANDOM_PATH, "Failed to open random source");
             return NULL;
@@ -1452,7 +1458,13 @@ Return Value:
 
     memset(&SystemInformation, 0, sizeof(SystemInformation));
     uname(&SystemInformation);
-    printf("%s login: ", SystemInformation.nodename);
+    if (SystemInformation.nodename[0] == '\0') {
+        printf("login: ");
+
+    } else {
+        printf("%s login: ", SystemInformation.nodename);
+    }
+
     fflush(NULL);
     return;
 }
@@ -1493,23 +1505,7 @@ Return Value:
 {
 
     struct utmpx Copy;
-    int Descriptor;
     struct utmpx *Entry;
-    struct utmp Utmp;
-
-    //
-    // Create the file if it does not exist.
-    //
-
-    if (access(_PATH_UTMPX, R_OK | W_OK) < 0) {
-        Descriptor = open(_PATH_UTMPX,
-                          O_WRONLY | O_CREAT,
-                          S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
-        if (Descriptor >= 0) {
-            close(Descriptor);
-        }
-    }
 
     setutxent();
     while (TRUE) {
@@ -1519,7 +1515,6 @@ Return Value:
         }
 
         if ((Entry->ut_pid == ProcessId) &&
-            (Entry->ut_id[0] != 0) &&
             ((Entry->ut_type == INIT_PROCESS) ||
              (Entry->ut_type == LOGIN_PROCESS) ||
              (Entry->ut_type == USER_PROCESS) ||
@@ -1534,16 +1529,11 @@ Return Value:
     }
 
     if (Entry == NULL) {
-        if (NewType == DEAD_PROCESS) {
-            SwpWriteNewUtmpEntry(ProcessId,
-                                 NewType,
-                                 TerminalName,
-                                 UserName,
-                                 HostName);
-
-        } else {
-            endutxent();
-        }
+        SwpWriteNewUtmpEntry(ProcessId,
+                             NewType,
+                             TerminalName,
+                             UserName,
+                             HostName);
 
     } else {
         memcpy(&Copy, Entry, sizeof(struct utmpx));
@@ -1563,8 +1553,14 @@ Return Value:
         Copy.ut_tv.tv_sec = time(NULL);
         pututxline(&Copy);
         endutxent();
-        getutmp(&Copy, &Utmp);
-        updwtmp(_PATH_WTMP, &Utmp);
+    }
+
+    if ((NewType == USER_PROCESS) || (NewType == DEAD_PROCESS)) {
+        if (NewType == DEAD_PROCESS) {
+            Copy.ut_user[0] = '\0';
+        }
+
+        updwtmpx(_PATH_WTMPX, &Copy);
     }
 
     return;

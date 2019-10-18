@@ -7,6 +7,7 @@
 # Driver = The driver that manages this device or device class.
 #
 
+CAHCI=ahci.drv
 CCharacter=null.drv
 CDisk=part.drv
 CEHCI=ehci.drv
@@ -20,9 +21,11 @@ CSdHostPio=sd.drv
 CSerial16550=ser16550.drv
 CUHCI=uhci.drv
 CUsbBootKeyboard=usbkbd.drv
+CUsbBootMouse=usbmouse.drv
 CUsbCompoundDevice=usbcomp.drv
 CUsbHub=usbhub.drv
 CUsbMassStorage=usbmass.drv
+CAudio=intelhda.drv
 
 DACPI=acpi.drv
 DACPI0007=null.drv
@@ -30,9 +33,11 @@ DAPL0050=pl050.drv
 DBCM0D40=sdbm2709.drv
 DBCM0000=dmab2709.drv
 DBCM0001=bc27gpio.drv
+DBCM0002=bc27pwma.drv
 DDEVREMCHLD=devrem.drv
 DDEVREMROOT=devrem.drv
 DDWC0000=dwhci.drv
+DELAN0000=elani2c.drv
 DGOO0001=goec.drv
 DKTestDevice=ktestdrv.drv
 
@@ -50,6 +55,8 @@ DPNP0C02=null.drv
 DPNP0C04=null.drv
 DPNP0C0F=null.drv
 DPNP0D20=ehci.drv
+DPNP0F03=i8042.drv
+DPNP0F13=i8042.drv
 
 DRKC0001=rk32spi.drv
 DRKC0002=rk32gpio.drv
@@ -68,6 +75,7 @@ DTEX3359=am3soc.drv
 DTEX4004=sdomap4.drv
 DTEX4006=om4gpio.drv
 DUsbRootHub=usbhub.drv
+#DVMW0003=i8042.drv
 
 # PCI device IDs
 DVEN_1013&DEV_00B8=null.drv
@@ -78,11 +86,18 @@ DVEN_8086&DEV_27B8=null.drv
 DVEN_8086&DEV_7113=null.drv
 DVEN_8086&DEV_1209=e100.drv
 DVEN_8086&DEV_1229=e100.drv
+DVEN_8086&DEV_1004=e1000.drv
+DVEN_8086&DEV_100E=e1000.drv
+DVEN_8086&DEV_100F=e1000.drv
+DVEN_8086&DEV_10D3=e1000.drv
+DVEN_8086&DEV_1521=e1000.drv
+DVEN_8086&DEV_1F45=e1000.drv
 DVEN_8086&DEV_1237=null.drv
 DVEN_8086&DEV_27DC=e100.drv
 DVEN_10EC&DEV_8136=rtl81xx.drv
 DVEN_10EC&DEV_8139=rtl81xx.drv
 DVEN_10EC&DEV_8168=rtl81xx.drv
+DVEN_1022&DEV_2000=pcnet32.drv
 
 # USB device IDs
 DVID_0424&PID_EC00=smsc95xx.drv
@@ -90,6 +105,7 @@ DVID_7392&PID_7811=rtlw81xx.drv
 DVID_8619&PID_0650=onering.drv
 DVID_8619&PID_0651=onering.drv
 DVID_8619&PID_0652=onering.drv
+DVID_0E0F&PID_0003_01=usbmouse.drv
 
 Dfull=special.drv
 Dnull=special.drv

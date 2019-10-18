@@ -2,10 +2,9 @@
 
 Copyright (c) 2015 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -48,7 +47,7 @@ Author:
 //
 
 #define _FD_MASK(_FileDescriptor) \
-    (1 << ((_FileDescriptor) % NFDBITS))
+    (1L << ((_FileDescriptor) % NFDBITS))
 
 //
 // This macro clears the bit for the file descriptor in the set.
@@ -77,6 +76,17 @@ Author:
 // This macro initializes the file descriptor set to be empty.
 //
 
+#if __SIZEOF_LONG__ == 8
+
+#define FD_ZERO(_Set)               \
+    do {                            \
+        (_Set)->fds_bits[0] = 0;    \
+        (_Set)->fds_bits[1] = 0;    \
+                                    \
+    } while (0)
+
+#else
+
 #define FD_ZERO(_Set)               \
     do {                            \
         (_Set)->fds_bits[0] = 0;    \
@@ -85,6 +95,8 @@ Author:
         (_Set)->fds_bits[3] = 0;    \
                                     \
     } while (0)
+
+#endif
 
 //
 // ---------------------------------------------------------------- Definitions

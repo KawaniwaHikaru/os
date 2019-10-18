@@ -69,7 +69,7 @@ Environment:
     "  -u file -- The file exists and has its set-user-ID flag set.\n"         \
     "  -w file -- The file exists and is writable.\n"                          \
     "  -x file -- The file exists and is executable.\n"                        \
-    "  file1 -fe file2 -- True if file1 and file2 have the same device and \n" \
+    "  file1 -ef file2 -- True if file1 and file2 have the same device and \n" \
     "      file serial numbers.\n"                                             \
     "  file1 -nt file2 -- True if file1 has a later modification date than \n" \
     "      file2.\n"                                                           \
@@ -1522,6 +1522,23 @@ Return Value:
                 (LeftStat.st_ino == RightStat.st_ino)) {
 
                 ReturnValue = TEST_UTILITY_TRUE;
+
+                //
+                // MinGW's inodes always return zero. Compare the other fields
+                // for equality. This isn't perfect as 1) files can
+                // accidentally match on these fields and 2) files can change
+                // in between the two stats, but what else can be done really.
+                //
+
+                if (LeftStat.st_ino == 0) {
+                    if ((LeftStat.st_size != RightStat.st_size) ||
+                        (LeftStat.st_mtime != RightStat.st_mtime) ||
+                        (LeftStat.st_ctime != RightStat.st_ctime) ||
+                        (LeftStat.st_mode != RightStat.st_mode)) {
+
+                        ReturnValue = TEST_UTILITY_FALSE;
+                    }
+                }
             }
 
             break;

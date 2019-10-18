@@ -42,6 +42,7 @@ Environment:
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 //
 // --------------------------------------------------------------------- Macros
@@ -217,6 +218,7 @@ DbgpStabsGetFramePointerRegister (
 DEBUG_SYMBOL_INTERFACE DbgStabsSymbolInterface = {
     DbgpStabsLoadSymbols,
     DbgpStabsUnloadSymbols,
+    NULL,
     NULL,
     NULL,
     NULL
@@ -673,6 +675,8 @@ Return Value:
                 FREE(LocalVariable);
                 CurrentLocalEntry = NextLocalEntry;
             }
+
+            assert(LIST_EMPTY(&(Function->FunctionsHead)));
 
             NextFunctionEntry = CurrentFunctionEntry->Next;
             FREE(Function);
@@ -3192,6 +3196,7 @@ Return Value:
     memset(NewFunction, 0, sizeof(FUNCTION_SYMBOL));
     INITIALIZE_LIST_HEAD(&(NewFunction->ParametersHead));
     INITIALIZE_LIST_HEAD(&(NewFunction->LocalsHead));
+    INITIALIZE_LIST_HEAD(&(NewFunction->FunctionsHead));
     NewFunction->Name = Name;
 
     //
@@ -3986,14 +3991,13 @@ Return Value:
 
 {
 
-    INT CurrentPosition;
-    LONG FileSize;
+    struct stat Stat;
 
-    CurrentPosition = ftell(File);
-    fseek(File, 0, SEEK_END);
-    FileSize = ftell(File);
-    fseek(File, CurrentPosition, SEEK_SET);
-    return FileSize;
+    if (fstat(fileno(File), &Stat) != 0) {
+        return -1;
+    }
+
+    return Stat.st_size;
 }
 
 ULONG
@@ -4024,6 +4028,9 @@ Return Value:
 
     if (Symbols->Machine == ImageMachineTypeX86) {
         return X86RegisterEbp;
+
+    } else if (Symbols->Machine == ImageMachineTypeX64) {
+        return X64RegisterRbp;
 
     } else if (Symbols->Machine == ImageMachineTypeArm32) {
         ParseState = Symbols->SymbolContext;

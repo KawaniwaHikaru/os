@@ -313,6 +313,15 @@ Return Value:
         goto CreateInterruptControllerEnd;
     }
 
+    //
+    // Now that it's all ready to go, initialize the controller.
+    //
+
+    Status = HlpInterruptInitializeController(Controller);
+    if (!KSUCCESS(Status)) {
+        goto CreateInterruptControllerEnd;
+    }
+
     ResultingInformation->Controller = Controller;
     ResultingInformation->StartingGsi = Gsi;
     ResultingInformation->LineCount = LineCount;
@@ -913,6 +922,15 @@ Return Value:
 {
 
     KSTATUS Status;
+
+    //
+    // Not all interrupts have a valid line. For example, MSI-based interrupts
+    // do not have an interrupt line.
+    //
+
+    if (Interrupt->Line.Type == InterruptLineInvalid) {
+        return;
+    }
 
     HlpInterruptAcquireLock();
     Status = HlpInterruptSetLineState(&(Interrupt->Line),

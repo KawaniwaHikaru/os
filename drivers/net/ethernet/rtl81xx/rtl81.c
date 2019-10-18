@@ -127,6 +127,7 @@ UUID Rtl81PciMsiInterfaceUuid = UUID_PCI_MESSAGE_SIGNALED_INTERRUPTS;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -517,7 +518,7 @@ Return Value:
     Properties.DataLinkType = NetDomainEthernet;
     Properties.MaxPhysicalAddress = MAX_ULONG;
     Properties.PhysicalAddress.Domain = NetDomainEthernet;
-    Properties.ChecksumFlags = Device->ChecksumFlags;
+    Properties.Capabilities = Device->SupportedCapabilities;
     RtlCopyMemory(&(Properties.PhysicalAddress.Address),
                   &(Device->MacAddress),
                   sizeof(Device->MacAddress));

@@ -419,7 +419,12 @@ TestHeaps (
     );
 
 ULONG
-TestSoftFloat (
+TestSoftFloatSingle (
+    VOID
+    );
+
+ULONG
+TestSoftFloatDouble (
     VOID
     );
 
@@ -590,7 +595,8 @@ Return Value:
 
     srand(time(NULL));
     TestsFailed = 0;
-    TestsFailed += TestSoftFloat();
+    TestsFailed += TestSoftFloatSingle();
+    TestsFailed += TestSoftFloatDouble();
     TestsFailed += TestTime();
     TestsFailed += TestHeaps(TRUE);
 
@@ -705,7 +711,7 @@ Return Value:
         printf("Error: Print basic string with NULL output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(BASIC_STRING) + 1);
+               (long)strlen(BASIC_STRING) + 1);
 
         TestsFailed += 1;
     }
@@ -723,7 +729,7 @@ Return Value:
         printf("Error: Print basic string with no output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(BASIC_STRING) + 1);
+               (long)strlen(BASIC_STRING) + 1);
 
         TestsFailed += 1;
     }
@@ -749,7 +755,7 @@ Return Value:
         printf("Error: Print formatted string with no output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(FORMATTED_STRING_RESULT) + 1);
+               (long)strlen(FORMATTED_STRING_RESULT) + 1);
 
         TestsFailed += 1;
     }
@@ -763,7 +769,7 @@ Return Value:
         printf("Error: Print formatted string with output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(FORMATTED_STRING_RESULT) + 1);
+               (long)strlen(FORMATTED_STRING_RESULT) + 1);
 
         TestsFailed += 1;
     }
@@ -808,7 +814,7 @@ Return Value:
         printf("Error: Print formatted string with output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(FORMATTED_STRING_POSITIONAL_RESULT) + 1);
+               (long)strlen(FORMATTED_STRING_POSITIONAL_RESULT) + 1);
 
         TestsFailed += 1;
     }
@@ -857,7 +863,7 @@ Return Value:
         printf("Error: Print float string with output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(PRINT_FLOAT_RESULT) + 1);
+               (long)strlen(PRINT_FLOAT_RESULT) + 1);
 
         TestsFailed += 1;
     }
@@ -885,7 +891,7 @@ Return Value:
         printf("Error: Print hex float string with output returned output "
                "length of %d, should have been %lu.\n",
                StringLength,
-               strlen(PRINT_HEX_FLOAT_RESULT) + 1);
+               (long)strlen(PRINT_HEX_FLOAT_RESULT) + 1);
 
         TestsFailed += 1;
     }
@@ -3404,7 +3410,7 @@ Return Value:
 
 VOID
 KdPrintWithArgumentList (
-    PSTR Format,
+    PCSTR Format,
     va_list ArgumentList
     )
 

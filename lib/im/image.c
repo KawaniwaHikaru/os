@@ -31,24 +31,11 @@ Environment:
 //
 
 #include "imp.h"
-#include "pe.h"
 #include "elf.h"
 
 //
 // --------------------------------------------------------------------- Macros
 //
-
-//
-// This macro subtracts a value from a pointer.
-//
-
-#define POINTER_SUBTRACT(_Pointer, _Value) (PVOID)((UINTN)(_Pointer) - (_Value))
-
-//
-// This macro adds a value to a pointer.
-//
-
-#define POINTER_ADD(_Pointer, _Value) (PVOID)((UINTN)(_Pointer) + (_Value))
 
 //
 // ---------------------------------------------------------------- Definitions
@@ -68,67 +55,6 @@ ImpOpenLibrary (
     PSTR *Path
     );
 
-KSTATUS
-ImpGetImageSize (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Image,
-    PIMAGE_BUFFER Buffer,
-    PSTR *InterpreterPath
-    );
-
-KSTATUS
-ImpLoadImage (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Image,
-    PIMAGE_BUFFER Buffer
-    );
-
-KSTATUS
-ImpAddImage (
-    PIMAGE_BUFFER ImageBuffer,
-    PLOADED_IMAGE Image
-    );
-
-KSTATUS
-ImpOpenImport (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Parent,
-    PVOID SystemContext,
-    PCSTR BinaryName,
-    PIMAGE_FILE_INFORMATION File,
-    PSTR *Path
-    );
-
-VOID
-ImpUnloadImage (
-    PLOADED_IMAGE Image
-    );
-
-KSTATUS
-ImpGetSymbolByName (
-    PLOADED_IMAGE Image,
-    PSTR SymbolName,
-    ULONG RecursionLevel,
-    ULONG VisitMarker,
-    PIMAGE_SYMBOL Symbol
-    );
-
-KSTATUS
-ImpGetSymbolByAddress (
-    PLOADED_IMAGE Image,
-    PVOID Address,
-    ULONG RecursionLevel,
-    ULONG VisitMarker,
-    PIMAGE_SYMBOL Symbol
-    );
-
-VOID
-ImpRelocateSelf (
-    PIMAGE_BUFFER Buffer,
-    PIM_RESOLVE_PLT_ENTRY PltResolver,
-    PLOADED_IMAGE Image
-    );
-
 PLOADED_IMAGE
 ImpFindImageByLibraryName (
     PLIST_ENTRY ListHead,
@@ -146,6 +72,12 @@ ImpAllocateImage (
     VOID
     );
 
+KSTATUS
+ImpAppendToScope (
+    PLOADED_IMAGE Image,
+    PLOADED_IMAGE Element
+    );
+
 //
 // ------------------------------------------------------ Data Type Definitions
 //
@@ -161,10 +93,10 @@ ImpAllocateImage (
 PIM_IMPORT_TABLE ImImportTable = NULL;
 
 //
-// Store the last visit marker.
+// Store a pointer to the primary executable, the root of the global scope.
 //
 
-UCHAR ImLastVisitMarker;
+PLOADED_IMAGE ImPrimaryExecutable = NULL;
 
 //
 // ------------------------------------------------------------------ Functions
@@ -473,32 +405,7 @@ Return Value:
 
 {
 
-    PLOADED_IMAGE FirstImage;
-    KSTATUS Status;
-
-    if (LIST_EMPTY(ListHead)) {
-        return STATUS_SUCCESS;
-    }
-
-    FirstImage = LIST_VALUE(ListHead->Next, LOADED_IMAGE, ListEntry);
-    switch (FirstImage->Format) {
-    case ImagePe32:
-        Status = STATUS_SUCCESS;
-        break;
-
-    case ImageElf32:
-        Status = ImpElf32LoadAllImports(ListHead);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        Status = STATUS_FILE_CORRUPT;
-        break;
-    }
-
-    return Status;
+    return ImpLoadImports(ListHead);
 }
 
 KSTATUS
@@ -526,32 +433,7 @@ Return Value:
 
 {
 
-    PLOADED_IMAGE FirstImage;
-    KSTATUS Status;
-
-    if (LIST_EMPTY(ListHead)) {
-        return STATUS_SUCCESS;
-    }
-
-    FirstImage = LIST_VALUE(ListHead->Next, LOADED_IMAGE, ListEntry);
-    switch (FirstImage->Format) {
-    case ImagePe32:
-        Status = STATUS_SUCCESS;
-        break;
-
-    case ImageElf32:
-        Status = ImpElf32RelocateImages(ListHead);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        Status = STATUS_FILE_CORRUPT;
-        break;
-    }
-
-    return Status;
+    return ImpRelocateImages(ListHead);
 }
 
 VOID
@@ -630,220 +512,19 @@ Return Value:
         ImFreeMemory(Image->FileName);
     }
 
+    if (Image->Scope != NULL) {
+        ImFreeMemory(Image->Scope);
+    }
+
     ImFreeMemory(Image);
     return;
-}
-
-KSTATUS
-ImGetImageInformation (
-    PIMAGE_BUFFER Buffer,
-    PIMAGE_INFORMATION Information
-    )
-
-/*++
-
-Routine Description:
-
-    This routine gets various pieces of information about an image. This is the
-    generic form that can get information from any supported image type.
-
-Arguments:
-
-    Buffer - Supplies a pointer to the image buffer.
-
-    Information - Supplies a pointer to the information structure that will be
-        filled out by this function. It is assumed the memory pointed to here
-        is valid.
-
-Return Value:
-
-    STATUS_SUCCESS on success.
-
-    STATUS_UNKNOWN_IMAGE_FORMAT if the image is unknown or corrupt.
-
---*/
-
-{
-
-    LOADED_IMAGE Image;
-    BOOL IsPeImage;
-    PIMAGE_NT_HEADERS PeHeaders;
-    KSTATUS Status;
-
-    Status = STATUS_UNKNOWN_IMAGE_FORMAT;
-    RtlZeroMemory(Information, sizeof(IMAGE_INFORMATION));
-
-    //
-    // Attempt to get image information for a PE image.
-    //
-
-    IsPeImage = ImpPeGetHeaders(Buffer, &PeHeaders);
-    if (IsPeImage != FALSE) {
-        Information->Format = ImagePe32;
-        Information->ImageBase = PeHeaders->OptionalHeader.ImageBase;
-        if (PeHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_I386) {
-            Information->Machine = ImageMachineTypeX86;
-
-        } else if (PeHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_ARMT) {
-            Information->Machine = ImageMachineTypeArm32;
-
-        } else {
-            Information->Machine = ImageMachineTypeUnknown;
-        }
-
-        Information->EntryPoint = PeHeaders->OptionalHeader.AddressOfEntryPoint;
-        Status = STATUS_SUCCESS;
-        goto GetImageInformationEnd;
-    }
-
-    RtlZeroMemory(&Image, sizeof(LOADED_IMAGE));
-    Status = ImpElf32GetImageSize(NULL, &Image, Buffer, NULL);
-    if (KSUCCESS(Status)) {
-        Information->Format = Image.Format;
-        Information->Machine = Image.Machine;
-        Information->EntryPoint = (UINTN)(Image.EntryPoint);
-        Information->ImageBase = (UINTN)(Image.PreferredLowestAddress);
-        goto GetImageInformationEnd;
-    }
-
-GetImageInformationEnd:
-    return Status;
-}
-
-BOOL
-ImGetImageSection (
-    PIMAGE_BUFFER Buffer,
-    PSTR SectionName,
-    PVOID *Section,
-    PULONGLONG VirtualAddress,
-    PULONG SectionSizeInFile,
-    PULONG SectionSizeInMemory
-    )
-
-/*++
-
-Routine Description:
-
-    This routine gets a pointer to the given section in a PE image given a
-    memory mapped file.
-
-Arguments:
-
-    Buffer - Supplies a pointer to the image buffer.
-
-    SectionName - Supplies the name of the desired section.
-
-    Section - Supplies a pointer where the pointer to the section will be
-        returned.
-
-    VirtualAddress - Supplies a pointer where the virtual address of the section
-        will be returned, if applicable.
-
-    SectionSizeInFile - Supplies a pointer where the size of the section as it
-        appears in the file will be returned.
-
-    SectionSizeInMemory - Supplies a pointer where the size of the section as it
-        appears after being loaded in memory will be returned.
-
-Return Value:
-
-    TRUE on success.
-
-    FALSE otherwise.
-
---*/
-
-{
-
-    IMAGE_FORMAT Format;
-
-    Format = ImGetImageFormat(Buffer);
-    switch (Format) {
-    case ImagePe32:
-        return ImpPeGetSection(Buffer,
-                               SectionName,
-                               Section,
-                               VirtualAddress,
-                               SectionSizeInFile,
-                               SectionSizeInMemory);
-
-    case ImageElf32:
-        return ImpElf32GetSection(Buffer,
-                                  SectionName,
-                                  Section,
-                                  VirtualAddress,
-                                  SectionSizeInFile,
-                                  SectionSizeInMemory);
-
-    default:
-        break;
-    }
-
-    //
-    // The image format is unknown or invalid.
-    //
-
-    return FALSE;
-}
-
-IMAGE_FORMAT
-ImGetImageFormat (
-    PIMAGE_BUFFER Buffer
-    )
-
-/*++
-
-Routine Description:
-
-    This routine determines the file format for an image mapped in memory.
-
-Arguments:
-
-    Buffer - Supplies a pointer to the image buffer to determine the type of.
-
-Return Value:
-
-    Returns the file format of the image.
-
---*/
-
-{
-
-    PELF32_HEADER ElfHeader;
-    BOOL IsElfImage;
-    BOOL IsPeImage;
-    PIMAGE_NT_HEADERS PeHeaders;
-
-    //
-    // Attempt to get the ELF image header.
-    //
-
-    IsElfImage = ImpElf32GetHeader(Buffer, &ElfHeader);
-    if (IsElfImage != FALSE) {
-        return ImageElf32;
-    }
-
-    //
-    // Attempt to get the PE image headers.
-    //
-
-    IsPeImage = ImpPeGetHeaders(Buffer, &PeHeaders);
-    if (IsPeImage != FALSE) {
-        return ImagePe32;
-    }
-
-    //
-    // Unknown image format.
-    //
-
-    return ImageUnknownFormat;
 }
 
 KSTATUS
 ImGetSymbolByName (
     PLOADED_IMAGE Image,
     PSTR SymbolName,
-    BOOL Recursive,
+    PLOADED_IMAGE Skip,
     PIMAGE_SYMBOL Symbol
     )
 
@@ -862,8 +543,7 @@ Arguments:
     SymbolName - Supplies a pointer to the string containing the name of the
         symbol to search for.
 
-    Recursive - Supplies a boolean indicating if the routine should recurse
-        into imports or just query this binary.
+    Skip - Supplies an optional pointer to an image to skip when searching.
 
     Symbol - Supplies a pointer to a structure that receives the symbol's
         information on success.
@@ -876,36 +556,62 @@ Return Value:
 
 {
 
-    ULONG RecursionLevel;
     KSTATUS Status;
-    UCHAR VisitMarker;
 
-    //
-    // Get a new visitor generation number. This means only one thread can be
-    // in here at a time.
-    //
+    Status = ImpGetSymbolByName(Image, SymbolName, Skip, Symbol);
+    return Status;
+}
 
-    ImLastVisitMarker += 1;
-    VisitMarker = ImLastVisitMarker;
-    RecursionLevel = 0;
-    if (Recursive == FALSE) {
-        RecursionLevel = MAX_IMPORT_RECURSION_DEPTH;
+PLOADED_IMAGE
+ImGetImageByAddress (
+    PLIST_ENTRY ListHead,
+    PVOID Address
+    )
+
+/*++
+
+Routine Description:
+
+    This routine attempts to find the image that covers the given address.
+
+Arguments:
+
+    ListHead - Supplies the list of loaded images.
+
+    Address - Supplies the address to search for.
+
+Return Value:
+
+    Returns a pointer to an image covering the given address on success.
+
+    NULL if no loaded image covers the given address.
+
+--*/
+
+{
+
+    PLIST_ENTRY CurrentEntry;
+    PLOADED_IMAGE Image;
+    PVOID Start;
+
+    CurrentEntry = ListHead->Next;
+    while (CurrentEntry != ListHead) {
+        Image = LIST_VALUE(CurrentEntry, LOADED_IMAGE, ListEntry);
+        Start = Image->PreferredLowestAddress + Image->BaseDifference;
+        if ((Address >= Start) && (Address < Start + Image->Size)) {
+            return Image;
+        }
+
+        CurrentEntry = CurrentEntry->Next;
     }
 
-    Status = ImpGetSymbolByName(Image,
-                                SymbolName,
-                                RecursionLevel,
-                                VisitMarker,
-                                Symbol);
-
-    return Status;
+    return NULL;
 }
 
 KSTATUS
 ImGetSymbolByAddress (
     PLOADED_IMAGE Image,
     PVOID Address,
-    BOOL Recursive,
     PIMAGE_SYMBOL Symbol
     )
 
@@ -913,18 +619,13 @@ ImGetSymbolByAddress (
 
 Routine Description:
 
-    This routine attempts to resolve the given address into a symbol. This
-    routine also looks through the image imports if the recursive flag is
-    specified.
+    This routine attempts to resolve the given address into a symbol.
 
 Arguments:
 
     Image - Supplies a pointer to the image to query.
 
     Address - Supplies the address to search for.
-
-    Recursive - Supplies a boolean indicating if the routine should recurse
-        into imports or just query this binary.
 
     Symbol - Supplies a pointer to a structure that receives the address's
         symbol information on success.
@@ -937,29 +638,7 @@ Return Value:
 
 {
 
-    ULONG RecursionLevel;
-    KSTATUS Status;
-    UCHAR VisitMarker;
-
-    //
-    // Toggle between two values that are not the default. This means only one
-    // thread can be in here at a time.
-    //
-
-    ImLastVisitMarker += 1;
-    VisitMarker = ImLastVisitMarker;
-    RecursionLevel = 0;
-    if (Recursive == FALSE) {
-        RecursionLevel = MAX_IMPORT_RECURSION_DEPTH;
-    }
-
-    Status = ImpGetSymbolByAddress(Image,
-                                   Address,
-                                   RecursionLevel,
-                                   VisitMarker,
-                                   Symbol);
-
-    return Status;
+    return ImpGetSymbolByAddress(Image, Address, Symbol);
 }
 
 VOID
@@ -1003,7 +682,6 @@ Return Value:
 
 PVOID
 ImResolvePltEntry (
-    PLIST_ENTRY ListHead,
     PLOADED_IMAGE Image,
     UINTN RelocationOffset
     )
@@ -1019,9 +697,6 @@ Routine Description:
     relocation and returns a pointer to the function to jump to.
 
 Arguments:
-
-    ListHead - Supplies a pointer to the head of the list of images to use for
-        symbol resolution.
 
     Image - Supplies a pointer to the loaded image whose PLT needs resolution.
         This is really whatever pointer is in GOT + 4.
@@ -1039,25 +714,7 @@ Return Value:
 
 {
 
-    PVOID FunctionAddress;
-
-    switch (Image->Format) {
-    case ImageElf32:
-        FunctionAddress = ImpElf32ResolvePltEntry(ListHead,
-                                                  Image,
-                                                  RelocationOffset);
-
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        FunctionAddress = NULL;
-        break;
-    }
-
-    return FunctionAddress;
+    return ImpResolvePltEntry(Image, RelocationOffset);
 }
 
 PVOID
@@ -1209,6 +866,7 @@ Return Value:
     PLOADED_IMAGE InterpreterImage;
     PSTR InterpreterPath;
     IMAGE_BUFFER LocalImageBuffer;
+    PLOADED_IMAGE OpenParent;
     KSTATUS Status;
 
     Image = NULL;
@@ -1235,7 +893,7 @@ Return Value:
 
         ASSERT((Flags & IMAGE_LOAD_FLAG_PRIMARY_EXECUTABLE) == 0);
 
-        Image = ImpGetPrimaryExecutable(ListHead);
+        Image = ImPrimaryExecutable;
         if (Image == NULL) {
             Status = STATUS_NOT_READY;
             goto LoadEnd;
@@ -1304,8 +962,21 @@ Return Value:
         RtlCopyMemory(Image->FileName, BinaryName, BinaryNameLength + 1);
 
     } else {
+
+        //
+        // A dynamically loaded library typically doesn't have a parent, but
+        // should be located as if the primary executable were its parent.
+        //
+
+        OpenParent = Parent;
+        if ((Parent == NULL) &&
+            ((Flags & IMAGE_LOAD_FLAG_DYNAMIC_LIBRARY) != 0)) {
+
+            OpenParent = ImPrimaryExecutable;
+        }
+
         Status = ImpOpenLibrary(ListHead,
-                                Parent,
+                                OpenParent,
                                 SystemContext,
                                 BinaryName,
                                 &(Image->File),
@@ -1490,50 +1161,70 @@ LoadEnd:
     return Status;
 }
 
-PLOADED_IMAGE
-ImpGetPrimaryExecutable (
-    PLIST_ENTRY ListHead
+KSTATUS
+ImpAddImageToScope (
+    PLOADED_IMAGE Parent,
+    PLOADED_IMAGE Child
     )
 
 /*++
 
 Routine Description:
 
-    This routine returns the primary executable in the list, if there is one.
+    This routine appends a breadth first traversal of the child's dependencies
+    to the image scope.
 
 Arguments:
 
-    ListHead - Supplies a pointer to the head of the list of loaded images.
+    Parent - Supplies a pointer to the innermost scope to add the child to.
+
+    Child - Supplies a pointer to the child to add to the scope. This is often
+        the parent itself.
 
 Return Value:
 
-    Returns a pointer to the primary executable if it exists. This routine does
-    not add a reference on the image.
+    STATUS_SUCCESS on success.
 
-    NULL if no primary executable is currently loaded in the list.
+    STATUS_INSUFFICIENT_RESOURCES if there was an allocation failure.
 
 --*/
 
 {
 
-    PLIST_ENTRY CurrentEntry;
-    PLOADED_IMAGE Image;
+    UINTN ImportCount;
+    UINTN ImportIndex;
+    UINTN Index;
+    KSTATUS Status;
 
-    if (ListHead == NULL) {
-        return NULL;
+    //
+    // Add the child itself.
+    //
+
+    Index = Parent->ScopeSize;
+    Status = ImpAppendToScope(Parent, Child);
+    if (!KSUCCESS(Status)) {
+        return Status;
     }
 
-    CurrentEntry = ListHead->Next;
-    while (CurrentEntry != ListHead) {
-        Image = LIST_VALUE(CurrentEntry, LOADED_IMAGE, ListEntry);
-        if ((Image->LoadFlags & IMAGE_LOAD_FLAG_PRIMARY_EXECUTABLE) != 0) {
-            return Image;
+    //
+    // Now process all the newly added images adding their dependencies until
+    // there are none left.
+    //
+
+    while (Index < Parent->ScopeSize) {
+        Child = Parent->Scope[Index];
+        ImportCount = Child->ImportCount;
+        for (ImportIndex = 0; ImportIndex < ImportCount; ImportIndex += 1) {
+            Status = ImpAppendToScope(Parent, Child->Imports[ImportIndex]);
+            if (!KSUCCESS(Status)) {
+                return Status;
+            }
         }
 
-        CurrentEntry = CurrentEntry->Next;
+        Index += 1;
     }
 
-    return NULL;
+    return STATUS_SUCCESS;
 }
 
 //
@@ -1572,8 +1263,6 @@ Arguments:
     File - Supplies a pointer where the information for the file including its
         open handle will be returned.
 
-    Image - Supplies a pointer where an existing image may be returned.
-
     Path - Supplies a pointer where the real path to the opened file will be
         returned. The caller is responsible for freeing this memory.
 
@@ -1587,10 +1276,6 @@ Return Value:
 
     ULONG NameLength;
     KSTATUS Status;
-
-    if (Parent == NULL) {
-        Parent = ImpGetPrimaryExecutable(ListHead);
-    }
 
     //
     // If this is an executable being loaded for the first time, just try to
@@ -1621,493 +1306,13 @@ Return Value:
         }
 
     } else {
-        Status = ImpOpenImport(ListHead,
-                               Parent,
-                               SystemContext,
-                               BinaryName,
-                               File,
-                               Path);
+
+        ASSERT(Parent->SystemContext == SystemContext);
+
+        Status = ImpOpenImport(ListHead, Parent, BinaryName, File, Path);
     }
 
     return Status;
-}
-
-KSTATUS
-ImpGetImageSize (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Image,
-    PIMAGE_BUFFER Buffer,
-    PSTR *InterpreterPath
-    )
-
-/*++
-
-Routine Description:
-
-    This routine determines the expanded image size and preferred image
-    virtual address and stores that in the loaded image structure.
-
-Arguments:
-
-    ListHead - Supplies a pointer to the head of the list of loaded images.
-
-    Image - Supplies a pointer to the loaded image structure. The format
-        memeber is the only member that is required to be initialized.
-
-    Buffer - Supplies a pointer to the loaded image buffer.
-
-    InterpreterPath - Supplies a pointer where the interpreter name will be
-        returned if the program is requesting an interpreter.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    KSTATUS Status;
-
-    switch (Image->Format) {
-    case ImagePe32:
-        Status = STATUS_NOT_SUPPORTED;
-        break;
-
-    case ImageElf32:
-        Status = ImpElf32GetImageSize(ListHead, Image, Buffer, InterpreterPath);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        Status = STATUS_INVALID_CONFIGURATION;
-        break;
-    }
-
-    return Status;
-}
-
-KSTATUS
-ImpLoadImage (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Image,
-    PIMAGE_BUFFER Buffer
-    )
-
-/*++
-
-Routine Description:
-
-    This routine loads an executable image into virtual memory.
-
-Arguments:
-
-    ListHead - Supplies a pointer to the head of the list of loaded images.
-
-    Image - Supplies a pointer to the loaded image. This must be partially
-        filled out. Notable fields that must be filled out by the caller
-        include the loaded virtual address and image size. This routine will
-        fill out many other fields.
-
-    Buffer - Supplies a pointer to the image file buffer.
-
-Return Value:
-
-    STATUS_SUCCESS on success.
-
-    STATUS_FILE_CORRUPT if the file headers were corrupt or unexpected.
-
-    Other errors on failure.
-
---*/
-
-{
-
-    KSTATUS Status;
-
-    switch (Image->Format) {
-    case ImagePe32:
-        Status = STATUS_NOT_SUPPORTED;
-        break;
-
-    case ImageElf32:
-        Status = ImpElf32LoadImage(ListHead, Image, Buffer);
-        break;
-
-    default:
-        Status = STATUS_UNKNOWN_IMAGE_FORMAT;
-        break;
-    }
-
-    return Status;
-}
-
-KSTATUS
-ImpAddImage (
-    PIMAGE_BUFFER ImageBuffer,
-    PLOADED_IMAGE Image
-    )
-
-/*++
-
-Routine Description:
-
-    This routine adds the accounting structures for an image that has already
-    been loaded into memory.
-
-Arguments:
-
-    ImageBuffer - Supplies a pointer to the loaded image buffer.
-
-    Image - Supplies a pointer to the image to initialize.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    KSTATUS Status;
-
-    switch (Image->Format) {
-    case ImageElf32:
-        Status = ImpElf32AddImage(ImageBuffer, Image);
-        break;
-
-    default:
-        Status = STATUS_UNKNOWN_IMAGE_FORMAT;
-        break;
-    }
-
-    return Status;
-}
-
-KSTATUS
-ImpOpenImport (
-    PLIST_ENTRY ListHead,
-    PLOADED_IMAGE Parent,
-    PVOID SystemContext,
-    PCSTR BinaryName,
-    PIMAGE_FILE_INFORMATION File,
-    PSTR *Path
-    )
-
-/*++
-
-Routine Description:
-
-    This routine attempts to open a file.
-
-Arguments:
-
-    ListHead - Supplies an optional pointer to the head of the list of loaded
-        images.
-
-    Parent - Supplies an optional pointer to the parent image requiring this
-        image for load.
-
-    SystemContext - Supplies the context pointer passed to the load executable
-        function.
-
-    BinaryName - Supplies the name of the executable image to open.
-
-    File - Supplies a pointer where the information for the file including its
-        open handle will be returned.
-
-    Image - Supplies a pointer where an existing image may be returned.
-
-    Path - Supplies a pointer where the real path to the opened file will be
-        returned. The caller is responsible for freeing this memory.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    KSTATUS Status;
-
-    ASSERT(Parent->SystemContext == SystemContext);
-
-    switch (Parent->Format) {
-    case ImageElf32:
-        Status = ImpElf32OpenLibrary(ListHead, Parent, BinaryName, File, Path);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        Status = STATUS_INVALID_CONFIGURATION;
-        break;
-    }
-
-    return Status;
-}
-
-VOID
-ImpUnloadImage (
-    PLOADED_IMAGE Image
-    )
-
-/*++
-
-Routine Description:
-
-    This routine unloads an executable image from virtual memory.
-
-Arguments:
-
-    Image - Supplies a pointer to the loaded image.
-
-Return Value:
-
-    None.
-
---*/
-
-{
-
-    switch (Image->Format) {
-    case ImageElf32:
-        ImpElf32UnloadImage(Image);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        break;
-    }
-
-    return;
-}
-
-KSTATUS
-ImpGetSymbolByName (
-    PLOADED_IMAGE Image,
-    PSTR SymbolName,
-    ULONG RecursionLevel,
-    ULONG VisitMarker,
-    PIMAGE_SYMBOL Symbol
-    )
-
-/*++
-
-Routine Description:
-
-    This routine attempts to find an exported symbol with the given name in the
-    given binary. This routine also looks through the image imports if the
-    recursive level is not greater than or equal to the maximum import
-    recursion depth.
-
-Arguments:
-
-    Image - Supplies a pointer to the image to query.
-
-    SymbolName - Supplies a pointer to the string containing the name of the
-        symbol to search for.
-
-    RecursionLevel - Supplies the current level of recursion.
-
-    VisitMarker - Supplies the value that images are marked with to indicate
-        they've been visited in this trip already.
-
-    Symbol - Supplies a pointer to a structure that receives the symbol's
-        information on success.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    PLOADED_IMAGE Import;
-    ULONG ImportIndex;
-    KSTATUS Status;
-
-    if (Image == NULL) {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    switch (Image->Format) {
-    case ImageElf32:
-        Status = ImpElf32GetSymbolByName(Image, SymbolName, Symbol);
-        break;
-
-    default:
-        Status = STATUS_UNKNOWN_IMAGE_FORMAT;
-        break;
-    }
-
-    if ((Status != STATUS_NOT_FOUND) ||
-        (RecursionLevel >= MAX_IMPORT_RECURSION_DEPTH)) {
-
-        return Status;
-    }
-
-    Image->VisitMarker = VisitMarker;
-    for (ImportIndex = 0; ImportIndex < Image->ImportCount; ImportIndex += 1) {
-        Import = Image->Imports[ImportIndex];
-        if ((Import != NULL) && (Import->VisitMarker != VisitMarker)) {
-            Status = ImpGetSymbolByName(Import,
-                                        SymbolName,
-                                        RecursionLevel + 1,
-                                        VisitMarker,
-                                        Symbol);
-
-            if (Status != STATUS_NOT_FOUND) {
-                return Status;
-            }
-        }
-    }
-
-    //
-    // The image format is unknown or invalid.
-    //
-
-    return Status;
-}
-
-KSTATUS
-ImpGetSymbolByAddress (
-    PLOADED_IMAGE Image,
-    PVOID Address,
-    ULONG RecursionLevel,
-    ULONG VisitMarker,
-    PIMAGE_SYMBOL Symbol
-    )
-
-/*++
-
-Routine Description:
-
-    This routine attempts to resolve the given address into a symbol. This
-    routine also looks through the image imports if the recursive level is not
-    greater than or equal to the maximum import recursion depth.
-
-Arguments:
-
-    Image - Supplies a pointer to the image to query.
-
-    Address - Supplies the address to search for.
-
-    RecursionLevel - Supplies the current level of recursion.
-
-    VisitMarker - Supplies the value that images are marked with to indicate
-        they've been visited in this trip already.
-
-    Symbol - Supplies a pointer to a structure that receives the address's
-        symbol information on success.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    PLOADED_IMAGE Import;
-    ULONG ImportIndex;
-    KSTATUS Status;
-
-    if (Image == NULL) {
-        return STATUS_INVALID_PARAMETER;
-    }
-
-    switch (Image->Format) {
-    case ImageElf32:
-        Status = ImpElf32GetSymbolByAddress(Image, Address, Symbol);
-        break;
-
-    default:
-        Status = STATUS_UNKNOWN_IMAGE_FORMAT;
-        break;
-    }
-
-    if ((Status != STATUS_NOT_FOUND) ||
-        (RecursionLevel >= MAX_IMPORT_RECURSION_DEPTH)) {
-
-        return Status;
-    }
-
-    Image->VisitMarker = VisitMarker;
-    for (ImportIndex = 0; ImportIndex < Image->ImportCount; ImportIndex += 1) {
-        Import = Image->Imports[ImportIndex];
-        if ((Import != NULL) && (Import->VisitMarker != VisitMarker)) {
-            Status = ImpGetSymbolByAddress(Import,
-                                           Address,
-                                           RecursionLevel + 1,
-                                           VisitMarker,
-                                           Symbol);
-
-            if (Status != STATUS_NOT_FOUND) {
-                return Status;
-            }
-        }
-    }
-
-    //
-    // The image format is unknown or invalid.
-    //
-
-    return Status;
-}
-
-VOID
-ImpRelocateSelf (
-    PIMAGE_BUFFER Buffer,
-    PIM_RESOLVE_PLT_ENTRY PltResolver,
-    PLOADED_IMAGE Image
-    )
-
-/*++
-
-Routine Description:
-
-    This routine relocates the currently running image.
-
-Arguments:
-
-    Buffer - Supplies a pointer to an initialized buffer pointing at the base
-        of the loaded image.
-
-    PltResolver - Supplies a pointer to the function used to resolve PLT
-        entries.
-
-    Image - Supplies a pointer to a zeroed out image structure. The image
-        format should be initialized. This can be stack allocated.
-
-Return Value:
-
-    None.
-
---*/
-
-{
-
-    switch (Image->Format) {
-    case ImageElf32:
-        ImpElf32RelocateSelf(Buffer, PltResolver, Image);
-        break;
-
-    default:
-
-        ASSERT(FALSE);
-
-        break;
-    }
-
-    return;
 }
 
 PLOADED_IMAGE
@@ -2297,5 +1502,81 @@ Return Value:
 
     Image->Debug.ImageChangeFunction = ImNotifyImageLoad;
     return Image;
+}
+
+KSTATUS
+ImpAppendToScope (
+    PLOADED_IMAGE Image,
+    PLOADED_IMAGE Element
+    )
+
+/*++
+
+Routine Description:
+
+    This routine appends an image to the scope of the given image.
+
+Arguments:
+
+    Image - Supplies the image whose scope should be expanded.
+
+    Element - Supplies the element to add to the scope.
+
+Return Value:
+
+    STATUS_SUCCESS if the elements were successfully appended.
+
+    STATUS_INSUFFICIENT_RESORUCES on allocation failure.
+
+--*/
+
+{
+
+    UINTN Index;
+    UINTN NewCapacity;
+    PLOADED_IMAGE *NewScope;
+    UINTN Size;
+
+    Size = Image->ScopeSize;
+
+    //
+    // First see if it's already there and do nothing if it is.
+    //
+
+    for (Index = 0; Index < Size; Index += 1) {
+        if (Image->Scope[Index] == Element) {
+            return STATUS_SUCCESS;
+        }
+    }
+
+    if (Size >= IM_MAX_SCOPE_SIZE) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    if (Image->ScopeSize >= Image->ScopeCapacity) {
+        NewCapacity = Image->ScopeCapacity * 2;
+        if (Image->ScopeCapacity == 0) {
+            NewCapacity = IM_INITIAL_SCOPE_SIZE;
+        }
+
+        NewScope = ImAllocateMemory(NewCapacity * sizeof(PLOADED_IMAGE),
+                                    IM_ALLOCATION_TAG);
+
+        if (NewScope == NULL) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        if (Size != 0) {
+            RtlCopyMemory(NewScope, Image->Scope, Size * sizeof(PLOADED_IMAGE));
+            ImFreeMemory(Image->Scope);
+        }
+
+        Image->Scope = NewScope;
+        Image->ScopeCapacity = NewCapacity;
+    }
+
+    Image->Scope[Size] = Element;
+    Image->ScopeSize += 1;
+    return STATUS_SUCCESS;
 }
 

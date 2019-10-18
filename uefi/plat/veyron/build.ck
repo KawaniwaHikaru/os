@@ -26,9 +26,30 @@ Environment:
 
 --*/
 
+from menv import binplace, staticApplication, uefiFwvol, flattenedBinary;
+
 function build() {
-    plat = "veyron";
-    text_address = "0x020000A4";
+    var commonLibs;
+    var elf;
+    var entries;
+    var flattened;
+    var ffs;
+    var fwb;
+    var fwbConfig;
+    var fwbSources;
+    var fwVolume;
+    var includes;
+    var libs;
+    var linkConfig;
+    var plat = "veyron";
+    var platfw;
+    var sources;
+    var sourcesConfig;
+    var textAddress = "0x020000A4";
+    var ubootConfig;
+    var ubootName;
+    var uboot;
+
     sources = [
         "armv7/entry.S",
         "armv7/minttbl.S",
@@ -50,10 +71,10 @@ function build() {
     ];
 
     includes = [
-        "$//uefi/include"
+        "$S/uefi/include"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-fshort-wchar"]
     };
 
@@ -62,61 +83,54 @@ function build() {
     // specific and unaligned place (hence the nmagic).
     //
 
-    link_ldflags = [
-        "-nostdlib",
-        "-Wl,--no-wchar-size-warning",
-        "-static",
-        "-Wl,--nmagic"
-    ];
-
-    link_config = {
-        "LDFLAGS": link_ldflags
+    linkConfig = {
+        "LDFLAGS": ["-Wl,--no-wchar-size-warning", "-Wl,--nmagic"]
     };
 
-    common_libs = [
-        "//uefi/core:ueficore",
-        "//kernel/kd:kdboot",
-        "//uefi/core:ueficore",
-        "//uefi/archlib:uefiarch",
-        "//lib/fatlib:fat",
-        "//lib/basevid:basevid",
-        "//lib/rtl/base:basertlb",
-        "//kernel/kd/kdusb:kdnousb",
-        "//kernel:archboot",
-        "//uefi/core:emptyrd",
+    commonLibs = [
+        "uefi/core:ueficore",
+        "kernel/kd:kdboot",
+        "uefi/core:ueficore",
+        "uefi/archlib:uefiarch",
+        "lib/fatlib:fat",
+        "lib/basevid:basevid",
+        "lib/rtl/base:basertlb",
+        "kernel/kd/kdusb:kdnousb",
+        "kernel:archboot",
+        "uefi/core:emptyrd",
     ];
 
     libs = [
-        "//uefi/dev/gic:gic",
-        "//uefi/dev/ns16550:ns16550",
-        "//uefi/dev/sd/dwc:sddwc",
-        "//uefi/dev/sd/core:sd"
+        "uefi/dev/gic:gic",
+        "uefi/dev/ns16550:ns16550",
+        "uefi/dev/sd/dwc:sddwc",
+        "uefi/dev/sd/core:sd"
     ];
 
-    libs += common_libs;
+    libs += commonLibs;
     platfw = plat + "fw";
     elf = {
         "label": platfw + ".elf",
         "inputs": sources + libs,
-        "sources_config": sources_config,
+        "sources_config": sourcesConfig,
         "includes": includes,
-        "config": link_config
+        "config": linkConfig
     };
 
-    entries = executable(elf);
+    entries = staticApplication(elf);
 
     //
     // Build the firmware volume.
     //
 
     ffs = [
-        "//uefi/core/runtime:rtbase.ffs",
-        "//uefi/plat/" + plat + "/runtime:" + plat + "rt.ffs",
-        "//uefi/plat/" + plat + "/acpi:acpi.ffs"
+        "uefi/core/runtime:rtbase.ffs",
+        "uefi/plat/" + plat + "/runtime:" + plat + "rt.ffs",
+        "uefi/plat/" + plat + "/acpi:acpi.ffs"
     ];
 
-    fw_volume = uefi_fwvol_o(plat, ffs);
-    entries += fw_volume;
+    fwVolume = uefiFwvol("uefi/plat/veyron", plat, ffs);
+    entries += fwVolume;
 
     //
     // Flatten the firmware image, convert to U-boot, and run the firmware
@@ -128,45 +142,45 @@ function build() {
         "inputs": [":" + platfw + ".elf"]
     };
 
-    flattened = flattened_binary(flattened);
+    flattened = flattenedBinary(flattened);
     entries += flattened;
-    uboot_config = {
-        "TEXT_ADDRESS": text_address,
+    ubootConfig = {
+        "text_address": textAddress,
         "MKUBOOT_FLAGS": "-c -a arm -f fit"
     };
 
-    uboot_name = platfw + ".ubo";
+    ubootName = platfw + ".ubo";
     uboot = {
-        "label": uboot_name,
+        "type": "target",
+        "label": ubootName,
         "inputs": [":" + platfw + ".bin"],
-        "orderonly": ["//uefi/tools/mkuboot:mkuboot"],
+        "orderonly": ["uefi/tools/mkuboot:mkuboot"],
         "tool": "mkuboot",
-        "config": uboot_config
+        "config": ubootConfig
     };
 
     entries += [uboot];
-    fwb_sources = [
+    fwbSources = [
         "veyron.kbk",
         "veyron.pem",
-        ":" + uboot_name
+        ":" + ubootName
     ];
 
-    fwb_config = {
-        "TEXT_ADDRESS": text_address
+    fwbConfig = {
+        "text_address": textAddress
     };
 
     fwb = {
         "type": "target",
         "label": platfw,
-        "inputs": fwb_sources,
-        "implicit": ["//uefi/plat/veyron/fwbuild:veyrnfwb"],
-        "config": fwb_config,
+        "inputs": fwbSources,
+        "implicit": ["uefi/plat/veyron/fwbuild:veyrnfwb"],
+        "config": fwbConfig,
         "tool": "veyrnfwb",
-        "nostrip": TRUE
+        "nostrip": true
     };
 
     entries += binplace(fwb);
     return entries;
 }
 
-return build();

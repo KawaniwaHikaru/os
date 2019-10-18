@@ -510,8 +510,8 @@ Return Value:
 
     BOOL Result;
 
-    if ((UserModePointer >= KERNEL_VA_START) ||
-        (UserModePointer + Size > KERNEL_VA_START) ||
+    if ((UserModePointer >= USER_VA_END) ||
+        (UserModePointer + Size > USER_VA_END) ||
         (UserModePointer + Size <= UserModePointer)) {
 
         return STATUS_ACCESS_VIOLATION;
@@ -561,8 +561,8 @@ Return Value:
 
     BOOL Result;
 
-    if ((UserModePointer >= KERNEL_VA_START) ||
-        (UserModePointer + Size > KERNEL_VA_START) ||
+    if ((UserModePointer >= USER_VA_END) ||
+        (UserModePointer + Size > USER_VA_END) ||
         (UserModePointer + Size <= UserModePointer)) {
 
         return STATUS_ACCESS_VIOLATION;
@@ -613,8 +613,8 @@ Return Value:
 
     BOOL Result;
 
-    if ((Buffer >= KERNEL_VA_START) ||
-        (Buffer + Size > KERNEL_VA_START) ||
+    if ((Buffer >= USER_VA_END) ||
+        (Buffer + Size > USER_VA_END) ||
         (Buffer + Size <= Buffer)) {
 
         return STATUS_ACCESS_VIOLATION;
@@ -1042,7 +1042,7 @@ Return Value:
 
     MmMdInitDescriptor(&FreeRange,
                        PageSize,
-                       (UINTN)KERNEL_VA_START,
+                       (UINTN)USER_VA_END,
                        MemoryTypeFree);
 
     return MmpAddAccountingDescriptor(Accountant, &FreeRange);
@@ -1946,6 +1946,9 @@ Return Value:
 
     PageCount = RangeSize >> PageShift;
     RunPageCount = PhysicalRunSize >> PageShift;
+
+    ASSERT(RunPageCount != 0);
+
     PhysicalRunAlignment >>= PageShift;
     Status = STATUS_SUCCESS;
     VirtualAddress = RangeAddress;
@@ -2654,9 +2657,7 @@ Return Value:
 
     OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
     ProcessorBlock = KeGetCurrentProcessorBlock();
-    MmpMapPage(PhysicalAddress,
-               ProcessorBlock->SwapPage,
-               MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+    MmpMapPage(PhysicalAddress, ProcessorBlock->SwapPage, MAP_FLAG_PRESENT);
 
     //
     // If the page is not accessible, make it accessible temporarily.
@@ -2738,9 +2739,7 @@ Return Value:
 
     OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
     ProcessorBlock = KeGetCurrentProcessorBlock();
-    MmpMapPage(PhysicalAddress,
-               ProcessorBlock->SwapPage,
-               MAP_FLAG_PRESENT | MAP_FLAG_GLOBAL);
+    MmpMapPage(PhysicalAddress, ProcessorBlock->SwapPage, MAP_FLAG_PRESENT);
 
     //
     // Zero the page.
@@ -2791,11 +2790,12 @@ Return Value:
     OriginalValue = RtlAtomicAdd(&(AddressSpace->ResidentSet), Addition);
     if (Addition <= 0) {
 
-        ASSERT(OriginalValue != 0);
+        ASSERT((Addition == 0) || (OriginalValue != 0));
 
         return;
     }
 
+    OriginalValue += Addition;
     PreviousMaximum = AddressSpace->MaxResidentSet;
 
     //
@@ -2953,36 +2953,12 @@ Return Value:
 
     PageSize = MmPageSize();
     RtlZeroMemory(PhysicalAddress, sizeof(PHYSICAL_ADDRESS) * 3);
-    PhysicalAddress[0] = MmpAllocatePhysicalPages(DESCRIPTOR_REFILL_PAGE_COUNT,
-                                                  1);
+    Status = MmpAllocateScatteredPhysicalPages(0,
+                                               -1ULL,
+                                               PhysicalAddress,
+                                               DESCRIPTOR_REFILL_PAGE_COUNT);
 
-    //
-    // If three contiguous pages could not be found, then allocate them one by
-    // one.
-    //
-
-    if (PhysicalAddress[0] == INVALID_PHYSICAL_ADDRESS) {
-        for (Index = 0; Index < DESCRIPTOR_REFILL_PAGE_COUNT; Index += 1) {
-            PhysicalAddress[Index] = MmpAllocatePhysicalPages(1, 1);
-            if (PhysicalAddress[Index] == INVALID_PHYSICAL_ADDRESS) {
-                break;
-            }
-        }
-
-    } else {
-        for (Index = 1; Index < DESCRIPTOR_REFILL_PAGE_COUNT; Index += 1) {
-            PhysicalAddress[Index] = PhysicalAddress[Index - 1] + PageSize;
-        }
-
-        ASSERT(Index == DESCRIPTOR_REFILL_PAGE_COUNT);
-    }
-
-    //
-    // If no physical pages where allocated, fail.
-    //
-
-    if (Index == 0) {
-        Status = STATUS_NO_MEMORY;
+    if (!KSUCCESS(Status)) {
         goto PrepareToAddAccountingDescriptorEnd;
     }
 

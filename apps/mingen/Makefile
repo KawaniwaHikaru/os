@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2017 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -8,11 +13,12 @@
 #
 #   Abstract:
 #
-#       This executable implements the Minoca build generator.
+#       This executable implements the Minoca build generator, which can create
+#       Makefiles or build.ninja files out of build.ck directive files.
 #
 #   Author:
 #
-#       Evan Green 3-Dec-2015
+#       Evan Green 2-May-2017
 #
 #   Environment:
 #
@@ -22,23 +28,36 @@
 
 BINARY = mingen
 
-BINPLACE = bin
+OS ?= $(shell uname -s)
 
-BINARYTYPE = app
+ifeq ($(OS),$(filter Windows_NT cygwin,$(OS)))
 
-INCLUDES += $(SRCROOT)/os/apps/libc/include;        \
-            $(SRCROOT)/os/apps/lib/chalk;       \
+BINARY = mingen.exe
 
-include $(SRCDIR)/sources
+endif
 
-OBJS += uos.o
+BUILD = yes
 
-TARGETLIBS = $(OBJROOT)/os/apps/lib/chalk/chalk.a           \
-             $(OBJROOT)/os/lib/yy/yy.a                      \
-             $(OBJROOT)/os/lib/rtl/rtlc/rtlc.a              \
-             $(OBJROOT)/os/lib/rtl/base/basertl.a           \
+BINPLACE = tools/bin
 
-DIRS = build
+BINARYTYPE = custom
+
+OBJS = make.ck     \
+       mingen.ck   \
+       mkbundle.ck \
+       ninja.ck    \
 
 include $(SRCROOT)/os/minoca.mk
+
+BUILD_COMMAND = chalk $(SRCDIR)/mkbundle.ck $@
+
+##
+## This would be the recipe needed to rebuild the bootstrap Makefiles. It's a
+## tad slow, and really is only needed once the (this) old system is gone. So
+## its disabled out for now.
+##
+
+#postbuild: bootstrap/remakebs.sh
+#	@echo Rebuilding bootstrap Makefiles
+#	@sh $(SRCDIR)/bootstrap/remakebs.sh
 

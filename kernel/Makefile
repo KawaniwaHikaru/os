@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -24,7 +29,7 @@ BINARY = kernel
 
 BINPLACE = bin
 
-BINARYTYPE = so
+BINARYTYPE = driver
 
 ##
 ## Link in all object files of the included libraries as they are exported.
@@ -46,12 +51,16 @@ ifeq (x86, $(ARCH))
 ARCHLIB = $(OBJROOT)/os/kernel/x86/x86sup.a
 endif
 
+ifeq (x64, $(ARCH))
+ARCHLIB = $(OBJROOT)/os/kernel/x64/x64sup.a
+endif
+
 TARGETLIBS = $(OBJROOT)/$(THISDIR)/acpi/acpi.a           \
              $(OBJROOT)/os/lib/crypto/crypto.a           \
              $(OBJROOT)/$(THISDIR)/ob/ob.a               \
              $(OBJROOT)/os/lib/rtl/base/basertl.a        \
              $(OBJROOT)/os/lib/rtl/kmode/krtl.a          \
-             $(OBJROOT)/os/lib/im/im.a                   \
+             $(OBJROOT)/os/lib/im/native/imn.a           \
              $(OBJROOT)/os/lib/basevid/basevid.a         \
              $(OBJROOT)/os/lib/termlib/termlib.a         \
              $(OBJROOT)/$(THISDIR)/kd/kd.a               \
@@ -62,7 +71,7 @@ TARGETLIBS = $(OBJROOT)/$(THISDIR)/acpi/acpi.a           \
              $(OBJROOT)/$(THISDIR)/hl/hl.a               \
              $(OBJROOT)/$(THISDIR)/mm/mm.a               \
              $(OBJROOT)/$(THISDIR)/sp/sp.a               \
-             $(ARCHLIB)                                 \
+             $(ARCHLIB)                                  \
 
 OBJS = init.o
 
@@ -74,6 +83,7 @@ DIRS = mm    \
        ke    \
        ps    \
        x86   \
+       x64   \
        armv7 \
        armv6 \
        kd    \
@@ -91,7 +101,7 @@ $(OBJROOT)/$(THISDIR)/io/io.a: io
 $(OBJROOT)/$(THISDIR)/hl/hl.a: hl
 $(OBJROOT)/$(THISDIR)/mm/mm.a: mm
 $(OBJROOT)/$(THISDIR)/sp/sp.a: sp
-$(ARCHLIB): armv7 armv6 x86
+$(ARCHLIB): armv7 armv6 x86 x64
 
 VPATH += $(BINROOT)
 

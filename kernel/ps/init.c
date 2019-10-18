@@ -229,6 +229,11 @@ Return Value:
                 goto InitializeEnd;
             }
 
+            Status = PspInitializeUtsRealm(KernelProcess);
+            if (!KSUCCESS(Status)) {
+                goto InitializeEnd;
+            }
+
             PsKernelProcess = KernelProcess;
 
             //
@@ -322,7 +327,7 @@ InitializeEnd:
 
 VOID
 PsVolumeArrival (
-    PSTR VolumeName,
+    PCSTR VolumeName,
     ULONG VolumeNameLength,
     BOOL SystemVolume
     )

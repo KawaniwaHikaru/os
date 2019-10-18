@@ -25,14 +25,27 @@ Environment:
 
 --*/
 
+from menv import application, binplace, group, mconfig;
+
 function build() {
-    tz_default = "America/Los_Angeles";
+    var almanac;
+    var buildApp;
+    var entries;
+    var sources;
+    var tzcompTool;
+    var tzCutoffYear = "1980";
+    var tzDataDir = "data/";
+    var tzDataFiles;
+    var tzDefault = "America/Los_Angeles";
+    var tzDefaultData;
+    var tzFiles;
+    var tzSourceFiles;
+
     sources = [
         "tzcomp.c",
     ];
 
-    tz_data_dir = "//tzcomp/data/";
-    tz_source_files = [
+    tzSourceFiles = [
         "africa",
         "antarctica",
         "asia",
@@ -44,32 +57,32 @@ function build() {
         "southamerica"
     ];
 
-    tz_files = [];
-    for (file in tz_source_files) {
-        tz_files += [tz_data_dir + file];
+    tzFiles = [];
+    for (file in tzSourceFiles) {
+        tzFiles += [tzDataDir + file];
     }
 
-    build_app = {
+    buildApp = {
         "label": "build_tzcomp",
         "output": "tzcomp",
         "inputs": sources,
-        "build": TRUE
+        "build": true
     };
 
-    entries = application(build_app);
+    entries = application(buildApp);
 
     //
     // Add the tzcomp tool.
     //
 
-    tzcomp_tool = {
+    tzcompTool = {
         "type": "tool",
         "name": "tzcomp",
-        "command": "$^//apps/tzcomp/tzcomp $TZCOMP_FLAGS -o $OUT $IN",
+        "command": "$O/apps/tzcomp/tzcomp $TZCOMP_FLAGS -o $OUT $IN",
         "description": "Compiling Time Zone Data - $OUT"
     };
 
-    entries += [tzcomp_tool];
+    entries += [tzcompTool];
 
     //
     // Add entries for the time zone almanac and time zone default.
@@ -78,37 +91,31 @@ function build() {
     almanac = {
         "type": "target",
         "label": "tzdata",
-        "inputs": tz_files,
+        "output": mconfig.binroot + "/skel/usr/share/tz/tzdata",
+        "inputs": tzFiles,
         "implicit": [":build_tzcomp"],
         "tool": "tzcomp",
-        "nostrip": TRUE
+        "config": {"TZCOMP_FLAGS": ["-y" + tzCutoffYear]}
     };
 
-    tz_default_config = {
-        "TZCOMP_FLAGS": ["-f " + tz_default]
-    };
-
-    tz_default_data = {
+    tzDefaultData = {
         "type": "target",
-        "label": "tzdflt",
-        "inputs": tz_files,
+        "label": "tz",
+        "output": mconfig.binroot + "/skel/etc/tz",
+        "inputs": tzFiles,
         "implicit": [":build_tzcomp"],
         "tool": "tzcomp",
-        "config": tz_default_config,
-        "nostrip": TRUE
+        "config": {"TZCOMP_FLAGS": ["-z" + tzDefault, "-y" + tzCutoffYear]},
     };
 
-    entries += binplace(almanac);
-    entries += binplace(tz_default_data);
+    entries += [almanac, tzDefaultData];
 
     //
     // Create a group for the data files.
     //
 
-    tz_data_files = [":tzdata", ":tzdflt"];
-    entries += group("tz_files", tz_data_files);
+    tzDataFiles = [":tzdata", ":tz"];
+    entries += group("tz_files", tzDataFiles);
     return entries;
 }
-
-return build();
 

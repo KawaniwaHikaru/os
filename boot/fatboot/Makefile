@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -37,11 +42,22 @@ X86_OBJS = vbr.o                    \
            prochw.o                 \
            archsup.o                \
            realmode.o               \
-           realmexe.o               \
+           x86/realmexe.o           \
 
-TEXT_ADDRESS = 0x7C00
+X64_OBJS := $(X86_OBJS)
 
 LDFLAGS += -Wl,-zmax-page-size=1 -nodefaultlibs -nostartfiles -nostdlib
+
+##
+## This application is always compiled 32-bit, even with a 64-bit target.
+##
+
+ifeq ($(ARCH),x64)
+EXTRA_CPPFLAGS += -m32
+EXTRA_LDFLAGS += -m32
+endif
+
+TEXT_ADDRESS := 0x7C00
 
 EXTRA_SRC_DIRS = x86 fw/pcat
 

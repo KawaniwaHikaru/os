@@ -1,6 +1,11 @@
 /*++
 
-Copyright (c) 2015 Minoca Corp. All Rights Reserved
+Copyright (c) 2015 Minoca Corp.
+
+    This file is licensed under the terms of the GNU General Public License
+    version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details. See the LICENSE file at the root of this
+    project for complete licensing information.
 
 Module Name:
 
@@ -25,7 +30,7 @@ Environment:
 //
 
 [0004]                          Signature : "BCM2"
-[0004]                       Table Length : 000000D8
+[0004]                       Table Length : 000000DC
 [0001]                           Revision : 01
 [0001]                           Checksum : 00
 [0006]                             Oem ID : "Minoca"
@@ -95,6 +100,12 @@ Environment:
                                    UINT32 : 00000000
 
 //
+// PWM clock frequency.
+//
+
+                                   UINT32 : 1DCD6500
+
+//
 // Mailbox physical address.
 //
 
@@ -109,7 +120,7 @@ Environment:
 //
 // Processor 0 information. See BCM2709_CPU_ENTRY.
 //
-                                   
+
                                     UINT8 : 00
                                     UINT8 : 18
                                    UINT16 : 0000
@@ -121,7 +132,7 @@ Environment:
 //
 // Processor 1 information. See BCM2709_CPU_ENTRY.
 //
-                                   
+
                                     UINT8 : 00
                                     UINT8 : 18
                                    UINT16 : 0000
@@ -129,11 +140,11 @@ Environment:
                                    UINT32 : 00000001
                                    UINT32 : 00000000
                                    UINT64 : 0000000001FFB000
-                                   
+
 //
 // Processor 2 information. See BCM2709_CPU_ENTRY.
 //
-                                   
+
                                     UINT8 : 00
                                     UINT8 : 18
                                    UINT16 : 0000
@@ -145,7 +156,7 @@ Environment:
 //
 // Processor 3 information. See BCM2709_CPU_ENTRY.
 //
-                                   
+
                                     UINT8 : 00
                                     UINT8 : 18
                                    UINT16 : 0000

@@ -131,12 +131,22 @@ YY_VALUE CkgDict[] = {
     0
 };
 
+YY_VALUE CkgStringLiteralList[] = {
+    CkTokenDoubleString, -1,
+    CkTokenSingleString, -1,
+    CkTokenTripleString, -1,
+    CkNodeStringLiteralList, CkTokenDoubleString, -1,
+    CkNodeStringLiteralList, CkTokenSingleString, -1,
+    CkNodeStringLiteralList, CkTokenTripleString, -1,
+    0
+};
+
 YY_VALUE CkgPrimaryExpression[] = {
     CkTokenIdentifier, -1,
     CkTokenConstant, -1,
     CkTokenHexConstant, -1,
     CkTokenBinaryConstant, -1,
-    CkTokenString, -1,
+    CkNodeStringLiteralList, -1,
     CkTokenNull, -1,
     CkTokenThis, -1,
     CkTokenSuper, -1,
@@ -275,6 +285,7 @@ YY_VALUE CkgVariableDefinition[] = {
 
 YY_VALUE CkgStatement[] = {
     CkNodeFunctionDefinition, -1,
+    CkNodeFunctionDeclaration, -1,
     CkNodeVariableDefinition, -1,
     CkNodeExpressionStatement, -1,
     CkNodeSelectionStatement, -1,
@@ -398,8 +409,21 @@ YY_VALUE CkgFunctionDefinition[] = {
     0
 };
 
+YY_VALUE CkgFunctionDeclaration[] = {
+    CkTokenFunction, CkTokenIdentifier, CkTokenOpenParentheses,
+        CkNodeIdentifierList, CkTokenCloseParentheses,
+        CkTokenSemicolon, -1,
+
+    CkTokenStatic, CkTokenFunction, CkTokenIdentifier, CkTokenOpenParentheses,
+        CkNodeIdentifierList, CkTokenCloseParentheses,
+        CkTokenSemicolon, -1,
+
+    0
+};
+
 YY_VALUE CkgClassMember[] = {
     CkNodeFunctionDefinition, -1,
+    CkNodeFunctionDeclaration, -1,
     CkNodeVariableDeclaration, -1,
     0
 };
@@ -488,7 +512,9 @@ YY_ELEMENT CkgGrammarElements[CkSymbolCount] = {
     {"Constant", 0, 0, NULL},
     {"Hex", 0, 0, NULL},
     {"Binary", 0, 0, NULL},
-    {"String", 0, 0, NULL},
+    {"String3", 0, 0, NULL},
+    {"String2", 0, 0, NULL},
+    {"String1", 0, 0, NULL},
     {">>=", 0, 0, NULL},
     {"<<=", 0, 0, NULL},
     {"+=", 0, 0, NULL},
@@ -543,6 +569,7 @@ YY_ELEMENT CkgGrammarElements[CkSymbolCount] = {
     {"DictElement", 0, 0, CkgDictElement},
     {"DictElementList", 0, 0, CkgDictElementList},
     {"Dict", 0, 0, CkgDict},
+    {"StringLiteralList", 0, 0, CkgStringLiteralList},
     {"PrimaryExpression", 0, 0, CkgPrimaryExpression},
     {"PostfixExpression", 0, 0, CkgPostfixExpression},
     {"ArgumentExpressionList", 0, 0, CkgArgumentExpressionList},
@@ -569,6 +596,7 @@ YY_ELEMENT CkgGrammarElements[CkSymbolCount] = {
     {"TryStatement", 0, 0, CkgTryStatement},
     {"IdentifierList", 0, 0, CkgIdentifierList},
     {"FunctionDefinition", 0, 0, CkgFunctionDefinition},
+    {"FunctionDeclaration", 0, 0, CkgFunctionDeclaration},
     {"ClassMember", 0, 0, CkgClassMember},
     {"ClassMemberList", 0, 0, CkgClassMemberList},
     {"ClassBody", 0, 0, CkgClassBody},

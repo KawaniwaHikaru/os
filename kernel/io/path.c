@@ -73,9 +73,7 @@ IopPathWalkWorker (
     PCSTR *Path,
     PULONG PathSize,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     ULONG RecursionLevel,
     PPATH_POINT Result
     );
@@ -88,9 +86,7 @@ IopPathLookupThroughFileSystem (
     ULONG NameSize,
     ULONG Hash,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT Result
     );
 
@@ -169,9 +165,9 @@ UINTN IoPathEntryListMaxSize;
 
 KSTATUS
 IoPathAppend (
-    PSTR Prefix,
+    PCSTR Prefix,
     ULONG PrefixSize,
-    PSTR Component,
+    PCSTR Component,
     ULONG ComponentSize,
     ULONG AllocationTag,
     PSTR *AppendedPath,
@@ -199,7 +195,7 @@ Arguments:
     AllocationTag - Supplies the tag to use for the combined allocation.
 
     AppendedPath - Supplies a pointer where the new path will be returned. The
-        caller is responsible for freeing this memory..
+        caller is responsible for freeing this memory.
 
     AppendedPathSize - Supplies a pointer where the size of the appended bath
         buffer in bytes including the null terminator will be returned.
@@ -482,6 +478,7 @@ Return Value:
     Status = IopCreateOrLookupFileObject(&Properties,
                                          RootObject,
                                          FILE_OBJECT_FLAG_EXTERNAL_IO_STATE,
+                                         0,
                                          &FileObject,
                                          &Created);
 
@@ -526,9 +523,7 @@ IopPathWalk (
     PCSTR *Path,
     PULONG PathSize,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT Result
     )
 
@@ -558,15 +553,7 @@ Arguments:
     OpenFlags - Supplies a bitfield of flags governing the behavior of the
         handle. See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies the type of object to create. If this is invalid,
-        then this routine will try to open an existing object. If this type is
-        valid, then this routine will attempt to create an object of the given
-        type.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to a created file.
+    Create - Supplies an optional pointer to the creation parameters.
 
     Result - Supplies a pointer to a path point that receives the resulting
         path entry and mount point on success. The path entry and mount point
@@ -590,9 +577,7 @@ Return Value:
                                Path,
                                PathSize,
                                OpenFlags,
-                               TypeOverride,
-                               OverrideParameter,
-                               CreatePermissions,
+                               Create,
                                0,
                                Result);
 
@@ -1083,11 +1068,275 @@ Return Value:
 }
 
 KSTATUS
+IoGetCurrentDirectory (
+    BOOL FromKernelMode,
+    BOOL Root,
+    PSTR *Path,
+    PUINTN PathSize
+    )
+
+/*++
+
+Routine Description:
+
+    This routine gets either the current working directory or the path of the
+    current chroot environment.
+
+Arguments:
+
+    FromKernelMode - Supplies a boolean indicating whether or not a kernel mode
+        caller is requesting the directory information. This dictates how the
+        given path buffer is treated.
+
+    Root - Supplies a boolean indicating whether to get the path to the current
+        working directory (FALSE) or to get the path of the current chroot
+        environment (TRUE). If the caller does not have permission to escape a
+        changed root, or the root has not been changed, then / is returned in
+        the path argument.
+
+    Path - Supplies a pointer to a buffer that will contain the desired path on
+        output. If the call is from kernel mode and the pointer is NULL, then
+        a buffer will be allocated.
+
+    PathSize - Supplies a pointer to the size of the path buffer on input. On
+        output it stores the required size of the path buffer. This includes
+        the null terminator.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+{
+
+    PPATH_POINT CurrentDirectory;
+    PATH_POINT CurrentDirectoryCopy;
+    PPROCESS_PATHS Paths;
+    PKPROCESS Process;
+    PPATH_POINT RootDirectory;
+    PATH_POINT RootDirectoryCopy;
+    PSTR RootPath;
+    UINTN RootPathSize;
+    KSTATUS Status;
+
+    Process = PsGetCurrentProcess();
+    RootPath = NULL;
+    RootPathSize = 0;
+
+    ASSERT((FromKernelMode != FALSE) || (Process != PsGetKernelProcess()));
+
+    //
+    // Get the path entries for this process's current directory and root
+    // directory.
+    //
+
+    CurrentDirectory = NULL;
+    RootDirectory = NULL;
+    Paths = &(Process->Paths);
+    KeAcquireQueuedLock(Paths->Lock);
+    if (Root != FALSE) {
+        if (Paths->Root.PathEntry != NULL) {
+            IO_COPY_PATH_POINT(&CurrentDirectoryCopy, &(Paths->Root));
+            IO_PATH_POINT_ADD_REFERENCE(&CurrentDirectoryCopy);
+            CurrentDirectory = &CurrentDirectoryCopy;
+        }
+
+        //
+        // Leave the root NULL for now (i.e. the real root). It will get set to
+        // the current directory if the caller does not have permission to
+        // escape a changed root.
+        //
+
+    } else {
+
+        ASSERT(Paths->CurrentDirectory.PathEntry != NULL);
+
+        IO_COPY_PATH_POINT(&CurrentDirectoryCopy, &(Paths->CurrentDirectory));
+        IO_PATH_POINT_ADD_REFERENCE(&CurrentDirectoryCopy);
+        CurrentDirectory = &CurrentDirectoryCopy;
+        if (Paths->Root.PathEntry != NULL) {
+            IO_COPY_PATH_POINT(&RootDirectoryCopy, &(Paths->Root));
+            IO_PATH_POINT_ADD_REFERENCE(&RootDirectoryCopy);
+            RootDirectory = &RootDirectoryCopy;
+        }
+    }
+
+    KeReleaseQueuedLock(Process->Paths.Lock);
+
+    //
+    // If the caller does not have permission to escape a changed root, then
+    // pretend they're at the real root.
+    //
+
+    if ((Root != FALSE) &&
+        (!KSUCCESS(PsCheckPermission(PERMISSION_ESCAPE_CHROOT)))) {
+
+        RootDirectory = CurrentDirectory;
+        if (RootDirectory != NULL) {
+            IO_PATH_POINT_ADD_REFERENCE(RootDirectory);
+        }
+    }
+
+    //
+    // If the caller is from kernel mode and did not supply a buffer, pass an
+    // allocated buffer back.
+    //
+
+    if (FromKernelMode != FALSE) {
+        Status = IopGetPathFromRoot(CurrentDirectory,
+                                    RootDirectory,
+                                    &RootPath,
+                                    &RootPathSize);
+
+        if (!KSUCCESS(Status)) {
+            goto GetCurrentDirectoryEnd;
+        }
+
+        if (*Path != NULL) {
+            if (*PathSize < RootPathSize) {
+                Status = STATUS_BUFFER_TOO_SMALL;
+                goto GetCurrentDirectoryEnd;
+            }
+
+            RtlCopyMemory(*Path, RootPath, RootPathSize);
+
+        } else {
+            *Path = RootPath;
+            RootPath = NULL;
+        }
+
+    //
+    // The user mode path must always copy into the provided path buffer.
+    //
+
+    } else {
+        Status = IopGetUserFilePath(CurrentDirectory,
+                                    RootDirectory,
+                                    *Path,
+                                    PathSize);
+
+        if (!KSUCCESS(Status)) {
+            goto GetCurrentDirectoryEnd;
+        }
+    }
+
+GetCurrentDirectoryEnd:
+    if (CurrentDirectory != NULL) {
+        IO_PATH_POINT_RELEASE_REFERENCE(CurrentDirectory);
+    }
+
+    if (RootDirectory != NULL) {
+        IO_PATH_POINT_RELEASE_REFERENCE(RootDirectory);
+    }
+
+    if (FromKernelMode != FALSE) {
+        if (RootPath != NULL) {
+            MmFreePagedPool(RootPath);
+        }
+
+        *PathSize = RootPathSize;
+    }
+
+    return Status;
+}
+
+KSTATUS
+IopGetUserFilePath (
+    PPATH_POINT Entry,
+    PPATH_POINT Root,
+    PSTR UserBuffer,
+    PUINTN UserBufferSize
+    )
+
+/*++
+
+Routine Description:
+
+    This routine copies the full path of the given path entry (as seen from
+    the given root) into the given user mode buffer.
+
+Arguments:
+
+    Entry - Supplies a pointer to the path point to get the full path of.
+
+    Root - Supplies a pointer to the user's root.
+
+    UserBuffer - Supplies a pointer to the user mode buffer where the full path
+        should be returned.
+
+    UserBufferSize - Supplies a pointer that on success contains the size of
+        the user mode buffer. Returns the actual size of the file path, even if
+        the supplied buffer was too small.
+
+Return Value:
+
+    STATUS_SUCCESS on success.
+
+    STATUS_PATH_NOT_FOUND if the path entry has no path.
+
+    STATUS_ACCESS_VIOLATION if the buffer was invalid.
+
+    STATUS_BUFFER_TOO_SMALL if the buffer was too small.
+
+--*/
+
+{
+
+    PSTR Path;
+    UINTN PathSize;
+    KSTATUS Status;
+
+    //
+    // Create the path.
+    //
+
+    Path = NULL;
+    PathSize = 0;
+    Status = IopGetPathFromRoot(Entry,
+                                Root,
+                                &Path,
+                                &PathSize);
+
+    if (!KSUCCESS(Status)) {
+        goto GetUserFilePathEnd;
+    }
+
+    //
+    // If not enough space was supplied, then return the required size.
+    //
+
+    if (*UserBufferSize < PathSize) {
+        Status = STATUS_BUFFER_TOO_SMALL;
+        goto GetUserFilePathEnd;
+    }
+
+    //
+    // Copy the path to the supplied buffer.
+    //
+
+    if (UserBuffer != NULL) {
+        Status = MmCopyToUserMode(UserBuffer, Path, PathSize);
+        if (!KSUCCESS(Status)) {
+            goto GetUserFilePathEnd;
+        }
+    }
+
+GetUserFilePathEnd:
+    if (Path != NULL) {
+        MmFreePagedPool(Path);
+    }
+
+    *UserBufferSize = PathSize;
+    return Status;
+}
+
+KSTATUS
 IopGetPathFromRoot (
     PPATH_POINT Entry,
     PPATH_POINT Root,
     PSTR *Path,
-    PULONG PathSize
+    PUINTN PathSize
     )
 
 /*++
@@ -1130,7 +1379,7 @@ IopGetPathFromRootUnlocked (
     PPATH_POINT Entry,
     PPATH_POINT Root,
     PSTR *Path,
-    PULONG PathSize
+    PUINTN PathSize
     )
 
 /*++
@@ -1162,12 +1411,12 @@ Return Value:
 {
 
     PSTR Name;
-    ULONG NameSize;
-    ULONG Offset;
+    UINTN NameSize;
+    UINTN Offset;
     PSTR PathBuffer;
-    ULONG PathBufferSize;
+    UINTN PathBufferSize;
     PATH_POINT PathPoint;
-    ULONG PrefixSize;
+    UINTN PrefixSize;
     KSTATUS Status;
     PPATH_POINT TrueRoot;
     BOOL Unreachable;
@@ -1378,9 +1627,7 @@ IopPathLookup (
     PCSTR Name,
     ULONG NameSize,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT Result
     )
 
@@ -1411,15 +1658,7 @@ Arguments:
     OpenFlags - Supplies a bitfield of flags governing the behavior of the
         handle. See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies the type of object to create. If this is invalid,
-        then this routine will try to open an existing object. If this type is
-        valid, then this routine will attempt to create an object of the given
-        type.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to a created file.
+    Create - Supplies an optional pointer to the creation parameters.
 
     Result - Supplies a pointer to a path point that receives the resulting
         path entry and mount point on success. The path entry and mount point
@@ -1468,9 +1707,9 @@ Return Value:
     //
 
     if (IopArePathsEqual(".", Name, NameSize) != FALSE) {
-        if (TypeOverride != IoObjectInvalid) {
-            if ((TypeOverride == IoObjectRegularDirectory) ||
-                (TypeOverride == IoObjectSymbolicLink)) {
+        if (Create != NULL) {
+            if ((Create->Type == IoObjectRegularDirectory) ||
+                (Create->Type == IoObjectSymbolicLink)) {
 
                 return STATUS_FILE_EXISTS;
             }
@@ -1488,8 +1727,14 @@ Return Value:
         return STATUS_SUCCESS;
 
     } else if (IopArePathsEqual("..", Name, NameSize) != FALSE) {
-        if (TypeOverride != IoObjectInvalid) {
-            return STATUS_FILE_EXISTS;
+        if (Create != NULL) {
+            if ((Create->Type == IoObjectRegularDirectory) ||
+                (Create->Type == IoObjectSymbolicLink)) {
+
+                return STATUS_FILE_EXISTS;
+            }
+
+            return STATUS_FILE_IS_DIRECTORY;
         }
 
         IopGetParentPathPoint(Root, Directory, Result);
@@ -1525,7 +1770,7 @@ Return Value:
         //
 
         if (Result->PathEntry->Negative != FALSE) {
-            if (TypeOverride == IoObjectInvalid) {
+            if (Create == NULL) {
                 return STATUS_PATH_NOT_FOUND;
             }
 
@@ -1539,7 +1784,7 @@ Return Value:
         //
 
         } else {
-            if ((TypeOverride != IoObjectInvalid) &&
+            if ((Create != NULL) &&
                 ((OpenFlags & OPEN_FLAG_FAIL_IF_EXISTS) != 0)) {
 
                 return STATUS_FILE_EXISTS;
@@ -1563,9 +1808,7 @@ Return Value:
                                             NameSize,
                                             Hash,
                                             OpenFlags,
-                                            TypeOverride,
-                                            OverrideParameter,
-                                            CreatePermissions,
+                                            Create,
                                             Result);
 
     if (DirectoryLockHeld == FALSE) {
@@ -1871,9 +2114,7 @@ IopPathWalkWorker (
     PCSTR *Path,
     PULONG PathSize,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     ULONG RecursionLevel,
     PPATH_POINT Result
     )
@@ -1902,15 +2143,7 @@ Arguments:
     OpenFlags - Supplies a bitfield of flags governing the behavior of the
         handle. See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies the type of object to create. If this is invalid,
-        then this routine will try to open an existing object. If this type is
-        valid, then this routine will attempt to create an object of the given
-        type.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to a created file.
+    Create - Supplies an optional pointer to the creation parameters.
 
     RecursionLevel - Supplies the recursion level used internally to avoid
         symbolic link loops.
@@ -1929,7 +2162,6 @@ Return Value:
 {
 
     ULONG ComponentSize;
-    BOOL Create;
     PCSTR CurrentPath;
     ULONG CurrentPathSize;
     PATH_POINT Entry;
@@ -1943,13 +2175,14 @@ Return Value:
     PPATH_POINT Root;
     PATH_POINT RootCopy;
     KSTATUS Status;
+    PCREATE_PARAMETERS ThisCreate;
     ULONG ThisIterationOpenFlags;
-    IO_OBJECT_TYPE ThisOverride;
 
     ASSERT(KeGetRunLevel() == RunLevelLow);
 
     CurrentPath = *Path;
     CurrentPathSize = *PathSize;
+    ThisCreate = NULL;
 
     //
     // Empty paths do not resolve to anything.
@@ -1960,15 +2193,6 @@ Return Value:
     }
 
     CurrentPathSize -= 1;
-
-    //
-    // If a valid I/O object type was supplied, then this is a create.
-    //
-
-    Create = FALSE;
-    if (TypeOverride != IoObjectInvalid) {
-        Create = TRUE;
-    }
 
     //
     // For all components except the end, follow symbolic links.
@@ -2078,13 +2302,10 @@ Return Value:
         // operation of a directory along the way.
         //
 
-        ThisOverride = IoObjectInvalid;
         ThisIterationOpenFlags = OPEN_FLAG_DIRECTORY;
         if (NextSeparator == NULL) {
             ThisIterationOpenFlags = OpenFlags;
-            if (Create != FALSE) {
-                ThisOverride = TypeOverride;
-            }
+            ThisCreate = Create;
 
             //
             // If this is the end component and the caller wants the symbolic
@@ -2123,9 +2344,7 @@ Return Value:
                                CurrentPath,
                                ComponentSize + 1,
                                ThisIterationOpenFlags,
-                               ThisOverride,
-                               OverrideParameter,
-                               CreatePermissions,
+                               ThisCreate,
                                &NextEntry);
 
         if (!KSUCCESS(Status)) {
@@ -2248,9 +2467,7 @@ IopPathLookupThroughFileSystem (
     ULONG NameSize,
     ULONG Hash,
     ULONG OpenFlags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT Result
     )
 
@@ -2279,15 +2496,7 @@ Arguments:
     OpenFlags - Supplies a bitfield of flags governing the behavior of the
         handle. See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies the type of object to create. If this is invalid,
-        then this routine will try to open an existing object. If this type is
-        valid, then this routine will attempt to create an object of the given
-        type.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to a created file.
+    Create - Supplies an optional pointer to the creation parameters.
 
     Result - Supplies a pointer to a path point that receives the resulting
          path entry and mount point on success. The path entry and mount point
@@ -2313,15 +2522,15 @@ Return Value:
     PFILE_OBJECT FileObject;
     ULONG FileObjectFlags;
     BOOL FoundPathPoint;
+    ULONG MapFlags;
     BOOL Negative;
     POBJECT_HEADER Object;
     PPATH_ENTRY PathEntry;
     PDEVICE PathRoot;
     FILE_PROPERTIES Properties;
-    ULONG RootLookupFlags;
+    PPATH_POINT ShmDirectory;
     KSTATUS Status;
     PKTHREAD Thread;
-    BOOL Unlinked;
 
     Child = NULL;
     Created = FALSE;
@@ -2377,7 +2586,7 @@ Return Value:
         //
 
         if (Result->PathEntry->Negative != FALSE) {
-            if (TypeOverride == IoObjectInvalid) {
+            if (Create == NULL) {
                 Status = STATUS_PATH_NOT_FOUND;
                 goto PathLookupThroughFileSystemEnd;
             }
@@ -2387,7 +2596,7 @@ Return Value:
         //
 
         } else {
-            if ((TypeOverride != IoObjectInvalid) &&
+            if ((Create != NULL) &&
                 ((OpenFlags & OPEN_FLAG_FAIL_IF_EXISTS) != 0)) {
 
                 Status = STATUS_FILE_EXISTS;
@@ -2405,21 +2614,29 @@ Return Value:
     //
 
     if (IS_DEVICE_OR_VOLUME(PathRoot)) {
-        if (TypeOverride != IoObjectInvalid) {
+        if (Create != NULL) {
+
+            ASSERT(Create->Type != IoObjectInvalid);
+
+            //
+            // It's not obvious what user/group ID to put as the owner
+            // if the creation comes from kernel mode. Assert that this create
+            // request is from user mode.
+            //
+
+            ASSERT(FromKernelMode == FALSE);
 
             //
             // Check to make sure the caller has permission to create objects
             // in this directory.
             //
 
-            if (FromKernelMode == FALSE) {
-                Status = IopCheckPermissions(FromKernelMode,
-                                             Directory,
-                                             IO_ACCESS_WRITE);
+            Status = IopCheckPermissions(FromKernelMode,
+                                         Directory,
+                                         IO_ACCESS_WRITE);
 
-                if (!KSUCCESS(Status)) {
-                    goto PathLookupThroughFileSystemEnd;
-                }
+            if (!KSUCCESS(Status)) {
+                goto PathLookupThroughFileSystemEnd;
             }
 
             //
@@ -2428,19 +2645,10 @@ Return Value:
             // the owning group to that of the directory.
             //
 
-            //
-            // TODO: This should assert that FromKernelMode is FALSE,
-            // because it's not obvious what user/group ID to put as the owner
-            // if the creation comes from kernel mode. Current the assert
-            // cannot be put in because creation of shared memory objects
-            // happens from kernel mode. Fix shared memory objects to do
-            // "from user mode" path walks, and then re-add this assert.
-            //
-
             Thread = KeGetCurrentThread();
             RtlZeroMemory(&Properties, sizeof(FILE_PROPERTIES));
             Properties.DeviceId = PathRoot->DeviceId;
-            Properties.Type = TypeOverride;
+            Properties.Type = Create->Type;
             Properties.UserId = Thread->Identity.EffectiveUserId;
             Properties.GroupId = Thread->Identity.EffectiveGroupId;
             if ((DirectoryFileObject->Properties.Permissions &
@@ -2449,7 +2657,7 @@ Return Value:
                 Properties.GroupId = DirectoryFileObject->Properties.GroupId;
             }
 
-            Properties.Permissions = CreatePermissions & FILE_PERMISSION_MASK;
+            Properties.Permissions = Create->Permissions & FILE_PERMISSION_MASK;
             Properties.HardLinkCount = 1;
             KeGetSystemTime(&(Properties.AccessTime));
             Properties.ModifiedTime = Properties.AccessTime;
@@ -2473,8 +2681,8 @@ Return Value:
                 ASSERT(Properties.DeviceId == PathRoot->DeviceId);
 
                 FileObjectFlags = 0;
-                if ((OpenFlags & OPEN_FLAG_NON_CACHED) != 0) {
-                    FileObjectFlags |= FILE_OBJECT_FLAG_NON_CACHED;
+                if ((OpenFlags & OPEN_FLAG_NO_PAGE_CACHE) != 0) {
+                    FileObjectFlags |= FILE_OBJECT_FLAG_NO_PAGE_CACHE;
                 }
 
                 switch (Properties.Type) {
@@ -2494,6 +2702,7 @@ Return Value:
                 Status = IopCreateOrLookupFileObject(&Properties,
                                                      PathRoot,
                                                      FileObjectFlags,
+                                                     0,
                                                      &FileObject,
                                                      &Created);
 
@@ -2503,33 +2712,7 @@ Return Value:
 
                 ASSERT(Created != FALSE);
 
-                //
-                // If requested, unlink the file now that it has been created
-                // and the necessary data recorded. If the unlink fails, leave
-                // the file in the file system, but fail the create call.
-                //
-
-                if ((OpenFlags & OPEN_FLAG_UNLINK_ON_CREATE) != 0) {
-                    KeAcquireSharedExclusiveLockExclusive(FileObject->Lock);
-                    Status = IopSendUnlinkRequest(PathRoot,
-                                                  FileObject,
-                                                  DirectoryFileObject,
-                                                  Name,
-                                                  NameSize,
-                                                  &Unlinked);
-
-                    KeReleaseSharedExclusiveLockExclusive(FileObject->Lock);
-                    if (Unlinked == FALSE) {
-
-                        ASSERT(FALSE);
-
-                        Status = STATUS_FILE_EXISTS;
-                    }
-
-                    if (!KSUCCESS(Status)) {
-                        goto PathLookupThroughFileSystemEnd;
-                    }
-                }
+                Create->Created = Created;
 
             //
             // The creation request didn't work. It can only turn into an open
@@ -2538,11 +2721,12 @@ Return Value:
             //
 
             } else {
+                Create->Created = FALSE;
                 if ((Status == STATUS_FILE_EXISTS) &&
-                    (TypeOverride == IoObjectRegularFile) &&
+                    (Create->Type == IoObjectRegularFile) &&
                     ((OpenFlags & OPEN_FLAG_FAIL_IF_EXISTS) == 0)) {
 
-                    TypeOverride = IoObjectInvalid;
+                    Create = NULL;
 
                 } else {
                     goto PathLookupThroughFileSystemEnd;
@@ -2551,19 +2735,22 @@ Return Value:
         }
 
         //
-        // No override, open an existing file.
+        // No creation parameters, open an existing file.
         //
 
-        if (TypeOverride == IoObjectInvalid) {
+        if (Create == NULL) {
             DirectoryDevice = DirectoryFileObject->Device;
 
             ASSERT(IS_DEVICE_OR_VOLUME(DirectoryDevice));
 
+            FileObjectFlags = 0;
             Status = IopSendLookupRequest(DirectoryDevice,
                                           DirectoryFileObject,
                                           Name,
                                           NameSize,
-                                          &Properties);
+                                          &Properties,
+                                          &FileObjectFlags,
+                                          &MapFlags);
 
             if (!KSUCCESS(Status)) {
                 if (Status == STATUS_PATH_NOT_FOUND) {
@@ -2579,9 +2766,8 @@ Return Value:
 
             } else {
                 Properties.DeviceId = DirectoryFileObject->Properties.DeviceId;
-                FileObjectFlags = 0;
-                if ((OpenFlags & OPEN_FLAG_NON_CACHED) != 0) {
-                    FileObjectFlags |= FILE_OBJECT_FLAG_NON_CACHED;
+                if ((OpenFlags & OPEN_FLAG_NO_PAGE_CACHE) != 0) {
+                    FileObjectFlags |= FILE_OBJECT_FLAG_NO_PAGE_CACHE;
                 }
 
                 switch (Properties.Type) {
@@ -2608,6 +2794,7 @@ Return Value:
                 Status = IopCreateOrLookupFileObject(&Properties,
                                                      DirectoryDevice,
                                                      FileObjectFlags,
+                                                     MapFlags,
                                                      &FileObject,
                                                      &Created);
 
@@ -2623,7 +2810,7 @@ Return Value:
         //
 
         if ((Created == FALSE) && (FileObject != NULL)) {
-            if (((OpenFlags & OPEN_FLAG_NON_CACHED) != 0) &&
+            if (((OpenFlags & OPEN_FLAG_NO_PAGE_CACHE) != 0) &&
                 (IO_IS_FILE_OBJECT_CACHEABLE(FileObject) != FALSE)) {
 
                 Status = STATUS_RESOURCE_IN_USE;
@@ -2648,13 +2835,13 @@ Return Value:
         // restricted situations.
         //
 
-        if (TypeOverride != IoObjectInvalid) {
+        if (Create != NULL) {
 
             //
             // Pipes are allowed in the pipes directory.
             //
 
-            switch (TypeOverride) {
+            switch (Create->Type) {
             case IoObjectPipe:
                 if (IopGetPipeDirectory() != Object) {
                     break;
@@ -2662,7 +2849,7 @@ Return Value:
 
                 Status = IopCreatePipe(Name,
                                        NameSize,
-                                       CreatePermissions,
+                                       Create,
                                        &FileObject);
 
                 if (!KSUCCESS(Status) &&
@@ -2674,11 +2861,14 @@ Return Value:
 
                 break;
 
-            case IoObjectSharedMemoryObject:
-                Equal = IO_ARE_PATH_POINTS_EQUAL(
-                                  Directory,
-                                  IopGetSharedMemoryDirectory(FromKernelMode));
+            //
+            // Shared memory objects are allowed in the current process's
+            // shared memory object directory.
+            //
 
+            case IoObjectSharedMemoryObject:
+                ShmDirectory = IopGetSharedMemoryDirectory(FromKernelMode);
+                Equal = IO_ARE_PATH_POINTS_EQUAL(Directory, ShmDirectory);
                 if (Equal == FALSE) {
                     break;
                 }
@@ -2687,7 +2877,7 @@ Return Value:
                                                      Name,
                                                      NameSize,
                                                      OpenFlags,
-                                                     CreatePermissions,
+                                                     Create,
                                                      &FileObject);
 
                 if (!KSUCCESS(Status) &&
@@ -2734,7 +2924,7 @@ Return Value:
                 // system.
                 //
 
-                if (TypeOverride != IoObjectInvalid) {
+                if (Create != NULL) {
                     Status = STATUS_ACCESS_DENIED;
 
                 } else {
@@ -2760,17 +2950,19 @@ Return Value:
 
             Status = STATUS_UNSUCCESSFUL;
             FileObjectFlags = 0;
+            MapFlags = 0;
             if (Child->Type == ObjectDevice) {
-                Status = IopSendRootLookupRequest((PDEVICE)Child,
-                                                  &Properties,
-                                                  &RootLookupFlags);
+                Status = IopSendLookupRequest((PDEVICE)Child,
+                                              NULL,
+                                              NULL,
+                                              0,
+                                              &Properties,
+                                              &FileObjectFlags,
+                                              &MapFlags);
 
                 if (KSUCCESS(Status)) {
                     PathRoot = (PDEVICE)Child;
                     Properties.DeviceId = PathRoot->DeviceId;
-                    if ((RootLookupFlags & LOOKUP_FLAG_NON_CACHED) != 0) {
-                        FileObjectFlags |= FILE_OBJECT_FLAG_NON_CACHED;
-                    }
 
                 } else if (Status == STATUS_DEVICE_NOT_CONNECTED) {
                     goto PathLookupThroughFileSystemEnd;
@@ -2848,10 +3040,15 @@ Return Value:
             Status = IopCreateOrLookupFileObject(&Properties,
                                                  PathRoot,
                                                  FileObjectFlags,
+                                                 MapFlags,
                                                  &FileObject,
                                                  &Created);
 
             ObReleaseReference(PathRoot);
+            if (Create != NULL) {
+                Create->Created = Created;
+            }
+
             if (!KSUCCESS(Status)) {
 
                 //
@@ -2915,11 +3112,13 @@ Return Value:
         case IoObjectTerminalSlave:
         case IoObjectSharedMemoryObject:
             if (FileObject->SpecialIo == NULL) {
+
+                ASSERT((Create != NULL) &&
+                       (Create->Type == FileObject->Properties.Type));
+
                 Status = IopCreateSpecialIoObject(FromKernelMode,
                                                   OpenFlags,
-                                                  FileObject->Properties.Type,
-                                                  OverrideParameter,
-                                                  CreatePermissions,
+                                                  Create,
                                                   &FileObject);
 
                 if (!KSUCCESS(Status)) {
@@ -2954,12 +3153,6 @@ Return Value:
 
         Result->PathEntry->FileObject = FileObject;
         IopFileObjectAddPathEntryReference(Result->PathEntry->FileObject);
-        if ((OpenFlags & OPEN_FLAG_UNLINK_ON_CREATE) != 0) {
-            if (Result->PathEntry->SiblingListEntry.Next != NULL) {
-                LIST_REMOVE(&(Result->PathEntry->SiblingListEntry));
-                Result->PathEntry->SiblingListEntry.Next = NULL;
-            }
-        }
 
     //
     // Create and insert a new path entry.
@@ -2983,19 +3176,15 @@ Return Value:
         PathEntry->DoNotCache = DoNotCache;
 
         //
-        // Unless this routine unlinked the file as soon as it was created,
-        // there should be at least one hard link count and it needs to get
+        // There should be at least one hard link count and it needs to get
         // inserted into the directory's list of children.
         //
 
-        if ((OpenFlags & OPEN_FLAG_UNLINK_ON_CREATE) == 0) {
+        ASSERT((FileObject == NULL) ||
+               (FileObject->Properties.HardLinkCount != 0));
 
-            ASSERT((FileObject == NULL) ||
-                   (FileObject->Properties.HardLinkCount != 0));
-
-            INSERT_BEFORE(&(PathEntry->SiblingListEntry),
-                          &(DirectoryEntry->ChildList));
-        }
+        INSERT_BEFORE(&(PathEntry->SiblingListEntry),
+                      &(DirectoryEntry->ChildList));
 
         Result->PathEntry = PathEntry;
         IoMountPointAddReference(Directory->MountPoint);
@@ -3124,9 +3313,7 @@ Return Value:
                                &RemainingPath,
                                &RemainingPathSize,
                                OpenFlags,
-                               IoObjectInvalid,
                                NULL,
-                               FILE_PERMISSION_NONE,
                                RecursionLevel + 1,
                                Result);
 

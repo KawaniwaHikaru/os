@@ -31,11 +31,16 @@ Environment:
 
 #include <minoca/kernel/driver.h>
 #include "netcore.h"
-#include "ethernet.h"
 
 //
 // ---------------------------------------------------------------- Definitions
 //
+
+//
+// Define the maximum port value that requires special bind permission.
+//
+
+#define NET_PORT_PERMISSIONS_MAX 1023
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -294,6 +299,7 @@ NET_SOCKET_OPTION NetBasicSocketOptions[] = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -357,11 +363,12 @@ Return Value:
     //
 
     NetpEthernetInitialize();
-    NetpIp4Initialize();
     NetpArpInitialize();
+    NetpIp4Initialize();
     NetpUdpInitialize();
     NetpTcpInitialize();
     NetpRawInitialize();
+    NetpIgmpInitialize();
     NetpDhcpInitialize();
     NetpNetlinkInitialize();
     NetpNetlinkGenericInitialize(0);
@@ -676,8 +683,7 @@ Return Value:
     if ((NewNetworkEntry->Domain == NetDomainInvalid) ||
         (NewNetworkEntry->Interface.InitializeLink == NULL) ||
         (NewNetworkEntry->Interface.DestroyLink == NULL) ||
-        (NewNetworkEntry->Interface.ProcessReceivedData == NULL) ||
-        (NewNetworkEntry->Interface.PrintAddress == NULL)) {
+        (NewNetworkEntry->Interface.ProcessReceivedData == NULL)) {
 
         Status = STATUS_INVALID_PARAMETER;
         goto RegisterNetworkLayerEnd;
@@ -887,8 +893,7 @@ Return Value:
         (NewDataLinkEntry->Interface.DestroyLink == NULL) ||
         (NewDataLinkEntry->Interface.Send == NULL) ||
         (NewDataLinkEntry->Interface.ProcessReceivedPacket == NULL) ||
-        (NewDataLinkEntry->Interface.GetBroadcastAddress == NULL) ||
-        (NewDataLinkEntry->Interface.PrintAddress == NULL) ||
+        (NewDataLinkEntry->Interface.ConvertToPhysicalAddress == NULL) ||
         (NewDataLinkEntry->Interface.GetPacketSizeInformation == NULL)) {
 
         Status = STATUS_INVALID_PARAMETER;
@@ -1042,6 +1047,7 @@ Return Value:
     PLIST_ENTRY CurrentEntry;
     PNET_NETWORK_ENTRY NetworkEntry;
     BOOL NetworkFound;
+    ULONG NetworkProtocolNumber;
 
     //
     // Try the common ones first before going heavy by acquiring the lock and
@@ -1072,7 +1078,10 @@ Return Value:
                                       NET_NETWORK_ENTRY,
                                       ListEntry);
 
-            if (NetworkEntry->ParentProtocolNumber == ParentProtocolNumber) {
+            NetworkProtocolNumber = NetworkEntry->ParentProtocolNumber;
+            if ((NetworkProtocolNumber != INVALID_PROTOCOL_NUMBER) &&
+                (NetworkProtocolNumber == ParentProtocolNumber)) {
+
                 NetworkFound = TRUE;
                 break;
             }
@@ -1287,12 +1296,14 @@ Return Value:
                                        ListEntry);
 
             if (DataLinkEntry->Domain == Address->Domain) {
-                Length = DataLinkEntry->Interface.PrintAddress(
+                if (DataLinkEntry->Interface.PrintAddress != NULL) {
+                    Length = DataLinkEntry->Interface.PrintAddress(
                                               Address,
                                               StringBuffer,
                                               NET_PRINT_ADDRESS_STRING_LENGTH);
 
-                ASSERT(Length <= NET_PRINT_ADDRESS_STRING_LENGTH);
+                    ASSERT(Length <= NET_PRINT_ADDRESS_STRING_LENGTH);
+                }
 
                 break;
             }
@@ -1312,12 +1323,14 @@ Return Value:
                                       ListEntry);
 
             if (NetworkEntry->Domain == Address->Domain) {
-                Length = NetworkEntry->Interface.PrintAddress(
+                if (NetworkEntry->Interface.PrintAddress != NULL) {
+                    Length = NetworkEntry->Interface.PrintAddress(
                                               Address,
                                               StringBuffer,
                                               NET_PRINT_ADDRESS_STRING_LENGTH);
 
-                ASSERT(Length <= NET_PRINT_ADDRESS_STRING_LENGTH);
+                    ASSERT(Length <= NET_PRINT_ADDRESS_STRING_LENGTH);
+                }
 
                 break;
             }
@@ -1376,6 +1389,7 @@ Return Value:
     PNET_NETWORK_ENTRY NetworkEntry;
     BOOL NetworkFound;
     PNET_PROTOCOL_ENTRY ProtocolEntry;
+    ULONG ProtocolFlags;
     BOOL ProtocolFound;
     PNET_SOCKET Socket;
     KSTATUS Status;
@@ -1383,6 +1397,7 @@ Return Value:
     Socket = NULL;
     NetworkEntry = NULL;
     ProtocolEntry = NULL;
+    ProtocolFlags = 0;
 
     //
     // If the domain is not within the bounds of the socket portion of the
@@ -1397,7 +1412,9 @@ Return Value:
     //
     // Attempt to find a handler for this protocol and network. Make sure that
     // the supplied network protocol matches the found protocol entry's parent
-    // protocol. If not, then it's a protocol for a different network.
+    // protocol. If not, then it's a protocol for a different network. Skip
+    // this check if the protocol entry specifies that it will match any given
+    // protocol value.
     //
 
     ProtocolFound = FALSE;
@@ -1411,8 +1428,9 @@ Return Value:
             continue;
         }
 
-        if ((Type != NetSocketRaw) &&
-            (Protocol != 0) &&
+        ProtocolFlags = ProtocolEntry->Flags;
+        if ((Protocol != 0) &&
+            ((ProtocolFlags & NET_PROTOCOL_FLAG_MATCH_ANY_PROTOCOL) == 0) &&
             (ProtocolEntry->ParentProtocolNumber != Protocol)) {
 
             continue;
@@ -1444,7 +1462,15 @@ Return Value:
         goto CreateSocketEnd;
     }
 
-    if (Protocol == 0) {
+    //
+    // A supplied protocol value of 0 typically indicates that the default
+    // protocol value should be set. There are some protocol entries, however,
+    // that may actually want 0 to be supplied to socket creation.
+    //
+
+    if ((Protocol == 0) &&
+        ((ProtocolFlags & NET_PROTOCOL_FLAG_NO_DEFAULT_PROTOCOL) == 0)) {
+
         Protocol = ProtocolEntry->ParentProtocolNumber;
     }
 
@@ -1455,7 +1481,8 @@ Return Value:
     Status = ProtocolEntry->Interface.CreateSocket(ProtocolEntry,
                                                    NetworkEntry,
                                                    Protocol,
-                                                   &Socket);
+                                                   &Socket,
+                                                   0);
 
     if (!KSUCCESS(Status)) {
         goto CreateSocketEnd;
@@ -1472,6 +1499,21 @@ Return Value:
     RtlCopyMemory(&(Socket->UnboundPacketSizeInformation),
                   &(Socket->PacketSizeInformation),
                   sizeof(NET_PACKET_SIZE_INFORMATION));
+
+    //
+    // Allow the protocol a chance to do more work now that the socket is
+    // initialized by netcore.
+    //
+
+    Status = ProtocolEntry->Interface.CreateSocket(ProtocolEntry,
+                                                   NetworkEntry,
+                                                   Protocol,
+                                                   &Socket,
+                                                   1);
+
+    if (!KSUCCESS(Status)) {
+        goto CreateSocketEnd;
+    }
 
 CreateSocketEnd:
     if (!KSUCCESS(Status)) {
@@ -1530,6 +1572,10 @@ Return Value:
         RtlDebugPrint("Net: Destroy socket 0x%x\n", NetSocket);
     }
 
+    if (NetSocket->RemoteTranslation != NULL) {
+        NetTranslationEntryReleaseReference(NetSocket->RemoteTranslation);
+    }
+
     if (NetSocket->Link != NULL) {
         NetLinkReleaseReference(NetSocket->Link);
         NetSocket->Link = NULL;
@@ -1570,9 +1616,37 @@ Return Value:
 {
 
     PNET_SOCKET NetSocket;
+    ULONG ProtocolFlags;
     KSTATUS Status;
 
+    //
+    // If the port is non-zero and less than or equal to the maximum port that
+    // requires a permission check, make sure the thread as the right
+    // privilege. Some protocols do not have this generic port restriction and
+    // can opt out of the check.
+    //
+
     NetSocket = (PNET_SOCKET)Socket;
+    ProtocolFlags = NetSocket->Protocol->Flags;
+    if ((Address->Port != 0) &&
+        (Address->Port <= NET_PORT_PERMISSIONS_MAX) &&
+        (ProtocolFlags & NET_PROTOCOL_FLAG_NO_BIND_PERMISSIONS) == 0) {
+
+        Status = PsCheckPermission(PERMISSION_NET_BIND);
+        if (!KSUCCESS(Status)) {
+            goto BindToAddressEnd;
+        }
+    }
+
+    //
+    // The address's domain must match the socket's domain.
+    //
+
+    if (Address->Domain != Socket->Domain) {
+        Status = STATUS_DOMAIN_NOT_SUPPORTED;
+        goto BindToAddressEnd;
+    }
+
     Status = NetSocket->Protocol->Interface.BindToAddress(NetSocket,
                                                           Link,
                                                           Address);
@@ -1757,7 +1831,17 @@ Return Value:
         RtlDebugPrint("...\n");
     }
 
-    Status = NetSocket->Protocol->Interface.Connect(NetSocket, Address);
+    //
+    // The remote connection address's domain must match the socket's domain.
+    //
+
+    if (Address->Domain == Socket->Domain) {
+        Status = NetSocket->Protocol->Interface.Connect(NetSocket, Address);
+
+    } else {
+        Status = STATUS_DOMAIN_NOT_SUPPORTED;
+    }
+
     if (NetGlobalDebug != FALSE) {
         RtlDebugPrint("Net: Connect socket 0x%x to ", NetSocket);
         NetDebugPrintAddress(Address);
@@ -2097,16 +2181,10 @@ Return Value:
             // Acquire the lock to not return a torn address.
             //
 
-            if (NetSocket->KernelSocket.Type == NetSocketRaw) {
-                KeAcquireSharedExclusiveLockShared(NetRawSocketsLock);
-
-            } else {
-                KeAcquireSharedExclusiveLockShared(Protocol->SocketLock);
-            }
-
+            KeAcquireSharedExclusiveLockShared(Protocol->SocketLock);
             if (BasicOption == SocketBasicOptionLocalAddress) {
                 RtlCopyMemory(&Address,
-                              &(NetSocket->LocalAddress),
+                              &(NetSocket->LocalReceiveAddress),
                               sizeof(NETWORK_ADDRESS));
 
                 //
@@ -2118,31 +2196,25 @@ Return Value:
                     Address.Domain = NetSocket->KernelSocket.Domain;
                 }
 
-                //
-                // The port should be zero for all raw sockets. The address
-                // request returns the protocol as the port value.
-                //
-
-                if (NetSocket->KernelSocket.Type == NetSocketRaw) {
-                    Address.Port = NetSocket->KernelSocket.Protocol;
-                }
-
                 RtlCopyMemory(Data, &Address, *DataSize);
 
             } else {
 
                 ASSERT(BasicOption == SocketBasicOptionRemoteAddress);
 
-                RtlCopyMemory(Data, &(NetSocket->RemoteAddress), *DataSize);
+                //
+                // Fail if there is not a valid remote address.
+                //
+
+                if (NetSocket->RemoteAddress.Domain == NetDomainInvalid) {
+                    Status = STATUS_NOT_CONNECTED;
+
+                } else {
+                    RtlCopyMemory(Data, &(NetSocket->RemoteAddress), *DataSize);
+                }
             }
 
-            if (NetSocket->KernelSocket.Type == NetSocketRaw) {
-                KeReleaseSharedExclusiveLockShared(NetRawSocketsLock);
-
-            } else {
-                KeReleaseSharedExclusiveLockShared(Protocol->SocketLock);
-            }
-
+            KeReleaseSharedExclusiveLockShared(Protocol->SocketLock);
             break;
 
         case SocketBasicOptionReuseAnyAddress:
@@ -2216,6 +2288,19 @@ Return Value:
             break;
 
         case SocketBasicOptionDebug:
+
+            //
+            // Administrator priveleges are required to change the debug
+            // option.
+            //
+
+            if (Set != FALSE) {
+                Status = PsCheckPermission(PERMISSION_NET_ADMINISTRATOR);
+                if (!KSUCCESS(Status)) {
+                    break;
+                }
+            }
+
         case SocketBasicOptionInlineOutOfBand:
         case SocketBasicOptionRoutingDisabled:
 

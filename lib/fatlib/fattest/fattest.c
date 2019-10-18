@@ -269,9 +269,9 @@ Return Value:
         goto MainEnd;
     }
 
-    READ_INT64_SYNC(&(DirectoryProperties.FileSize), &DirectorySize);
+    DirectorySize = DirectoryProperties.Size;
     if (NewDirectorySize > DirectorySize) {
-        WRITE_INT64_SYNC(&(DirectoryProperties.FileSize), NewDirectorySize);
+        DirectoryProperties.Size = NewDirectorySize;
         FatWriteFileProperties(VolumeToken, &DirectoryProperties, 0);
     }
 
@@ -461,7 +461,7 @@ Return Value:
                 printf("Error: Immediately after writing block %d, offset %lu "
                        "had %x in it instead of %x\n",
                        BlockIndex,
-                       FillIndex * sizeof(ULONG),
+                       (long)FillIndex * sizeof(ULONG),
                        PageBuffer[FillIndex],
                        PageValue);
 
@@ -573,7 +573,7 @@ Return Value:
 
 VOID
 KdPrintWithArgumentList (
-    PSTR Format,
+    PCSTR Format,
     va_list ArgumentList
     )
 

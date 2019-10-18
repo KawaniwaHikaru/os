@@ -542,6 +542,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _DWE_DESCRIPTOR {
     ULONG Control;
     ULONG BufferSize;
@@ -551,6 +553,8 @@ typedef struct _DWE_DESCRIPTOR {
     ULONG Reserved;
     ULONGLONG Timestamp;
 } PACKED DWE_DESCRIPTOR, *PDWE_DESCRIPTOR;
+
+#pragma pack(pop)
 
 /*++
 
@@ -589,6 +593,10 @@ Members:
 
     ReceiveLock - Stores a pointer to a queued lock that protects the
         received list.
+
+    ConfigurationLock - Stores a pointer to a queued lock that protects the
+        enabled capabilities field and synchronizes configuration register
+        access between capability updates and checking the link state.
 
     CommandPhysicalAddress - Stores the physical address of the base of the
         command list (called a list but is really an array).
@@ -653,7 +661,11 @@ Members:
         being transmitted because there were no descriptors available. This is
         a sign that more descriptors should be allocated.
 
-    ChecksumFlags - Stores the current checksum offloading options.
+    SupportedCapabilities - Stores the set of capabilities that this device
+        supports. See NET_LINK_CAPABILITY_* for definitions.
+
+    EnabledCapabilities - Stores the currently enabled capabilities on the
+        devices. See NET_LINK_CAPABILITY_* for definitions.
 
 --*/
 
@@ -669,6 +681,7 @@ typedef struct _DWE_DEVICE {
     PVOID ReceiveData;
     ULONG ReceiveBegin;
     PQUEUED_LOCK ReceiveLock;
+    PQUEUED_LOCK ConfigurationLock;
     PIO_BUFFER DescriptorIoBuffer;
     PDWE_DESCRIPTOR TransmitDescriptors;
     PDWE_DESCRIPTOR ReceiveDescriptors;
@@ -690,7 +703,8 @@ typedef struct _DWE_DEVICE {
     BYTE MacAddress[ETHERNET_ADDRESS_SIZE];
     ULONG PhyId;
     UINTN DroppedTxPackets;
-    ULONG ChecksumFlags;
+    ULONG SupportedCapabilities;
+    ULONG EnabledCapabilities;
 } DWE_DEVICE, *PDWE_DEVICE;
 
 //

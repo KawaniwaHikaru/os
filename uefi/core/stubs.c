@@ -59,7 +59,7 @@ ULONG KeActiveProcessorCount = 1;
 
 VOID
 RtlDebugPrint (
-    PSTR Format,
+    PCSTR Format,
     ...
     )
 
@@ -155,6 +155,87 @@ Return Value:
 
     RtlDebugService(EXCEPTION_ASSERTION_FAILURE, NULL);
     return;
+}
+
+VOID
+RtlpGetDoubleArgument (
+    BOOL LongDouble,
+    va_list *ArgumentList,
+    PDOUBLE_PARTS DoubleParts
+    )
+
+/*++
+
+Routine Description:
+
+    This routine gets a double from the argument list. It is used by printf,
+    and is a separate function so that floating point support can be shaved out
+    of the library.
+
+Arguments:
+
+    LongDouble - Supplies a boolean indicating if the argument is a long double
+        or just a regular double.
+
+    ArgumentList - Supplies a pointer to the VA argument list. It's a pointer
+        so that the effect of the va_arg can be felt by the calling function.
+
+    DoubleParts - Supplies a pointer where the double is returned, disguised in
+        a structure so as not to force floating point arguments.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    DoubleParts->Ulonglong = (ULONGLONG)DOUBLE_NAN_EXPONENT <<
+                             DOUBLE_EXPONENT_SHIFT;
+
+    return;
+}
+
+BOOL
+RtlpPrintDouble (
+    PPRINT_FORMAT_CONTEXT Context,
+    double Value,
+    VOID *Properties
+    )
+
+/*++
+
+Routine Description:
+
+    This routine prints a double to the destination given the style
+    properties.
+
+Arguments:
+
+    Context - Supplies a pointer to the initialized context structure.
+
+    DestinationSize - Supplies the size of the destination buffer. If NULL was
+        passed as the Destination argument, then this argument is ignored.
+
+    Value - Supplies a pointer to the value to convert to a string.
+
+    Properties - Supplies the style characteristics to use when printing this
+        integer.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE on failure.
+
+--*/
+
+{
+
+    ASSERT(FALSE);
+
+    return FALSE;
 }
 
 ULONG
@@ -268,7 +349,7 @@ Return Value:
 VOID
 KeCrashSystemEx (
     ULONG CrashCode,
-    PSTR CrashCodeString,
+    PCSTR CrashCodeString,
     ULONGLONG Parameter1,
     ULONGLONG Parameter2,
     ULONGLONG Parameter3,
@@ -362,7 +443,9 @@ Return Value:
 
 KSTATUS
 HlResetSystem (
-    SYSTEM_RESET_TYPE ResetType
+    SYSTEM_RESET_TYPE ResetType,
+    PVOID Data,
+    UINTN Size
     )
 
 /*++
@@ -376,15 +459,20 @@ Arguments:
     ResetType - Supplies the desired reset type. If the desired reset type is
         not supported, a cold reset will be attempted.
 
+    Data - Supplies a pointer to platform-specific reboot data.
+
+    Size - Supplies the size of the platform-specific data in bytes.
+
 Return Value:
 
     Does not return on success, the system is reset.
 
     STATUS_INVALID_PARAMETER if an invalid reset type was supplied.
 
-    STATUS_NOT_SUPPORTED if the system cannot be reset.
+    STATUS_NO_INTERFACE if there are no appropriate reboot capababilities
+    registered with the system.
 
-    STATUS_UNSUCCESSFUL if the system did not reset.
+    Other status codes on other failures.
 
 --*/
 
@@ -410,7 +498,7 @@ Return Value:
     if ((EfiRuntimeServices != NULL) &&
         (EfiRuntimeServices->ResetSystem != NULL)) {
 
-        EfiResetSystem(EfiResetType, 0, 0, NULL);
+        EfiResetSystem(EfiResetType, 0, Size, Data);
     }
 
     return STATUS_UNSUCCESSFUL;

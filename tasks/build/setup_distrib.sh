@@ -1,5 +1,10 @@
 #!/bin/sh
-## Copyright (c) 2015 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2015 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -53,7 +58,7 @@ make_index="$SRCROOT/third-party/build/opkg-utils/opkg-make-index"
 package_dir="$SRCROOT/$ARCH$VARIANT$DEBUG/bin/packages"
 index_file="$package_dir/Packages"
 python "$make_index" "$package_dir" > "$index_file"
-cat "$index_file" | tr -d '\r' | gzip > "${index_file}.gz"
+cat "$index_file" | tr -d '\r' | gzip -9 > "${index_file}.gz"
 
 ##
 ## Create a local configuration that prefers the local package repository.
@@ -72,7 +77,7 @@ if [ "$ARCH$VARIANT" = "x86q" ]; then
 fi
 
 ##
-## Perform an offline install of distributed.
+## Perform an offline install of the minimal set of packages.
 ##
 
 PACKAGES="opkg gzip tar wget nano libpcre"

@@ -278,16 +278,23 @@ Author:
 // ------------------------------------------------------ Data Type Definitions
 //
 
+//
+// Define the system call numbers. Note that the first few are defined in
+// assmebly as well, so if the top of this table changes arrangement those
+// first few would need upkeep as well. Please move any system call numbers
+// referenced from assembly to the top.
+//
+
 typedef enum _SYSTEM_CALL_NUMBER {
     SystemCallInvalid,
     SystemCallRestoreContext,
+    SystemCallForkProcess,
     SystemCallExitThread,
     SystemCallOpen,
     SystemCallClose,
     SystemCallPerformIo,
     SystemCallCreatePipe,
     SystemCallCreateThread,
-    SystemCallForkProcess,
     SystemCallExecuteImage,
     SystemCallChangeDirectory,
     SystemCallSetSignalHandler,
@@ -312,7 +319,6 @@ typedef enum _SYSTEM_CALL_NUMBER {
     SystemCallReadSymbolicLink,
     SystemCallDelete,
     SystemCallRename,
-    SystemCallTimeZoneControl,
     SystemCallMountOrUnmount,
     SystemCallQueryTimeCounter,
     SystemCallTimerControl,
@@ -407,14 +413,6 @@ typedef enum _FILE_CONTROL_COMMAND {
     FileControlCommandCount
 } FILE_CONTROL_COMMAND, *PFILE_CONTROL_COMMAND;
 
-typedef enum _TIME_ZONE_OPERATION {
-    TimeZoneOperationInvalid,
-    TimeZoneOperationGetCurrentZoneData,
-    TimeZoneOperationGetZoneData,
-    TimeZoneOperationGetAllData,
-    TimeZoneOperationSetZone
-} TIME_ZONE_OPERATION, *PTIME_ZONE_OPERATION;
-
 typedef enum _TIMER_OPERATION {
     TimerOperationInvalid,
     TimerOperationCreateTimer,
@@ -440,6 +438,30 @@ typedef enum _RESOURCE_USAGE_REQUEST {
 //
 // System call parameter structures
 //
+
+/*++
+
+Structure Description:
+
+    This structure defines the system call parameters for the fork call.
+
+Members:
+
+    Flags - Stores a bitfield of flags governing the behavior of the child.
+
+    FrameRestoreBase - Stores an optional pointer that is only used if the
+        VFORK flag is set in the child. In this case, the kernel will copy a
+        region of the stack from this supplied pointer to the current stack
+        pointer into temporary storage. When the child execs or exits, the
+        kernel will copy this region back into the process, "restoring" that
+        region of the stack after the child trashed it.
+
+--*/
+
+typedef struct _SYSTEM_CALL_FORK {
+    ULONG Flags;
+    PVOID FrameRestoreBase;
+} SYSCALL_STRUCT SYSTEM_CALL_FORK, *PSYSTEM_CALL_FORK;
 
 /*++
 
@@ -673,7 +695,7 @@ Structure Description:
 
 Members:
 
-    Environment - Supplies the image name, arguments, and environment.
+    Environment - Stores the image name, arguments, and environment.
 
 --*/
 
@@ -1490,45 +1512,6 @@ typedef struct _SYSTEM_CALL_RENAME {
 
 Structure Description:
 
-    This structure defines the system call parameters for time zone control
-    operations.
-
-Members:
-
-    Operation - Stores the time zone operation to perform.
-
-    DataBuffer - Stores a pointer to the data buffer where the requested data
-        will be returned.
-
-    DataBufferSize - Stores the size of the supplied buffer on success. Returns
-        the needed size for the given data, even if no data buffer is supplied.
-
-    ZoneName - Stores a pointer to the string containing the zone name to
-        switch to.
-
-    ZoneNameSize - Stores the size of the zone name buffer in bytes.
-
-    OriginalZoneName - Stores an optional pointer to a buffer where the
-        original time zone name will be returned.
-
-    OriginalZoneNameSize - Stores the size of the original zone name buffer.
-
---*/
-
-typedef struct _SYSTEM_CALL_TIME_ZONE_CONTROL {
-    TIME_ZONE_OPERATION Operation;
-    PVOID DataBuffer;
-    ULONG DataBufferSize;
-    PSTR ZoneName;
-    ULONG ZoneNameSize;
-    PSTR OriginalZoneName;
-    ULONG OriginalZoneNameSize;
-} SYSCALL_STRUCT SYSTEM_CALL_TIME_ZONE_CONTROL, *PSYSTEM_CALL_TIME_ZONE_CONTROL;
-
-/*++
-
-Structure Description:
-
     This structure defines the system call parameters for mounting or
     unmounting a file, directory, volume, pipe, socket or device.
 
@@ -1836,7 +1819,7 @@ Structure Description:
 
 Members:
 
-    Root - Stores a pointer indicating whether to get the path to the current
+    Root - Stores a boolean indicating whether to get the path to the current
         working directory (FALSE) or to get the path of the current chroot
         environment (TRUE). If the caller does not have permission to escape
         a changed root, or the root has not been changed, then / is returned
@@ -1847,8 +1830,6 @@ Members:
 
     BufferSize - Stores the size of the buffer on input. On output, stores the
         required size of the buffer.
-
-    Status - Stores the resulting status code from the kernel.
 
 --*/
 
@@ -2544,6 +2525,7 @@ Members:
 --*/
 
 typedef union _SYSTEM_CALL_PARAMETER_UNION {
+    SYSTEM_CALL_FORK Fork;
     SYSTEM_CALL_EXIT_THREAD ExitThread;
     SYSTEM_CALL_OPEN Open;
     SYSTEM_CALL_PERFORM_IO PerformIo;
@@ -2573,7 +2555,6 @@ typedef union _SYSTEM_CALL_PARAMETER_UNION {
     SYSTEM_CALL_READ_SYMBOLIC_LINK ReadSymbolicLink;
     SYSTEM_CALL_DELETE Delete;
     SYSTEM_CALL_RENAME Rename;
-    SYSTEM_CALL_TIME_ZONE_CONTROL TimeZoneControl;
     SYSTEM_CALL_MOUNT_UNMOUNT MountUnmount;
     SYSTEM_CALL_QUERY_TIME_COUNTER QueryTimeCounter;
     SYSTEM_CALL_TIMER_CONTROL TimerControl;

@@ -92,8 +92,8 @@ Return Value:
     // and EFI image handle, in case EFI ever changes the size of an EFI_HANDLE.
     //
 
-    Parameters->EfiImageHandle = &BoEfiImageHandle;
-    Parameters->EfiSystemTable = BoEfiSystemTable;
+    Parameters->EfiImageHandle = (UINTN)&BoEfiImageHandle;
+    Parameters->EfiSystemTable = (UINTN)BoEfiSystemTable;
     return STATUS_SUCCESS;
 }
 

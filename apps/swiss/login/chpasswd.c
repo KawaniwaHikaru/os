@@ -291,7 +291,7 @@ Return Value:
     // it. Don't freak out if this fails, as maybe the root does have it.
     //
 
-    RandomSource = open(URANDOM_PATH, O_RDONLY);
+    RandomSource = SwOpen(URANDOM_PATH, O_RDONLY, 0);
 
     //
     // Chroot if requested. Warm up crypt first in case libcrypt isn't in the
@@ -392,6 +392,12 @@ Return Value:
         errno = 0;
         Shadow = getspnam(UserName);
         if ((Shadow == NULL) && (errno != ENOENT)) {
+            if ((errno == EPERM) || (errno == EACCES)) {
+                SwPrintError(errno, NULL, "Cannot access the password file");
+                Status = 1;
+                goto MainEnd;
+            }
+
             SwPrintError(0,
                          NULL,
                          "Shadow entry not found for user %s on line %I64d",

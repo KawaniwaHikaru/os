@@ -27,7 +27,13 @@ Environment:
 
 --*/
 
+from menv import kernelLibrary;
+
 function build() {
+    var entries;
+    var lib;
+    var sources;
+
     sources = [
         "tables.c"
     ];
@@ -37,8 +43,7 @@ function build() {
         "inputs": sources,
     };
 
-    entries = static_library(lib);
+    entries = kernelLibrary(lib);
     return entries;
 }
 
-return build();

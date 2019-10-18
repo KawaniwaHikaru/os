@@ -25,7 +25,16 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary, staticLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var buildLib;
+    var entries;
+    var lib;
+    var lib32;
+    var sources;
+
     sources = [
         "fat.c",
         "fatcache.c",
@@ -38,17 +47,27 @@ function build() {
         "inputs": sources,
     };
 
-    build_lib = {
+    buildLib = {
         "label": "build_fat",
         "output": "fat",
         "inputs": sources,
-        "build": TRUE,
+        "build": true,
         "prefix": "build"
     };
 
-    entries = static_library(lib);
-    entries += static_library(build_lib);
+    entries = kernelLibrary(lib);
+    entries += staticLibrary(buildLib);
+    if (arch == "x64") {
+        lib32 = {
+            "label": "fat32",
+            "inputs": sources,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(lib32);
+    }
+
     return entries;
 }
 
-return build();

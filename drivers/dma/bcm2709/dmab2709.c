@@ -327,6 +327,7 @@ DMA_INFORMATION DmaBcm2709InformationTemplate = {
     DMA_INFORMATION_VERSION,
     UUID_DMA_BCM2709_CONTROLLER,
     0,
+    DMA_CAPABILITY_CONTINUOUS_MODE,
     NULL,
     0,
     DMA_BCM2709_CHANNEL_COUNT,
@@ -338,6 +339,7 @@ DMA_INFORMATION DmaBcm2709InformationTemplate = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -347,7 +349,7 @@ DriverEntry (
 
 Routine Description:
 
-    This routine is the entry point for the RK32 GPIO driver. It registers
+    This routine is the entry point for the Broadcom GPIO driver. It registers
     its other dispatch functions, and performs driver-wide initialization.
 
 Arguments:
@@ -689,6 +691,7 @@ Return Value:
 {
 
     ULONG Channel;
+    ULONG ChannelStatus;
     PDMA_BCM2709_CONTROLLER Controller;
     INTERRUPT_STATUS Status;
     ULONG Value;
@@ -701,16 +704,23 @@ Return Value:
 
         //
         // The interrupt must be acknowledged for each channel or else it will
-        // keep interrupting.
+        // keep interrupting. Do this as a read-modify-write as to not unset
+        // the active bit for any looping transfers. This should also clear the
+        // end bit.
         //
 
         while (Value != 0) {
             Channel = RtlCountTrailingZeros32(Value);
             Value &= ~(1ULL << Channel);
+            ChannelStatus = DMA_BCM2709_CHANNEL_READ(Controller,
+                                                     Channel,
+                                                     DmaBcm2709ChannelStatus);
+
+            ChannelStatus |= DMA_BCM2709_CHANNEL_STATUS_INTERRUPT;
             DMA_BCM2709_CHANNEL_WRITE(Controller,
                                       Channel,
                                       DmaBcm2709ChannelStatus,
-                                      DMA_BCM2709_CHANNEL_STATUS_INTERRUPT);
+                                      ChannelStatus);
         }
 
         DMA_BCM2709_WRITE(Controller, DmaBcm2709InterruptStatus, Value);
@@ -1088,6 +1098,15 @@ Return Value:
     LockHeld = FALSE;
 
     //
+    // Only 32-bit and 128-bit widths are supported.
+    //
+
+    if ((Transfer->Width != 32) && (Transfer->Width != 128)) {
+        Status = STATUS_NOT_SUPPORTED;
+        goto SubmitEnd;
+    }
+
+    //
     // If this channel does not have a control block table yet, then allocate
     // it now.
     //
@@ -1360,6 +1379,7 @@ Return Value:
 
     UINTN BytesThisRound;
     ULONG Channel;
+    BOOL Continuous;
     PDMA_BCM2709_CONTROL_BLOCK ControlBlock;
     ULONG ControlBlockCount;
     PHYSICAL_ADDRESS ControlBlockPhysical;
@@ -1386,12 +1406,31 @@ Return Value:
         goto PrepareTransferEnd;
     }
 
+    Continuous = FALSE;
     Channel = DmaTransfer->Allocation->Allocation;
+
+    //
+    // In continuous mode, the maximum block size is defined by the interrupt
+    // period, as long as it is non-zero. If it is zero, then there is only
+    // one interrupt after the full chunk of data has been transferred and the
+    // block size doesn't matter.
+    //
+
+    MaxSize = 0;
+    if ((DmaTransfer->Flags & DMA_TRANSFER_CONTINUOUS) != 0) {
+        MaxSize = DmaTransfer->InterruptPeriod;
+        Continuous = TRUE;
+    }
+
     if (Channel >= DMA_BCM2709_LITE_CHANNEL_START) {
-        MaxSize = DMA_BCM2709_MAX_LITE_TRANSFER_SIZE;
+        if ((MaxSize == 0) || (MaxSize > DMA_BCM2709_MAX_LITE_TRANSFER_SIZE)) {
+            MaxSize = DMA_BCM2709_MAX_LITE_TRANSFER_SIZE;
+        }
 
     } else {
-        MaxSize = DMA_BCM2709_MAX_TRANSFER_SIZE;
+        if ((MaxSize == 0) || (MaxSize > DMA_BCM2709_MAX_TRANSFER_SIZE)) {
+            MaxSize = DMA_BCM2709_MAX_TRANSFER_SIZE;
+        }
     }
 
     //
@@ -1446,7 +1485,7 @@ Return Value:
     ControlBlockCount = 0;
     TransferSize = 0;
     while ((Remaining != 0) &&
-           (ControlBlockCount + 1 < DMA_BCM2709_CONTROL_BLOCK_COUNT)) {
+           ((ControlBlockCount + 1) < DMA_BCM2709_CONTROL_BLOCK_COUNT)) {
 
         ASSERT(FragmentIndex < IoBuffer->FragmentCount);
 
@@ -1530,9 +1569,30 @@ Return Value:
         }
 
         Transfer->BytesPending += TransferSize;
+
+        //
+        // If the transfer is meant to loop, set the last control black to
+        // point back to the first.
+        //
+
+        if (Continuous != FALSE) {
+            ControlBlock->NextAddress =
+                                ControlBlockTable->Fragment[0].PhysicalAddress;
+        }
+
         ControlBlockCount += 1;
         ControlBlock += 1;
         ControlBlockPhysical += sizeof(DMA_BCM2709_CONTROL_BLOCK);
+    }
+
+    //
+    // If this is a continuous transfer and there are bytes remaining, it is
+    // too large (or too fragmented) to be handled by the DMA controller.
+    //
+
+    if ((Remaining != 0) && (Continuous != FALSE)) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto PrepareTransferEnd;
     }
 
     Status = STATUS_SUCCESS;
@@ -1605,9 +1665,27 @@ Return Value:
 
     ControlBlock->TransferLength = Size;
     ControlBlock->Stride = 0;
-    if (LastOne != FALSE) {
+
+    //
+    // Interrupt if this is a continuous transfer and the size equals the
+    // interrupt period or if this is the last control block.
+    //
+
+    if ((LastOne != FALSE) ||
+        (((DmaTransfer->Flags & DMA_TRANSFER_CONTINUOUS) != 0) &&
+         (DmaTransfer->InterruptPeriod == Size))) {
+
         TransferInformation |=
                              DMA_BCM2709_TRANSFER_INFORMATION_INTERRUPT_ENABLE;
+    }
+
+    //
+    // Make sure the next address is 0 if this is the last block in a
+    // non-continuous transfer.
+    //
+
+    if ((LastOne != FALSE) &&
+        ((DmaTransfer->Flags & DMA_TRANSFER_CONTINUOUS) == 0)) {
 
         ControlBlock->NextAddress = 0;
     }
@@ -1620,9 +1698,21 @@ Return Value:
         ControlBlock->DestinationAddress = MemoryAddress;
         if ((DmaTransfer->Flags & DMA_TRANSFER_ADVANCE_DEVICE) != 0) {
             TransferInformation |=
-                            DMA_BCM2709_TRANSFER_INFORMATION_SOURCE_WIDTH_128 |
-                            DMA_BCM2709_TRANSFER_INFORMATION_SOURCE_INCREMENT;
+                             DMA_BCM2709_TRANSFER_INFORMATION_SOURCE_INCREMENT;
+
+            //
+            // The default is a 32-bit device width.
+            //
+
+            if (DmaTransfer->Width == 128) {
+                TransferInformation |=
+                         DMA_BCM2709_TRANSFER_INFORMATION_SOURCE_WIDTH_128;
+            }
         }
+
+        //
+        // The memory address is free to write 128-bits at a time.
+        //
 
         TransferInformation |=
                        DMA_BCM2709_TRANSFER_INFORMATION_DESTINATION_WIDTH_128 |
@@ -1636,13 +1726,36 @@ Return Value:
 
         ControlBlock->SourceAddress = MemoryAddress;
         ControlBlock->DestinationAddress = DeviceAddress;
-        if ((DmaTransfer->Direction == DmaTransferMemoryToMemory) ||
-            ((DmaTransfer->Flags & DMA_TRANSFER_ADVANCE_DEVICE) != 0)) {
 
+        //
+        // The data can be written to a memory destination in 128-bit
+        // chunks.
+        //
+
+        if (DmaTransfer->Direction == DmaTransferMemoryToMemory) {
             TransferInformation |=
                        DMA_BCM2709_TRANSFER_INFORMATION_DESTINATION_WIDTH_128 |
                        DMA_BCM2709_TRANSFER_INFORMATION_DESTINATION_INCREMENT;
+
+        } else if ((DmaTransfer->Flags &
+                    DMA_TRANSFER_ADVANCE_DEVICE) != 0) {
+
+            TransferInformation |=
+                        DMA_BCM2709_TRANSFER_INFORMATION_DESTINATION_INCREMENT;
+
+            //
+            // The default is a 32-bit device width.
+            //
+
+            if (DmaTransfer->Width == 128) {
+                TransferInformation |=
+                        DMA_BCM2709_TRANSFER_INFORMATION_DESTINATION_WIDTH_128;
+            }
         }
+
+        //
+        // The memory address is free to read 128-bits at a time.
+        //
 
         TransferInformation |=
                      DMA_BCM2709_TRANSFER_INFORMATION_SOURCE_WIDTH_128 |
@@ -1680,24 +1793,47 @@ Return Value:
 
 {
 
+    UINTN BaseBlockAddress;
+    UINTN BlockIndex;
     ULONG ChannelStatus;
     BOOL CompleteTransfer;
+    BOOL Continuous;
+    PIO_BUFFER ControlBlockTable;
+    UINTN CurrentBlockAddress;
     PDMA_TRANSFER DmaTransfer;
     KSTATUS Status;
     PDMA_BCM2709_TRANSFER Transfer;
 
     Status = STATUS_SUCCESS;
+    CompleteTransfer = FALSE;
+    Continuous = FALSE;
+    DmaTransfer = NULL;
+
+    //
+    // Attempt to get the transfer from the channel.
+    //
+
+    Transfer = &(Controller->Channels[Channel].Transfer);
+    if (Transfer->Transfer != NULL) {
+        DmaTransfer = Transfer->Transfer;
+        if ((DmaTransfer->Flags & DMA_TRANSFER_CONTINUOUS) != 0) {
+            Continuous = TRUE;
+        }
+    }
 
     //
     // Before checking the transfer, take a peak at the channel's state. If
-    // it's active, then this interrupt may be from an old cancel. Ignore it.
+    // this is a non-continuous transfer and the channel is active, then this
+    // interrupt may be from an old cancel. Ignore it.
     //
 
     ChannelStatus = DMA_BCM2709_CHANNEL_READ(Controller,
                                              Channel,
                                              DmaBcm2709ChannelStatus);
 
-    if ((ChannelStatus & DMA_BCM2709_CHANNEL_STATUS_ACTIVE) != 0) {
+    if ((Continuous == FALSE) &&
+        ((ChannelStatus & DMA_BCM2709_CHANNEL_STATUS_ACTIVE) != 0)) {
+
         return;
     }
 
@@ -1714,26 +1850,38 @@ Return Value:
     }
 
     //
-    // Clear the end state for this channel.
-    //
-
-    ChannelStatus |= DMA_BCM2709_CHANNEL_STATUS_END;
-    DMA_BCM2709_CHANNEL_WRITE(Controller,
-                              Channel,
-                              DmaBcm2709ChannelStatus,
-                              ChannelStatus);
-
-    //
     // Ok. Carry on processing this channel interrupt to see if a transfer just
     // completed. If there is no transfer, then ignore it. It's been cancelled.
     //
 
-    Transfer = &(Controller->Channels[Channel].Transfer);
-    if (Transfer->Transfer == NULL) {
+    if (DmaTransfer == NULL) {
         return;
     }
 
-    DmaTransfer = Transfer->Transfer;
+    //
+    // If the transfer is meant to loop, the rest of this doesn't make sense.
+    // The transfers don't need updating as the loop goes on continuously and
+    // the completed bytes do not mean the same thing. For continuous
+    // transfers, the completed bytes store the current offset within the DMA
+    // transfer. Calculate that offset and call the completion callback.
+    //
+
+    if (Continuous != FALSE) {
+        CurrentBlockAddress = DMA_BCM2709_CHANNEL_READ(
+                                         Controller,
+                                         Channel,
+                                         DmaBcm2709ChannelControlBlockAddress);
+
+        ControlBlockTable = Controller->Channels[Channel].ControlBlockTable;
+        BaseBlockAddress = ControlBlockTable->Fragment[0].PhysicalAddress;
+        BlockIndex = (CurrentBlockAddress - BaseBlockAddress) /
+                     sizeof(DMA_BCM2709_CONTROL_BLOCK);
+
+        DmaTransfer->Completed = BlockIndex * DmaTransfer->InterruptPeriod;
+        DmaTransfer->Status = Status;
+        DmaTransfer->CompletionCallback(DmaTransfer);
+        return;
+    }
 
     //
     // Tear down the channel, since either way this transfer is over.

@@ -40,6 +40,7 @@ Environment:
 #include <grp.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,7 @@ Environment:
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include "../swlib.h"
 
 //
@@ -1389,7 +1391,7 @@ Return Value:
     strncpy(Name->Machine, UtsName.machine, sizeof(Name->Machine));
     Name->Machine[sizeof(Name->Machine) - 1] = '\0';
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__CYGWIN__) || defined(__FreeBSD__)
 
     Name->DomainName[0] = '\0';
 
@@ -2291,6 +2293,26 @@ Return Value:
 
 {
 
+    unsigned long long Seconds;
+
+    //
+    // The usleep function probably only takes a 32-bit value. Use the
+    // second-based sleep function to get within range of usleep.
+    //
+
+    while (Microseconds != (useconds_t)Microseconds) {
+        Seconds = Microseconds / 1000000ULL;
+        if (Seconds > UINT32_MAX) {
+            Seconds = UINT32_MAX;
+        }
+
+        if (sleep((unsigned)Seconds) != 0) {
+            return;
+        }
+
+        Microseconds -= Seconds * 1000000ULL;
+    }
+
     usleep(Microseconds);
     return;
 }
@@ -3055,7 +3077,9 @@ Return Value:
     // Send a signal to init.
     //
 
-    return kill(1, Signal);
+    errno = 0;
+    kill(1, Signal);
+    return errno;
 }
 
 int
@@ -3189,7 +3213,9 @@ Return Value:
     struct termios TerminalSettings;
 
     if (SwOriginalTerminalSettingsValid == 0) {
-        SwSaveTerminalMode();
+        if (!SwSaveTerminalMode()) {
+            return 0;
+        }
     }
 
     memcpy(&TerminalSettings,
@@ -3311,6 +3337,44 @@ Return Value:
     }
 
     return Result;
+}
+
+int
+SwOpen (
+    const char *Path,
+    int OpenFlags,
+    mode_t Mode
+    )
+
+/*++
+
+Routine Description:
+
+    This routine opens a file and connects it to a file descriptor.
+
+Arguments:
+
+    Shell - Supplies a pointer to the shell.
+
+    Path - Supplies a pointer to a null terminated string containing the path
+        of the file to open.
+
+    OpenFlags - Supplies a set of flags ORed together. See O_* definitions.
+
+    Mode - Supplies an optional integer representing the permission mask to set
+        if the file is to be created by this open call.
+
+Return Value:
+
+    Returns a file descriptor on success.
+
+    -1 on failure. The errno variable will be set to indicate the error.
+
+--*/
+
+{
+
+    return open(Path, OpenFlags, Mode);
 }
 
 //

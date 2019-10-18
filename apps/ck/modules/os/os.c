@@ -30,10 +30,13 @@ Environment:
 // ------------------------------------------------------------------- Includes
 //
 
-#include "osp.h"
 #include <errno.h>
-#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+
+#include "osp.h"
 
 //
 // ---------------------------------------------------------------- Definitions
@@ -48,22 +51,22 @@ Environment:
 //
 
 VOID
-CkpOsOpen (
+CkpOsFork (
     PCK_VM Vm
     );
 
 VOID
-CkpOsClose (
+CkpOsWaitPid (
     PCK_VM Vm
     );
 
 VOID
-CkpOsRead (
+CkpOsExit (
     PCK_VM Vm
     );
 
 VOID
-CkpOsWrite (
+CkpOsNproc (
     PCK_VM Vm
     );
 
@@ -72,10 +75,13 @@ CkpOsWrite (
 //
 
 CK_VARIABLE_DESCRIPTION CkOsModuleValues[] = {
-    {CkTypeFunction, "open", CkpOsOpen, 3},
-    {CkTypeFunction, "close", CkpOsClose, 1},
-    {CkTypeFunction, "read", CkpOsRead, 2},
-    {CkTypeFunction, "write", CkpOsWrite, 2},
+    {CkTypeInteger, "WNOHANG", NULL, WNOHANG},
+    {CkTypeInteger, "WUNTRACED", NULL, WUNTRACED},
+    {CkTypeInteger, "WCONTINUED", NULL, WCONTINUED},
+    {CkTypeFunction, "fork", CkpOsFork, 0},
+    {CkTypeFunction, "waitpid", CkpOsWaitPid, 2},
+    {CkTypeFunction, "exit", CkpOsExit, 1},
+    {CkTypeFunction, "nproc", CkpOsNproc, 0},
     {CkTypeInvalid, NULL, NULL, 0}
 };
 
@@ -135,12 +141,29 @@ Return Value:
 
 {
 
+    //
+    // Define the OsError exception.
+    //
+
+    CkPushString(Vm, "OsError", 7);
+    CkGetVariable(Vm, 0, "Exception");
+    CkPushClass(Vm, 0, 0);
+    CkSetVariable(Vm, 0, "OsError");
+
+    //
+    // Register the functions and definitions.
+    //
+
+    CkDeclareVariables(Vm, 0, CkOsErrnoValues);
+    CkDeclareVariables(Vm, 0, CkOsIoModuleValues);
+    CkDeclareVariables(Vm, 0, CkOsUserValues);
     CkDeclareVariables(Vm, 0, CkOsModuleValues);
+    CkpOsInitializeInfo(Vm);
     return;
 }
 
 VOID
-CkpOsOpen (
+CkpOsFork (
     PCK_VM Vm
     )
 
@@ -148,9 +171,9 @@ CkpOsOpen (
 
 Routine Description:
 
-    This routine implements the open call. It takes in a path string, flags
-    integer, and creation mode integer. It returns a file descriptor integer
-    on success, or -1 on failure.
+    This routine implements the fork call. It takes no parameters. In the child
+    forked process, it returns 0. In the parent process, it returns the pid of
+    the child. On error and on Windows an exception is raised.
 
 Arguments:
 
@@ -158,70 +181,27 @@ Arguments:
 
 Return Value:
 
-    None.
+    Returns 0 in the child, or the pid in the parent. On failure, an exception
+    is raised.
 
 --*/
 
 {
 
-    INT Descriptor;
-    ULONG Flags;
-    ULONG Mode;
-    PCSTR Path;
+    pid_t Result;
 
-    //
-    // The function is open(path, flags, mode).
-    //
-
-    if (!CkCheckArguments(Vm, 3, CkTypeString, CkTypeInteger, CkTypeInteger)) {
+    Result = fork();
+    if (Result < 0) {
+        CkpOsRaiseError(Vm, NULL);
         return;
     }
 
-    Path = CkGetString(Vm, 1, NULL);
-    Flags = CkGetInteger(Vm, 2);
-    Mode = CkGetInteger(Vm, 3);
-    Descriptor = open(Path, Flags, Mode);
-    CkReturnInteger(Vm, Descriptor);
-    return;
-}
-
-VOID
-CkpOsClose (
-    PCK_VM Vm
-    )
-
-/*++
-
-Routine Description:
-
-    This routine implements the close call. It takes in a file descriptor
-    integer, and returns the integer returned by the close call.
-
-Arguments:
-
-    Vm - Supplies a pointer to the virtual machine.
-
-Return Value:
-
-    None.
-
---*/
-
-{
-
-    INT Result;
-
-    if (!CkCheckArguments(Vm, 1, CkTypeInteger)) {
-        return;
-    }
-
-    Result = close(CkGetInteger(Vm, 1));
     CkReturnInteger(Vm, Result);
     return;
 }
 
 VOID
-CkpOsRead (
+CkpOsWaitPid (
     PCK_VM Vm
     )
 
@@ -229,10 +209,8 @@ CkpOsRead (
 
 Routine Description:
 
-    This routine implements the read call. It takes in a file descriptor
-    integer and a size, and reads at most that size byte from the descriptor.
-    It returns a string containing the bytes read on success, an empty string
-    if no bytes were read, or null on failure.
+    This routine implements the waitpid call. It takes two parameters: a pid
+    to wait for, and an integer bitfield of options to wait for.
 
 Arguments:
 
@@ -240,50 +218,66 @@ Arguments:
 
 Return Value:
 
-    None.
+    Returns a list of [Pid, Status] on success. Status is either non-negative
+    if the process exited, or negative if the process hit a signal (and either
+    stopped or terminated). Status will be 0x1000 if the process is continued.
+
+    Returns null if WNOHANG is specified and no children are ready.
+
+    Raises an exception on failure and on Windows.
 
 --*/
 
 {
 
-    PSTR Buffer;
-    ssize_t BytesRead;
-    INT Descriptor;
-    INT Size;
+    pid_t Result;
+    int Status;
+    CK_INTEGER StatusValue;
 
     if (!CkCheckArguments(Vm, 2, CkTypeInteger, CkTypeInteger)) {
         return;
     }
 
-    Descriptor = CkGetInteger(Vm, 1);
-    Size = CkGetInteger(Vm, 2);
-    if (Size < 0) {
-        Size = 0;
-    }
-
-    Buffer = CkPushStringBuffer(Vm, Size);
-    if (Buffer == NULL) {
+    Status = 0;
+    Result = waitpid(CkGetInteger(Vm, 1), &Status, CkGetInteger(Vm, 2));
+    if (Result < 0) {
+        CkpOsRaiseError(Vm, NULL);
         return;
     }
 
-    do {
-        BytesRead = read(Descriptor, Buffer, Size);
-
-    } while ((BytesRead < 0) && (errno == EINTR));
-
-    if (BytesRead < 0) {
+    if (Result == 0) {
         CkReturnNull(Vm);
-
-    } else {
-        CkFinalizeString(Vm, -1, BytesRead);
-        CkStackReplace(Vm, 0);
+        return;
     }
 
+    CkPushList(Vm);
+    CkPushInteger(Vm, Result);
+    CkListSet(Vm, -2, 0);
+    if (WIFEXITED(Status)) {
+        StatusValue = WEXITSTATUS(Status);
+
+    } else if (WIFSTOPPED(Status)) {
+        StatusValue = -WSTOPSIG(Status);
+
+    } else if (WIFSIGNALED(Status)) {
+        StatusValue = -WTERMSIG(Status);
+
+    } else if (WIFCONTINUED(Status)) {
+        StatusValue = 0x1000;
+
+    } else {
+        CkpOsRaiseError(Vm, NULL);
+        return;
+    }
+
+    CkPushInteger(Vm, StatusValue);
+    CkListSet(Vm, -2, 1);
+    CkStackReplace(Vm, 0);
     return;
 }
 
 VOID
-CkpOsWrite (
+CkpOsExit (
     PCK_VM Vm
     )
 
@@ -291,10 +285,8 @@ CkpOsWrite (
 
 Routine Description:
 
-    This routine implements the write call. It takes in a file descriptor
-    integer and a string, and attempts to write that string to the descriptor.
-    It returns the number of bytes actually written, which may be less than the
-    desired size, or -1 on failure.
+    This routine implements the exit call. It takes in an exit code, and does
+    not return because the current process exits.
 
 Arguments:
 
@@ -302,29 +294,141 @@ Arguments:
 
 Return Value:
 
-    None.
+    This routine does not return. The process exits.
 
 --*/
 
 {
 
-    PCSTR Buffer;
-    ssize_t BytesWritten;
-    INT Descriptor;
-    UINTN Size;
-
-    if (!CkCheckArguments(Vm, 2, CkTypeInteger, CkTypeString)) {
+    if (!CkCheckArguments(Vm, 1, CkTypeInteger)) {
         return;
     }
 
-    Descriptor = CkGetInteger(Vm, 1);
-    Buffer = CkGetString(Vm, 2, &Size);
-    do {
-        BytesWritten = write(Descriptor, Buffer, Size);
+    exit(CkGetInteger(Vm, 1));
+    CkReturnInteger(Vm, -1LL);
+    return;
+}
 
-    } while ((BytesWritten < 0) && (errno == EINTR));
+VOID
+CkpOsNproc (
+    PCK_VM Vm
+    )
 
-    CkReturnInteger(Vm, BytesWritten);
+/*++
+
+Routine Description:
+
+    This routine returns the number of processors online.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+Return Value:
+
+    None. The routine will return the number of processors online, minimum 1.
+
+--*/
+
+{
+
+    long Count;
+
+    Count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (Count <= 0) {
+        Count = 1;
+    }
+
+    CkReturnInteger(Vm, Count);
+    return;
+}
+
+VOID
+CkpOsRaiseError (
+    PCK_VM Vm,
+    PCSTR Path
+    )
+
+/*++
+
+Routine Description:
+
+    This routine raises an error associated with the current errno value.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Path - Supplies an optional path.
+
+Return Value:
+
+    This routine does not return. The process exits.
+
+--*/
+
+{
+
+    INT Error;
+    PCSTR ErrorString;
+    INT Length;
+    CHAR LocalBuffer[2048];
+
+    Error = errno;
+    if (Path != NULL) {
+        Length = snprintf(LocalBuffer,
+                          sizeof(LocalBuffer),
+                          "%s: %s",
+                          Path,
+                          strerror(Error));
+
+        ErrorString = LocalBuffer;
+
+    } else {
+        ErrorString = strerror(Error);
+        Length = strlen(ErrorString);
+    }
+
+    //
+    // Create an OsError exception.
+    //
+
+    CkPushModule(Vm, "os");
+    CkGetVariable(Vm, -1, "OsError");
+    CkPushString(Vm, ErrorString, Length);
+    CkCall(Vm, 1);
+
+    //
+    // Execute instance.errno = Error.
+    //
+
+    CkPushValue(Vm, -1);
+    CkPushString(Vm, "errno", 5);
+    CkPushInteger(Vm, Error);
+    CkCallMethod(Vm, "__set", 2);
+    CkStackPop(Vm);
+
+    //
+    // Also set instance.path if one was supplied.
+    //
+
+    CkPushValue(Vm, -1);
+    CkPushString(Vm, "path", 4);
+    if (Path != NULL) {
+        CkPushString(Vm, Path, strlen(Path));
+
+    } else {
+        CkPushNull(Vm);
+    }
+
+    CkCallMethod(Vm, "__set", 2);
+    CkStackPop(Vm);
+
+    //
+    // Raise the exception.
+    //
+
+    CkRaiseException(Vm, -1);
     return;
 }
 

@@ -1,6 +1,6 @@
 /*++
 
-Copyright (c) 2015 Minoca Corp.
+Copyright (c) 2017 Minoca Corp.
 
     This file is licensed under the terms of the GNU General Public License
     version 3. Alternative licensing terms are available. Contact
@@ -13,83 +13,83 @@ Module Name:
 
 Abstract:
 
-    This module implements support for the Minoca build generator.
+    This executable implements the Minoca build generator application, which
+    converts build.ck files into Makefiles or Ninja files.
 
 Author:
 
-    Evan Green 3-Dec-2015
+    Evan Green 5-Mar-2015
 
 Environment:
 
-    Any
+    User
 
 --*/
 
+from menv import application, mconfig;
+
 function build() {
-    base_sources = [
-        "chkfuncs.c",
-        "make.c",
-        "mingen.c",
-        "ninja.c",
-        "path.c",
-        "script.c"
+    var app;
+    var appName = "mingen";
+    var bootstrapStamp;
+    var bootstrapTool;
+    var config;
+    var entries;
+    var sources;
+    var tool;
+
+    sources = [
+        "make.ck",
+        "mingen.ck",
+        "ninja.ck",
+        "bootstrap/remakebs.sh"
     ];
 
-    uos_sources = [
-        "uos.c"
-    ];
-
-    win32_sources = [
-        "ntos.c"
-    ];
-
-    sources = base_sources + uos_sources;
-    build_sources = sources;
-    if (build_os == "Windows") {
-        build_sources = base_sources + win32_sources;
+    if (mconfig.build_os == "Windows") {
+        appName += ".exe";
     }
 
-    libs = [
-        "//apps/lib/chalk:chalk",
-        "//lib/yy:yy",
-        "//lib/rtl/rtlc:rtlc",
-        "//lib/rtl/base/:basertl"
-    ];
-
-    build_libs = [
-        "//apps/lib/chalk:build_chalk",
-        "//lib/yy:build_yy",
-        "//lib/rtl/rtlc:build_rtlc",
-        "//lib/rtl/base:build_basertl"
-    ];
-
-    build_includes = [
-        "$//apps/lib/chalk"
-    ];
-
-    includes = build_includes + [
-        "$//apps/libc/include"
-    ];
+    config = {
+        "CHALK_ARGS": "$IN $OUT"
+    };
 
     app = {
-        "label": "mingen",
-        "inputs": sources + libs,
-        "includes": includes
-    };
-
-    build_app = {
+        "type": "target",
         "label": "build_mingen",
-        "output": "mingen",
-        "inputs": build_sources + build_libs,
-        "includes": build_includes,
-        "build": TRUE,
-        "prefix": "build"
+        "output": appName,
+        "inputs": ["mkbundle.ck"],
+        "implicit": sources + ["apps/ck:build_chalk"],
+        "tool": "create_mingen",
+        "config": config
     };
 
-    entries = application(app);
-    entries += application(build_app);
+    tool = {
+        "type": "tool",
+        "name": "create_mingen",
+        "command": "$O/../../tools/bin/chalk $in $out",
+        "description": "Bundling mingen - $OUT"
+    };
+
+    //
+    // If mingen ever gets rebuilt, also rebuild the bootstrap files in case
+    // the recipe to make mingen changed.
+    //
+
+    bootstrapStamp = {
+        "type": "target",
+        "label": "bootstrap_stamp",
+        "inputs": [":build_mingen"],
+        "tool": "rebuild_bootstrap"
+    };
+
+    bootstrapTool = {
+        "type": "tool",
+        "name": "rebuild_bootstrap",
+        "command": "$SHELL $S/apps/mingen/bootstrap/remakebs.sh $OUT",
+        "description": "Rebuilding bootstrap Makefiles"
+    };
+
+    entries = [app, bootstrapStamp, tool, bootstrapTool];
     return entries;
 }
-
-return build();
 

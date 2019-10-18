@@ -647,6 +647,7 @@ PDRIVER Ser16550Driver = NULL;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -2565,13 +2566,13 @@ Return Value:
             // Enable opening of the root as a character device.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectCharacterDevice;
             Properties->HardLinkCount = 1;
             Properties->BlockSize = 0;
             Properties->BlockCount = 0;
-            WRITE_INT64_SYNC(&(Properties->FileSize), 0);
+            Properties->Size = 0;
             Status = STATUS_SUCCESS;
         }
 
@@ -2585,7 +2586,7 @@ Return Value:
     case IrpMinorSystemControlWriteFileProperties:
         FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
         Properties = FileOperation->FileProperties;
-        READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+        PropertiesFileSize = Properties->Size;
         if ((Properties->FileId != 0) ||
             (Properties->Type != IoObjectCharacterDevice) ||
             (Properties->HardLinkCount != 1) ||

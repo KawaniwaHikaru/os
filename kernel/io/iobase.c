@@ -69,9 +69,7 @@ IopCreateAnonymousObject (
     BOOL FromKernelMode,
     ULONG Access,
     ULONG Flags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT PathPoint
     );
 
@@ -187,6 +185,7 @@ Return Value:
 
 {
 
+    CREATE_PARAMETERS Create;
     PSTR Separator;
     KSTATUS Status;
 
@@ -205,15 +204,20 @@ Return Value:
         }
     }
 
+    if ((Flags & OPEN_FLAG_CREATE) != 0) {
+        Create.Type = IoObjectInvalid;
+        Create.Context = NULL;
+        Create.Permissions = CreatePermissions;
+        Create.Created = FALSE;
+    }
+
     Status = IopOpen(FromKernelMode,
                      Directory,
                      Path,
                      PathLength,
                      Access,
                      Flags,
-                     IoObjectInvalid,
-                     NULL,
-                     CreatePermissions,
+                     &Create,
                      Handle);
 
 OpenEnd:
@@ -306,7 +310,7 @@ Return Value:
         //
 
         FileObject = IoHandle->FileObject;
-        READ_INT64_SYNC(&(FileObject->Properties.FileSize), &LocalFileSize);
+        LocalFileSize = FileObject->Properties.Size;
         if (IoOffsetAlignment != NULL) {
             *IoOffsetAlignment = FileObject->Properties.BlockSize;
         }
@@ -1026,7 +1030,7 @@ Return Value:
         //
 
         case SeekCommandFromEnd:
-            READ_INT64_SYNC(&(FileObject->Properties.FileSize), &FileSize);
+            FileSize = FileObject->Properties.Size;
             LocalNewOffset = Offset + FileSize;
             break;
 
@@ -1104,7 +1108,7 @@ Return Value:
     }
 
     FileObject = Handle->FileObject;
-    READ_INT64_SYNC(&(FileObject->Properties.FileSize), &LocalFileSize);
+    LocalFileSize = FileObject->Properties.Size;
     *FileSize = LocalFileSize;
     Status = STATUS_SUCCESS;
     return Status;
@@ -1142,13 +1146,8 @@ Return Value:
     KSTATUS Status;
 
     Request.FieldsToSet = 0;
+    Request.FileProperties = FileProperties;
     Status = IoSetFileInformation(TRUE, Handle, &Request);
-    if (KSUCCESS(Status)) {
-        RtlCopyMemory(FileProperties,
-                      &(Request.FileProperties),
-                      sizeof(FILE_PROPERTIES));
-    }
-
     return Status;
 }
 
@@ -1189,12 +1188,12 @@ Return Value:
     PFILE_OBJECT FileObject;
     BOOL FileOwner;
     PFILE_PROPERTIES FileProperties;
-    ULONGLONG FileSize;
     BOOL HasChownPermission;
+    FILE_PROPERTIES LocalProperties;
     BOOL LockHeldExclusive;
     BOOL LockHeldShared;
     BOOL ModifyFileSize;
-    ULONGLONG NewFileSize;
+    IO_OFFSET NewFileSize;
     KSTATUS Status;
     BOOL StatusChanged;
     PKTHREAD Thread;
@@ -1204,7 +1203,13 @@ Return Value:
     LockHeldShared = FALSE;
     Thread = KeGetCurrentThread();
     FieldsToSet = Request->FieldsToSet;
-    FileProperties = &(Request->FileProperties);
+    if (FromKernelMode != FALSE) {
+        FileProperties = Request->FileProperties;
+
+    } else {
+        FileProperties = &LocalProperties;
+    }
+
     if (FieldsToSet == 0) {
         RtlZeroMemory(FileProperties, sizeof(FILE_PROPERTIES));
     }
@@ -1219,6 +1224,21 @@ Return Value:
 
     FileObject = Handle->PathPoint.PathEntry->FileObject;
     if (FromKernelMode == FALSE) {
+
+        //
+        // Copy the properties from the user mode buffer.
+        //
+
+        if (FieldsToSet != 0) {
+            Status = MmCopyFromUserMode(FileProperties,
+                                        Request->FileProperties,
+                                        sizeof(FILE_PROPERTIES));
+
+            if (!KSUCCESS(Status)) {
+                goto SetFileInformationEnd;
+            }
+        }
+
         FileOwner = FALSE;
         if ((FileObject->Properties.UserId ==
              Thread->Identity.EffectiveUserId) ||
@@ -1241,7 +1261,20 @@ Return Value:
         Status = STATUS_PERMISSION_DENIED;
         if ((FieldsToSet & FILE_PROPERTY_FIELD_USER_ID) != 0) {
             if (HasChownPermission == FALSE) {
-                goto SetFileInformationEnd;
+
+                //
+                // Succeed a "non-change" for a file already owned by the user.
+                //
+
+                if ((FileOwner != FALSE) &&
+                    (FileObject->Properties.UserId ==
+                     FileProperties->UserId)) {
+
+                    FieldsToSet &= ~FILE_PROPERTY_FIELD_USER_ID;
+
+                } else {
+                    goto SetFileInformationEnd;
+                }
             }
         }
 
@@ -1418,16 +1451,13 @@ Return Value:
             }
 
             ModifyFileSize = TRUE;
-            READ_INT64_SYNC(&(FileProperties->FileSize), &NewFileSize);
+            NewFileSize = FileProperties->Size;
         }
 
     } else {
         RtlCopyMemory(FileProperties,
                       &(FileObject->Properties),
                       sizeof(FILE_PROPERTIES));
-
-        READ_INT64_SYNC(&(FileObject->Properties.FileSize), &FileSize);
-        WRITE_INT64_SYNC(&(FileProperties->FileSize), FileSize);
     }
 
     //
@@ -1478,6 +1508,16 @@ SetFileInformationEnd:
 
     } else if (LockHeldShared != FALSE) {
         KeReleaseSharedExclusiveLockShared(FileObject->Lock);
+    }
+
+    //
+    // Copy the buffer back to user mode if this is a successful get request.
+    //
+
+    if ((KSUCCESS(Status)) && (FromKernelMode == FALSE) && (FieldsToSet == 0)) {
+        Status = MmCopyToUserMode(Request->FileProperties,
+                                  FileProperties,
+                                  sizeof(FILE_PROPERTIES));
     }
 
     return Status;
@@ -1568,9 +1608,7 @@ Return Value:
                          &Path,
                          &PathSize,
                          OpenFlags,
-                         IoObjectInvalid,
                          NULL,
-                         FILE_PERMISSION_NONE,
                          &PathPoint);
 
     if (!KSUCCESS(Status)) {
@@ -1744,9 +1782,7 @@ Return Value:
                              &LocalSourcePath,
                              &LocalSourcePathSize,
                              OPEN_FLAG_SYMBOLIC_LINK | OPEN_FLAG_NO_MOUNT_POINT,
-                             IoObjectInvalid,
                              NULL,
-                             FILE_PERMISSION_NONE,
                              &SourcePathPoint);
 
         if (!KSUCCESS(Status)) {
@@ -1823,9 +1859,7 @@ Return Value:
                              &LocalDestinationPath,
                              &LocalDestinationPathSize,
                              OPEN_FLAG_SYMBOLIC_LINK | OPEN_FLAG_NO_MOUNT_POINT,
-                             IoObjectInvalid,
                              NULL,
-                             FILE_PERMISSION_NONE,
                              &DestinationPathPoint);
 
         if (!KSUCCESS(Status)) {
@@ -1854,9 +1888,7 @@ Return Value:
                                  &LocalDestinationPath,
                                  &LocalDestinationPathSize,
                                  OPEN_FLAG_SYMBOLIC_LINK,
-                                 IoObjectInvalid,
                                  NULL,
-                                 FILE_PERMISSION_NONE,
                                  &DestinationDirectoryPathPoint);
 
             if (!KSUCCESS(Status)) {
@@ -2103,9 +2135,7 @@ Return Value:
                                DestinationFile,
                                DestinationFileSize,
                                OPEN_FLAG_NO_MOUNT_POINT,
-                               IoObjectInvalid,
                                NULL,
-                               0,
                                &FoundPathPoint);
 
         //
@@ -2388,7 +2418,7 @@ KSTATUS
 IoCreateSymbolicLink (
     BOOL FromKernelMode,
     PIO_HANDLE Directory,
-    PSTR LinkName,
+    PCSTR LinkName,
     ULONG LinkNameSize,
     PSTR LinkTarget,
     ULONG LinkTargetSize
@@ -2430,6 +2460,7 @@ Return Value:
 {
 
     UINTN BytesCompleted;
+    CREATE_PARAMETERS Create;
     ULONG Flags;
     PIO_HANDLE Handle;
     IO_BUFFER IoBuffer;
@@ -2439,15 +2470,17 @@ Return Value:
     Flags = OPEN_FLAG_CREATE | OPEN_FLAG_FAIL_IF_EXISTS | OPEN_FLAG_TRUNCATE |
             OPEN_FLAG_SYMBOLIC_LINK;
 
+    Create.Type = IoObjectSymbolicLink;
+    Create.Context = NULL;
+    Create.Permissions = FILE_PERMISSION_ALL;
+    Create.Created = FALSE;
     Status = IopOpen(FromKernelMode,
                      Directory,
                      LinkName,
                      LinkNameSize,
                      IO_ACCESS_WRITE,
                      Flags,
-                     IoObjectSymbolicLink,
-                     NULL,
-                     FILE_PERMISSION_ALL,
+                     &Create,
                      &Handle);
 
     if (!KSUCCESS(Status)) {
@@ -2554,7 +2587,7 @@ Return Value:
         goto ReadSymbolicLinkEnd;
     }
 
-    READ_INT64_SYNC(&(FileProperties.FileSize), &Size);
+    Size = FileProperties.Size;
     TargetBufferSize = Size;
     if (Size != TargetBufferSize) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
@@ -2658,19 +2691,12 @@ Return Value:
 
 {
 
-    PDEVICE Device;
-    PFILE_OBJECT FileObject;
     KSTATUS Status;
 
-    FileObject = Handle->FileObject;
-    switch (FileObject->Properties.Type) {
+    switch (Handle->FileObject->Properties.Type) {
     case IoObjectBlockDevice:
     case IoObjectCharacterDevice:
-        Device = FileObject->Device;
-
-        ASSERT(Device->Header.Type == ObjectDevice);
-
-        Status = IopSendUserControlIrp(Device,
+        Status = IopSendUserControlIrp(Handle,
                                        MinorCode,
                                        FromKernelMode,
                                        ContextBuffer,
@@ -2694,6 +2720,15 @@ Return Value:
                                      FromKernelMode,
                                      ContextBuffer,
                                      ContextBufferSize);
+
+        break;
+
+    case IoObjectSharedMemoryObject:
+        Status = IopSharedMemoryUserControl(Handle,
+                                            MinorCode,
+                                            FromKernelMode,
+                                            ContextBuffer,
+                                            ContextBufferSize);
 
         break;
 
@@ -2843,8 +2878,53 @@ Return Value:
 }
 
 KSTATUS
+IoNotifyFileMapping (
+    PIO_HANDLE Handle,
+    BOOL Mapping
+    )
+
+/*++
+
+Routine Description:
+
+    This routine is called to notify a file object that it is being mapped
+    into memory or unmapped.
+
+Arguments:
+
+    Handle - Supplies the handle being mapped.
+
+    Mapping - Supplies a boolean indicating if a new mapping is being created
+        (TRUE) or an old mapping is being destroyed (FALSE).
+
+Return Value:
+
+    Status code.
+
+--*/
+
+{
+
+    PFILE_OBJECT FileObject;
+    KSTATUS Status;
+
+    FileObject = Handle->FileObject;
+    switch (FileObject->Properties.Type) {
+    case IoObjectSharedMemoryObject:
+        Status = IopSharedMemoryNotifyFileMapping(FileObject, Mapping);
+        break;
+
+    default:
+        Status = STATUS_SUCCESS;
+        break;
+    }
+
+    return Status;
+}
+
+KSTATUS
 IoOpenPageFile (
-    PSTR Path,
+    PCSTR Path,
     ULONG PathSize,
     ULONG Access,
     ULONG Flags,
@@ -2919,16 +2999,14 @@ Return Value:
     // Open the file normally, but with the page file and non-cached flags set.
     //
 
-    Flags |= OPEN_FLAG_PAGE_FILE | OPEN_FLAG_NON_CACHED;
+    Flags |= OPEN_FLAG_PAGE_FILE | OPEN_FLAG_NO_PAGE_CACHE;
     Status = IopOpen(TRUE,
                      NULL,
                      Path,
                      PathSize,
                      Access,
                      Flags,
-                     IoObjectInvalid,
                      NULL,
-                     0,
                      &IoHandle);
 
     if (!KSUCCESS(Status)) {
@@ -2955,7 +3033,7 @@ Return Value:
 
     NewHandle->DeviceContext = IoHandle->DeviceContext;
     NewHandle->Device = Device;
-    READ_INT64_SYNC(&(FileObject->Properties.FileSize), &LocalFileSize);
+    LocalFileSize = FileObject->Properties.Size;
     NewHandle->Capacity = LocalFileSize;
     NewHandle->IoHandle = IoHandle;
     NewHandle->OffsetAlignment = FileObject->Properties.BlockSize;
@@ -2988,9 +3066,7 @@ IopOpen (
     ULONG PathLength,
     ULONG Access,
     ULONG Flags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PIO_HANDLE *Handle
     )
 
@@ -3020,14 +3096,8 @@ Arguments:
     Flags - Supplies a bitfield of flags governing the behavior of the handle.
         See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies an object type that the regular file should be
-        converted to. Supply the invalid object type to specify no override.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to apply for created object
-        on create operations.
+    Create - Supplies an optional pointer to the creation information. If the
+        OPEN_FLAG_CREATE is supplied in the flags, then this field is required.
 
     Handle - Supplies a pointer where a pointer to the open I/O handle will be
         returned on success.
@@ -3052,15 +3122,6 @@ Return Value:
     PathPoint.MountPoint = NULL;
 
     //
-    // If the request is meant to unlink on creation, make sure that the create
-    // flag is also set and prepare to fail if the file already exists.
-    //
-
-    ASSERT(((Flags & OPEN_FLAG_UNLINK_ON_CREATE) == 0) ||
-           ((Flags & (OPEN_FLAG_CREATE | OPEN_FLAG_FAIL_IF_EXISTS)) ==
-            (OPEN_FLAG_CREATE | OPEN_FLAG_FAIL_IF_EXISTS)));
-
-    //
     // If the caller specified a directory, validate that it is a directory,
     // and perform permission checking if search permissions were not granted
     // upon open.
@@ -3083,8 +3144,13 @@ Return Value:
     //
 
     if ((Flags & OPEN_FLAG_CREATE) != 0) {
+        if (Create == NULL) {
+            Status = STATUS_INVALID_PARAMETER;
+            goto OpenEnd;
+        }
+
         Process = PsGetCurrentProcess();
-        CreatePermissions &= ~(Process->Umask);
+        Create->Permissions &= ~(Process->Umask);
 
         //
         // Change the override if the create flag is on.
@@ -3092,19 +3158,22 @@ Return Value:
 
         if ((Flags & OPEN_FLAG_DIRECTORY) != 0) {
 
-            ASSERT(TypeOverride == IoObjectInvalid);
+            ASSERT(Create->Type == IoObjectInvalid);
 
-            TypeOverride = IoObjectRegularDirectory;
+            Create->Type = IoObjectRegularDirectory;
 
         } else if ((Flags & OPEN_FLAG_SHARED_MEMORY) != 0) {
 
-            ASSERT(TypeOverride == IoObjectInvalid);
+            ASSERT(Create->Type == IoObjectInvalid);
 
-            TypeOverride = IoObjectSharedMemoryObject;
+            Create->Type = IoObjectSharedMemoryObject;
 
-        } else if (TypeOverride == IoObjectInvalid) {
-            TypeOverride = IoObjectRegularFile;
+        } else if (Create->Type == IoObjectInvalid) {
+            Create->Type = IoObjectRegularFile;
         }
+
+    } else {
+        Create = NULL;
     }
 
     //
@@ -3118,9 +3187,7 @@ Return Value:
         Status = IopCreateAnonymousObject(FromKernelMode,
                                           Access,
                                           Flags,
-                                          TypeOverride,
-                                          OverrideParameter,
-                                          CreatePermissions,
+                                          Create,
                                           &PathPoint);
 
     //
@@ -3133,9 +3200,7 @@ Return Value:
                              &Path,
                              &PathLength,
                              Flags,
-                             TypeOverride,
-                             OverrideParameter,
-                             CreatePermissions,
+                             Create,
                              &PathPoint);
     }
 
@@ -3168,7 +3233,9 @@ Return Value:
     //
 
     } else if (FileObject->Properties.Type == IoObjectSocket) {
-        if ((TypeOverride != IoObjectSocket) && (Access != 0)) {
+        if (((Create == NULL) && (Access != 0)) ||
+            ((Create != NULL) && (Create->Created == FALSE))) {
+
             Status = STATUS_NO_SUCH_DEVICE_OR_ADDRESS;
             goto OpenEnd;
         }
@@ -3191,9 +3258,11 @@ Return Value:
             (FileObject->Properties.Type == IoObjectObjectDirectory)) {
 
             if (((Access & (IO_ACCESS_WRITE | IO_ACCESS_EXECUTE)) != 0) ||
-                (TypeOverride != IoObjectInvalid)) {
+                (Create != NULL)) {
 
-                if (TypeOverride == IoObjectSymbolicLink) {
+                if ((Create != NULL) &&
+                    (Create->Type == IoObjectSymbolicLink)) {
+
                     Status = STATUS_FILE_EXISTS;
 
                 } else {
@@ -3206,13 +3275,18 @@ Return Value:
     }
 
     //
-    // Check permissions on path entry.
+    // Check permissions on path entry. If this call successfully created the
+    // object, then open it no matter what. This supports calls like creating
+    // a file with read/write access on that file but fewer permissions in the
+    // create mask.
     //
 
     if (FromKernelMode == FALSE) {
-        Status = IopCheckPermissions(FromKernelMode, &PathPoint, Access);
-        if (!KSUCCESS(Status)) {
-            goto OpenEnd;
+        if ((Create == NULL) || (Create->Created == FALSE)) {
+            Status = IopCheckPermissions(FromKernelMode, &PathPoint, Access);
+            if (!KSUCCESS(Status)) {
+                goto OpenEnd;
+            }
         }
     }
 
@@ -3579,9 +3653,7 @@ Return Value:
                      RtlStringLength(ObjectPath) + 1,
                      Access,
                      Flags,
-                     IoObjectInvalid,
                      NULL,
-                     0,
                      &NewHandle);
 
     if (!KSUCCESS(Status)) {
@@ -3601,9 +3673,7 @@ KSTATUS
 IopCreateSpecialIoObject (
     BOOL FromKernelMode,
     ULONG Flags,
-    IO_OBJECT_TYPE Type,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PFILE_OBJECT *FileObject
     )
 
@@ -3621,12 +3691,7 @@ Arguments:
     Flags - Supplies a bitfield of flags governing the behavior of the handle.
         See OPEN_FLAG_* definitions.
 
-    Type - Supplies the type of special object to create.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to the new file.
+    Create - Supplies a pointer to the creation parameters.
 
     FileObject - Supplies a pointer where a pointer to the new file object
         will be returned on success.
@@ -3641,25 +3706,20 @@ Return Value:
 
     KSTATUS Status;
 
-    switch (Type) {
+    ASSERT(Create != NULL);
+
+    switch (Create->Type) {
     case IoObjectPipe:
-        Status = IopCreatePipe(NULL, 0, CreatePermissions, FileObject);
+        Status = IopCreatePipe(NULL, 0, Create, FileObject);
         break;
 
     case IoObjectSocket:
-        Status = IopCreateSocket(OverrideParameter,
-                                 CreatePermissions,
-                                 FileObject);
-
+        Status = IopCreateSocket(Create, FileObject);
         break;
 
     case IoObjectTerminalMaster:
     case IoObjectTerminalSlave:
-        Status = IopCreateTerminal(Type,
-                                   OverrideParameter,
-                                   CreatePermissions,
-                                   FileObject);
-
+        Status = IopCreateTerminal(Create, FileObject);
         break;
 
     case IoObjectSharedMemoryObject:
@@ -3667,7 +3727,7 @@ Return Value:
                                              NULL,
                                              0,
                                              Flags,
-                                             CreatePermissions,
+                                             Create,
                                              FileObject);
 
         break;
@@ -4186,7 +4246,9 @@ IopSendLookupRequest (
     PFILE_OBJECT Directory,
     PCSTR FileName,
     ULONG FileNameSize,
-    PFILE_PROPERTIES Properties
+    PFILE_PROPERTIES Properties,
+    PULONG Flags,
+    PULONG MapFlags
     )
 
 /*++
@@ -4208,11 +4270,17 @@ Arguments:
 
     FileNameSize - Supplies the size of the file name buffer including space
         for a null terminator (which may be a null terminator or may be a
-        garbage character).
+        garbage character). Supply 0 to perform a root lookup request.
 
     Properties - Supplies a pointer where the file properties will be returned
         if the file was found.
 
+    Flags - Supplies a pointer where the translated file object flags will be
+        returned. See FILE_OBJECT_FLAG_* definitions.
+
+    MapFlags - Supplies a pointer where the required map flags associated with
+        this file object will be returned. See MAP_FLAG_* definitions.
+
 Return Value:
 
     Status code.
@@ -4224,63 +4292,43 @@ Return Value:
     SYSTEM_CONTROL_LOOKUP Request;
     KSTATUS Status;
 
-    ASSERT(KeIsSharedExclusiveLockHeldExclusive(Directory->Lock) != FALSE);
-    ASSERT(Directory->Properties.HardLinkCount != 0);
-
-    RtlZeroMemory(&Request, sizeof(SYSTEM_CONTROL_LOOKUP));
+    RtlZeroMemory(Properties, sizeof(FILE_PROPERTIES));
     Request.Root = FALSE;
-    Request.DirectoryProperties = &(Directory->Properties);
+    if (FileNameSize == 0) {
+        Request.Root = TRUE;
+
+        ASSERT(Directory == NULL);
+    }
+
+    Request.Flags = 0;
+    Request.MapFlags = 0;
+    Request.DirectoryProperties = NULL;
+    if (Directory != NULL) {
+
+        ASSERT(KeIsSharedExclusiveLockHeldExclusive(Directory->Lock) != FALSE);
+        ASSERT(Directory->Properties.HardLinkCount != 0);
+        ASSERT(FileNameSize != 0);
+
+        Request.DirectoryProperties = &(Directory->Properties);
+    }
+
     Request.FileName = FileName;
     Request.FileNameSize = FileNameSize;
+    Request.Properties = Properties;
     Status = IopSendSystemControlIrp(Device,
                                      IrpMinorSystemControlLookup,
                                      &Request);
 
-    RtlCopyMemory(Properties, &(Request.Properties), sizeof(FILE_PROPERTIES));
-    return Status;
-}
+    *Flags = 0;
+    if ((Request.Flags & LOOKUP_FLAG_NO_PAGE_CACHE) != 0) {
+        *Flags |= FILE_OBJECT_FLAG_NO_PAGE_CACHE;
+    }
 
-KSTATUS
-IopSendRootLookupRequest (
-    PDEVICE Device,
-    PFILE_PROPERTIES Properties,
-    PULONG Flags
-    )
+    if ((Request.Flags & LOOKUP_FLAG_NON_PAGED_IO_STATE) != 0) {
+        *Flags |= FILE_OBJECT_FLAG_NON_PAGED_IO_STATE;
+    }
 
-/*++
-
-Routine Description:
-
-    This routine sends a lookup request IRP for the device's root.
-
-Arguments:
-
-    Device - Supplies a pointer to the device to send the request to.
-
-    Properties - Supplies the file properties if the file was found.
-
-    Flags - Supplies a pointer that receives the flags returned by the root
-        lookup call. See LOOKUP_FLAG_* for definitions.
-
-Return Value:
-
-    Status code.
-
---*/
-
-{
-
-    SYSTEM_CONTROL_LOOKUP Request;
-    KSTATUS Status;
-
-    RtlZeroMemory(&Request, sizeof(SYSTEM_CONTROL_LOOKUP));
-    Request.Root = TRUE;
-    Status = IopSendSystemControlIrp(Device,
-                                     IrpMinorSystemControlLookup,
-                                     &Request);
-
-    RtlCopyMemory(Properties, &(Request.Properties), sizeof(FILE_PROPERTIES));
-    *Flags = Request.Flags;
+    *MapFlags = Request.MapFlags;
     return Status;
 }
 
@@ -4798,7 +4846,7 @@ Return Value:
 KERNEL_API
 KSTATUS
 IoLoadFile (
-    PSTR Path,
+    PCSTR Path,
     ULONG PathLength,
     PLOAD_FILE_COMPLETION_ROUTINE CompletionRoutine,
     PVOID CompletionContext
@@ -5078,9 +5126,7 @@ Return Value:
     PagingHandle->IoHandle = IoHandle;
     PagingHandle->Device = FileObject->Device;
     PagingHandle->DeviceContext = IoHandle->DeviceContext;
-    READ_INT64_SYNC(&(FileObject->Properties.FileSize),
-                    &(PagingHandle->Capacity));
-
+    PagingHandle->Capacity = FileObject->Properties.Size;
     PagingHandle->OffsetAlignment = FileObject->Properties.BlockSize;
     PagingHandle->SizeAlignment = PagingHandle->OffsetAlignment;
     *IoOffsetAlignment = PagingHandle->OffsetAlignment;
@@ -5155,9 +5201,7 @@ IopCreateAnonymousObject (
     BOOL FromKernelMode,
     ULONG Access,
     ULONG Flags,
-    IO_OBJECT_TYPE TypeOverride,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PPATH_POINT PathPoint
     )
 
@@ -5179,14 +5223,7 @@ Arguments:
     Flags - Supplies a bitfield of flags governing the behavior of the handle.
         See OPEN_FLAG_* definitions.
 
-    TypeOverride - Supplies an object type that the regular file should be
-        converted to. Supply the invalid object type to specify no override.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the initial permissions to create the entry
-        with.
+    Create - Supplies a pointer to the creation parameters.
 
     PathPoint - Supplies a pointer that receives the path entry and mount point
         of the newly minted path point.
@@ -5207,9 +5244,7 @@ Return Value:
     PathEntry = NULL;
     Status = IopCreateSpecialIoObject(FromKernelMode,
                                       Flags,
-                                      TypeOverride,
-                                      OverrideParameter,
-                                      CreatePermissions,
+                                      Create,
                                       &FileObject);
 
     if (!KSUCCESS(Status)) {
@@ -5521,9 +5556,14 @@ Return Value:
     Parameters.TimeoutInMilliseconds = Context->TimeoutInMilliseconds;
     Parameters.IoSizeInBytes = Context->SizeInBytes;
     Parameters.IoBytesCompleted = 0;
-    Parameters.IoOffset = 0;
-    Parameters.NewIoOffset = 0;
+    Parameters.IoOffset = Context->Offset;
     Parameters.FileProperties = &(FileObject->Properties);
+    if (Context->Offset == IO_OFFSET_NONE) {
+        Parameters.IoOffset =
+                        RtlAtomicOr64((PULONGLONG)&(Handle->CurrentOffset), 0);
+    }
+
+    Parameters.NewIoOffset = Context->Offset;
     Device = FileObject->Device;
 
     ASSERT(IS_DEVICE_OR_VOLUME(Device));
@@ -5541,6 +5581,11 @@ Return Value:
 
     Status = IopSendIoIrp(Device, MinorCode, &Parameters);
     Context->BytesCompleted = Parameters.IoBytesCompleted;
+    if (Context->Offset == IO_OFFSET_NONE) {
+        RtlAtomicExchange64((PULONGLONG)&(Handle->CurrentOffset),
+                            Parameters.NewIoOffset);
+    }
+
     return Status;
 }
 

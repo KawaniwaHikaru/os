@@ -25,36 +25,36 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------- Includes
-##
+//
+// ------------------------------------------------------------------- Includes
+//
 
 #include <minoca/kernel/x86.inc>
 
-##
-## ---------------------------------------------------------------- Definitions
-##
+//
+// ---------------------------------------------------------------- Definitions
+//
 
-##
-## ----------------------------------------------------------------------- Code
-##
+//
+// ----------------------------------------------------------------------- Code
+//
 
-##
-## .text specifies that this code belongs in the executable section.
-##
-## .code32 specifies that this is 32-bit protected mode code.
-##
+//
+// .text specifies that this code belongs in the executable section.
+//
+// .code32 specifies that this is 32-bit protected mode code.
+//
 
 .text
 .code32
 
-##
-## INTN
-## OspSystemCallFull (
-##     ULONG SystemCallNumber,
-##     PVOID SystemCallParameter
-##     )
-##
+//
+// INTN
+// OspSystemCallFull (
+//     ULONG SystemCallNumber,
+//     PVOID SystemCallParameter
+//     )
+//
 
 /*++
 
@@ -85,13 +85,13 @@ FUNCTION(OspSystemCallFull)
 
 END_FUNCTION(OspSystemCallFull)
 
-##
-## INTN
-## OspSysenterSystemCall (
-##     ULONG SystemCallNumber,
-##     PVOID SystemCallParameter
-##     )
-##
+//
+// INTN
+// OspSysenterSystemCall (
+//     ULONG SystemCallNumber,
+//     PVOID SystemCallParameter
+//     )
+//
 
 /*++
 
@@ -116,17 +116,23 @@ Return Value:
 
 FUNCTION(OspSysenterSystemCall)
     pushl   %ebx                # Save EBX.
+    CFI_ADJUST_CFA_OFFSET(4)    # Let the debugger know about the push.
     call    OspSysenter         # Perform a call to get the return address.
     popl    %ebx                # Restore EBX.
+    CFI_ADJUST_CFA_OFFSET(-4)   # Let the debugger know about the pop.
     ret                         # Return.
 
-##
-## This small fake-ish function is used to be able to get the return address
-## without generating text relocations.
-##
+//
+// This small fake-ish function is used to be able to get the return address
+// without generating text relocations. The CFA offset is explicitly set to 8
+// because the debugger does not know that this is a function, so the stack
+// has the return address and ebx on it.
+//
 
 OspSysenter:
+    CFI_DEF_CFA_OFFSET(8)
     popl    %ebx                # Put the return address in EBX for sysenter.
+    CFI_ADJUST_CFA_OFFSET(-4)   # Tell the debugger about the pop.
     movl    8(%esp), %ecx       # Move the system call number to ECX.
     movl    12(%esp), %edx      # Move the system call parameter to EDX.
     movl    %esp, %eax          # EAX contains the return stack pointer.
@@ -135,13 +141,13 @@ OspSysenter:
 
 END_FUNCTION(OspSysenterSystemCall)
 
-##
-## VOID
-## OspSignalHandler (
-##     PSIGNAL_PARAMETERS Parameters,
-##     PSIGNAL_CONTEXT Context
-##     )
-##
+//
+// VOID
+// OspSignalHandler (
+//     PSIGNAL_PARAMETERS Parameters,
+//     PSIGNAL_CONTEXT Context
+//     )
+//
 
 /*++
 
@@ -166,31 +172,43 @@ Return Value:
 --*/
 
 FUNCTION(OspSignalHandler)
+    CFI_DEF_CFA_OFFSET(SIGNAL_PARAMETERS_SIZE + SIGNAL_CONTEXT_SIZE)
+    CFI_OFFSET(%eax, TRAP_EAX)
+    CFI_OFFSET(%ebx, TRAP_EBX)
+    CFI_OFFSET(%ecx, TRAP_ECX)
+    CFI_OFFSET(%edx, TRAP_EDX)
+    CFI_OFFSET(%esi, TRAP_ESI)
+    CFI_OFFSET(%edi, TRAP_EDI)
+    CFI_OFFSET(%ebp, TRAP_EBP)
+    CFI_OFFSET(%eip, TRAP_EIP)
+    CFI_OFFSET(%esp, TRAP_ESP)
 
-    ##
-    ## Volatile registers are either saved or don't matter. Non-volatiles will
-    ## be saved and restored by any C routine called.
-    ##
+    //
+    // Volatile registers are either saved or don't matter. Non-volatiles will
+    // be saved and restored by any C routine called.
+    //
 
     movl    %esp, %eax          # Get a pointer to the signal parameters.
     leal    SIGNAL_PARAMETERS_SIZE(%eax), %ecx # Get a pointer to the context.
     pushl   %ecx                # Push a pointer to the signal context.
     pushl   %eax                # Push a pointer to the signal parameters.
+    CFI_ADJUST_CFA_OFFSET(8)    # Tell the debugger.
     call    OspProcessSignal    # Call out to the C routine to handle it.
     addl    $(SIGNAL_PARAMETERS_SIZE + 8), %esp # Pop arguments + signal params.
     pushl   %esp                # Push system call parameter (signal context).
     pushl   $SystemCallRestoreContext # Push system call number.
+    CFI_ADJUST_CFA_OFFSET(-SIGNAL_PARAMETERS_SIZE)
     call    OspSystemCallFull   # Call the full restore handler.
     int     $3                  # Execution should never get back here.
 
 END_FUNCTION(OspSignalHandler)
 
-##
-## PTHREAD_CONTROL_BLOCK
-## OspGetThreadControlBlock (
-##     VOID
-##     )
-##
+//
+// PTHREAD_CONTROL_BLOCK
+// OspGetThreadControlBlock (
+//     VOID
+//     )
+//
 
 /*++
 
@@ -215,13 +233,13 @@ FUNCTION(OspGetThreadControlBlock)
 
 END_FUNCTION(OspGetThreadControlBlock)
 
-##
-## VOID
-## OspImArchResolvePltEntry (
-##     PLOADED_IMAGE Image,
-##     ULONG RelocationOffset
-##     )
-##
+//
+// VOID
+// OspImArchResolvePltEntry (
+//     PLOADED_IMAGE Image,
+//     ULONG RelocationOffset
+//     )
+//
 
 /*++
 
@@ -248,6 +266,7 @@ Return Value:
 --*/
 
 FUNCTION(OspImArchResolvePltEntry)
+    CFI_ADJUST_CFA_OFFSET(8)    # Image and offset are already pushed.
     pushl   %eax                # Save eax in case of ___tls_get_addr.
     pushl   %ecx                # Save ecx in case of fastcall.
     pushl   %edx                # Save edx in case of fastcall.
@@ -255,12 +274,14 @@ FUNCTION(OspImArchResolvePltEntry)
     pushl   %eax                # Push it.
     movl    16(%esp), %eax      # Get the image pointer.
     pushl   %eax                # Push it.
+    CFI_ADJUST_CFA_OFFSET(20)   # Account for the pushes.
     call    OspImResolvePltEntry    # Call the C handler
     movl    %eax, 24(%esp)      # Save the address to fake return to later.
     movl    8(%esp), %edx       # Restore edx.
     movl    12(%esp), %ecx      # Restore ecx.
     movl    16(%esp), %eax      # Restore eax.
     addl    $24, %esp           # Pop nearly everything, including parameters.
+    CFI_ADJUST_CFA_OFFSET(-24)  # Account for the pops.
     ret                         # "Return" to the function destination.
 
 END_FUNCTION(OspImArchResolvePltEntry)

@@ -31,6 +31,7 @@ Environment:
 
 #include "libcp.h"
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/utsname.h>
 #include <time.h>
@@ -40,9 +41,6 @@ Environment:
 //
 
 #define UNAME_SYSTEM_NAME "Minoca"
-
-#define UNAME_NODE_NAME "minoca"
-#define UNAME_DOMAIN_NAME ""
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -86,30 +84,78 @@ Return Value:
 
 {
 
+    CHAR EndTag[32];
+    UINTN Size;
     KSTATUS Status;
     SYSTEM_VERSION_INFORMATION Version;
 
     Status = OsGetSystemVersion(&Version, TRUE);
     if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return -1;
+        goto unameEnd;
     }
 
     //
-    // TODO: Implement getting the host and domain name.
+    // Start by getting the hostname and domain name.
     //
 
+    Size = sizeof(Name->nodename) - 1;
+    Name->nodename[Size] = '\0';
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationHostName,
+                                       Name->nodename,
+                                       &Size,
+                                       FALSE);
+
+    if ((!KSUCCESS(Status)) && (Status != STATUS_BUFFER_TOO_SMALL)) {
+        goto unameEnd;
+    }
+
+    Size = sizeof(Name->domainname) - 1;
+    Name->domainname[Size] = '\0';
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationDomainName,
+                                       Name->domainname,
+                                       &Size,
+                                       FALSE);
+
+    if ((!KSUCCESS(Status)) && (Status != STATUS_BUFFER_TOO_SMALL)) {
+        goto unameEnd;
+    }
+
     strcpy(Name->sysname, UNAME_SYSTEM_NAME);
-    strcpy(Name->nodename, UNAME_NODE_NAME);
+    if ((Version.ReleaseLevel == SystemReleaseFinal) &&
+        (Version.DebugLevel == SystemBuildRelease)) {
+
+        EndTag[0] = '\0';
+
+    } else if (Version.ReleaseLevel == SystemReleaseFinal) {
+        snprintf(EndTag,
+                 sizeof(EndTag),
+                 "-%s",
+                 RtlGetBuildDebugLevelString(Version.DebugLevel));
+
+    } else if (Version.DebugLevel == SystemBuildRelease) {
+        snprintf(EndTag,
+                 sizeof(EndTag),
+                 "-%s",
+                 RtlGetReleaseLevelString(Version.ReleaseLevel));
+
+    } else {
+        snprintf(EndTag,
+                 sizeof(EndTag),
+                 "-%s-%s",
+                 RtlGetReleaseLevelString(Version.ReleaseLevel),
+                 RtlGetBuildDebugLevelString(Version.DebugLevel));
+    }
+
     snprintf(Name->release,
              sizeof(Name->release),
-             "%d.%d.%d.%lld-%s-%s",
+             "%d.%d.%d.%lld%s",
              Version.MajorVersion,
              Version.MinorVersion,
              Version.Revision,
              Version.SerialVersion,
-             RtlGetReleaseLevelString(Version.ReleaseLevel),
-             RtlGetBuildDebugLevelString(Version.DebugLevel));
+             EndTag);
 
     if (Version.BuildString == NULL) {
         Version.BuildString = "";
@@ -151,7 +197,14 @@ Return Value:
 
 #endif
 
-    strcpy(Name->domainname, UNAME_DOMAIN_NAME);
+    Status = STATUS_SUCCESS;
+
+unameEnd:
+    if (!KSUCCESS(Status)) {
+        errno = ClConvertKstatusToErrorNumber(Status);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -185,24 +238,28 @@ Return Value:
 
 {
 
-    size_t NodeLength;
-    int Result;
-    struct utsname UtsName;
+    UINTN NameSize;
+    KSTATUS Status;
 
-    Result = uname(&UtsName);
-    if (Result != 0) {
-        return Result;
+    NameSize = NameLength;
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationHostName,
+                                       Name,
+                                       &NameSize,
+                                       FALSE);
+
+    if (!KSUCCESS(Status)) {
+        if (Status == STATUS_BUFFER_TOO_SMALL) {
+            errno = ENAMETOOLONG;
+
+        } else {
+            errno = ClConvertKstatusToErrorNumber(Status);
+        }
+
+        return -1;
     }
 
-    NodeLength = strlen(UtsName.nodename);
-    strncpy(Name, UtsName.nodename, NameLength);
-    if (NameLength < (NodeLength + 1)) {
-        errno = ENAMETOOLONG;
-        Result = -1;
-        Name[NameLength] = '\0';
-    }
-
-    return Result;
+    return 0;
 }
 
 LIBC_API
@@ -235,24 +292,122 @@ Return Value:
 
 {
 
-    size_t DomainLength;
-    int Result;
-    struct utsname UtsName;
+    UINTN NameSize;
+    KSTATUS Status;
 
-    Result = uname(&UtsName);
-    if (Result != 0) {
-        return Result;
+    NameSize = NameLength;
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationDomainName,
+                                       Name,
+                                       &NameSize,
+                                       FALSE);
+
+    if (!KSUCCESS(Status)) {
+        if (Status == STATUS_BUFFER_TOO_SMALL) {
+            errno = ENAMETOOLONG;
+
+        } else {
+            errno = ClConvertKstatusToErrorNumber(Status);
+        }
+
+        return -1;
     }
 
-    DomainLength = strlen(UtsName.domainname);
-    strncpy(Name, UtsName.domainname, NameLength);
-    if (NameLength < (DomainLength + 1)) {
-        errno = ENAMETOOLONG;
-        Result = -1;
-        Name[NameLength] = '\0';
+    return 0;
+}
+
+LIBC_API
+int
+sethostname (
+    const char *Name,
+    size_t Size
+    )
+
+/*++
+
+Routine Description:
+
+    This routine sets the network host name for the current machine.
+
+Arguments:
+
+    Name - Supplies a pointer to the new name to set.
+
+    Size - Supplies the size of the name, not including a null terminator.
+
+Return Value:
+
+    0 on success.
+
+    -1 on failure, and errno will be set to indicate the error.
+
+--*/
+
+{
+
+    UINTN NameSize;
+    KSTATUS Status;
+
+    NameSize = Size;
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationHostName,
+                                       (PVOID)Name,
+                                       &NameSize,
+                                       TRUE);
+
+    if (!KSUCCESS(Status)) {
+        errno = ClConvertKstatusToErrorNumber(Status);
+        return -1;
     }
 
-    return Result;
+    return 0;
+}
+
+LIBC_API
+int
+setdomainname (
+    const char *Name,
+    size_t Size
+    )
+
+/*++
+
+Routine Description:
+
+    This routine sets the network domain name for the current machine.
+
+Arguments:
+
+    Name - Supplies a pointer to the new name to set.
+
+    Size - Supplies the size of the name, not including a null terminator.
+
+Return Value:
+
+    0 on success.
+
+    -1 on failure, and errno will be set to indicate the error.
+
+--*/
+
+{
+
+    UINTN NameSize;
+    KSTATUS Status;
+
+    NameSize = Size;
+    Status = OsGetSetSystemInformation(SystemInformationPs,
+                                       PsInformationDomainName,
+                                       (PVOID)Name,
+                                       &NameSize,
+                                       TRUE);
+
+    if (!KSUCCESS(Status)) {
+        errno = ClConvertKstatusToErrorNumber(Status);
+        return -1;
+    }
+
+    return 0;
 }
 
 PSTR

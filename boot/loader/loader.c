@@ -93,13 +93,6 @@ BopGetConfigurationDirectory (
     );
 
 VOID
-BopLoadTimeZoneData (
-    PBOOT_VOLUME BootDevice,
-    FILE_ID ConfigurationDirectory,
-    PKERNEL_INITIALIZATION_BLOCK Parameters
-    );
-
-VOID
 BopSetBootTime (
     PKERNEL_INITIALIZATION_BLOCK Parameters
     );
@@ -207,6 +200,7 @@ extern FILE_ID BoSystemDirectoryId;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 INT
 BoMain (
     PBOOT_INITIALIZATION_BLOCK Parameters
@@ -299,7 +293,9 @@ Return Value:
     //
 
     RtlZeroMemory(&BoLoaderModuleBuffer, sizeof(BoLoaderModuleBuffer));
-    LoaderModuleNameLength = RtlStringLength(Parameters->ApplicationName) + 1;
+    LoaderModuleNameLength =
+              RtlStringLength((PVOID)(UINTN)(Parameters->ApplicationName)) + 1;
+
     if (LoaderModuleNameLength > LOADER_BINARY_NAME_MAX_SIZE) {
         LoaderModuleNameLength = LOADER_BINARY_NAME_MAX_SIZE;
     }
@@ -309,10 +305,12 @@ Return Value:
                                   (ANYSIZE_ARRAY * sizeof(CHAR));
 
     RtlStringCopy(LoaderModule->BinaryName,
-                  Parameters->ApplicationName,
+                  (PVOID)(UINTN)(Parameters->ApplicationName),
                   LoaderModuleNameLength);
 
-    LoaderModule->LowestAddress = Parameters->ApplicationLowestAddress;
+    LoaderModule->LowestAddress =
+                          (PVOID)(UINTN)(Parameters->ApplicationLowestAddress);
+
     LoaderModule->Size = Parameters->ApplicationSize;
     BoProductName = LOADER_NAME;
     if ((BoForceDebug != FALSE) ||
@@ -364,10 +362,10 @@ Return Value:
     //
 
     AlignedLoaderStart = (PVOID)(UINTN)ALIGN_RANGE_DOWN(
-                                 (UINTN)(Parameters->ApplicationLowestAddress),
-                                 PageSize);
+                                          Parameters->ApplicationLowestAddress,
+                                          PageSize);
 
-    PageOffset = (UINTN)(Parameters->ApplicationLowestAddress) -
+    PageOffset = Parameters->ApplicationLowestAddress -
                  (UINTN)AlignedLoaderStart;
 
     AlignedLoaderSize = ALIGN_RANGE_UP(Parameters->ApplicationSize + PageOffset,
@@ -406,9 +404,9 @@ Return Value:
     // global).
     //
 
-    StackBottom = (UINTN)Parameters->StackTop - Parameters->StackSize;
+    StackBottom = Parameters->StackTop - Parameters->StackSize;
     StackOutsideImage = TRUE;
-    if ((StackBottom >= (UINTN)Parameters->ApplicationLowestAddress) &&
+    if ((StackBottom >= Parameters->ApplicationLowestAddress) &&
         (Parameters->StackTop <
          Parameters->ApplicationLowestAddress + Parameters->ApplicationSize)) {
 
@@ -417,9 +415,7 @@ Return Value:
 
     if (StackOutsideImage != FALSE) {
         RoundedStackMinimum = ALIGN_RANGE_DOWN(StackBottom, PageSize);
-        RoundedStackMaximum = ALIGN_RANGE_UP((UINTN)Parameters->StackTop,
-                                             PageSize);
-
+        RoundedStackMaximum = ALIGN_RANGE_UP(Parameters->StackTop, PageSize);
         Status = BoMapPhysicalAddress((PVOID)&RoundedStackMinimum,
                                       RoundedStackMinimum,
                                       RoundedStackMaximum - RoundedStackMinimum,
@@ -595,16 +591,6 @@ Return Value:
     if (!KSUCCESS(Status)) {
         goto MainEnd;
     }
-
-    //
-    // Load the kernel's time zone data.
-    //
-
-    BopLoadTimeZoneData(BootDevice,
-                        ConfigurationDirectory,
-                        KernelParameters);
-
-    LoaderStep += 1;
 
     //
     // Load the boot driver list, device to driver database, and boot device
@@ -1235,7 +1221,7 @@ Return Value:
     ULONG TableIndex;
     ULONG TestTablesExaminedBytes;
     PVOID TestTablesPhysical;
-    ULONG TestTablesSize;
+    UINTN TestTablesSize;
     PVOID TestTablesVirtual;
 
     DsdtTable = NULL;
@@ -1259,7 +1245,7 @@ Return Value:
         // the RSDT.
         //
 
-        RsdtTable = (PRSDT)RsdpTable->RsdtAddress;
+        RsdtTable = (PRSDT)(UINTN)RsdpTable->RsdtAddress;
         RsdtTableCount = (RsdtTable->Header.Length -
                           sizeof(DESCRIPTION_HEADER)) / sizeof(ULONG);
 
@@ -1282,9 +1268,9 @@ Return Value:
         //
 
         for (TableIndex = 0; TableIndex < RsdtTableCount; TableIndex += 1) {
-            FadtTable = (PFADT)RsdtTableEntry[TableIndex];
+            FadtTable = (PFADT)(UINTN)RsdtTableEntry[TableIndex];
             if (FadtTable->Header.Signature == FADT_SIGNATURE) {
-                DsdtTable = (PDESCRIPTION_HEADER)FadtTable->DsdtAddress;
+                DsdtTable = (PDESCRIPTION_HEADER)(UINTN)FadtTable->DsdtAddress;
                 if ((DsdtTable != NULL) &&
                     (DsdtTable->Signature == DSDT_SIGNATURE)) {
 
@@ -1440,7 +1426,7 @@ Return Value:
 
         RtlCopyMemory(NewTable, SmbiosTable, sizeof(SMBIOS_ENTRY_POINT));
         RtlCopyMemory(NewTable + sizeof(SMBIOS_ENTRY_POINT),
-                      (PVOID)(SmbiosTable->StructureTableAddress),
+                      (PVOID)(UINTN)(SmbiosTable->StructureTableAddress),
                       SmbiosTable->StructureTableLength);
 
         TableEntry[TableDirectory->TableCount] = NewTable;
@@ -1676,7 +1662,8 @@ Return Value:
 
         LoadFlags = IMAGE_LOAD_FLAG_IGNORE_INTERPRETER |
                     IMAGE_LOAD_FLAG_NO_STATIC_CONSTRUCTORS |
-                    IMAGE_LOAD_FLAG_BIND_NOW;
+                    IMAGE_LOAD_FLAG_BIND_NOW |
+                    IMAGE_LOAD_FLAG_GLOBAL;
 
         Status = ImLoad(&BoLoadedImageList,
                         DriverName,
@@ -1876,7 +1863,9 @@ Return Value:
     RtlZeroMemory(BootConfiguration, sizeof(BOOT_CONFIGURATION_CONTEXT));
     BootConfiguration->AllocateFunction = BoAllocateMemory;
     BootConfiguration->FreeFunction = BoFreeMemory;
-    BootConfiguration->FileData = Parameters->BootConfigurationFile;
+    BootConfiguration->FileData =
+                             (PVOID)(UINTN)(Parameters->BootConfigurationFile);
+
     BootConfiguration->FileDataSize = Parameters->BootConfigurationFileSize;
     Status = BcInitializeContext(BootConfiguration);
     if (!KSUCCESS(Status)) {
@@ -1967,59 +1956,6 @@ Return Value:
 
     *DirectoryFileId = Properties.FileId;
     return STATUS_SUCCESS;
-}
-
-VOID
-BopLoadTimeZoneData (
-    PBOOT_VOLUME BootDevice,
-    FILE_ID ConfigurationDirectory,
-    PKERNEL_INITIALIZATION_BLOCK Parameters
-    )
-
-/*++
-
-Routine Description:
-
-    This routine loads the default time zone data and attaches it to the
-    kernel initialization block.
-
-Arguments:
-
-    BootDevice - Supplies a pointer to the boot device.
-
-    ConfigurationDirectory - Supplies the file ID of the configuration
-        directory.
-
-    Parameters - Supplies a pointer to the kernel initialization block.
-
-Return Value:
-
-    None, as failure here is not fatal.
-
---*/
-
-{
-
-    ULONG DataSize;
-    PVOID DataVirtual;
-    KSTATUS Status;
-
-    Status = BoLoadFile(BootDevice,
-                        &ConfigurationDirectory,
-                        TIME_ZONE_DATA_FILE,
-                        &DataVirtual,
-                        &DataSize,
-                        NULL);
-
-    if (!KSUCCESS(Status)) {
-        goto LoadTimeZoneDataEnd;
-    }
-
-    Parameters->TimeZoneData.Buffer = DataVirtual;
-    Parameters->TimeZoneData.Size = DataSize;
-
-LoadTimeZoneDataEnd:
-    return;
 }
 
 VOID
@@ -2194,7 +2130,7 @@ Return Value:
     // this ULONG calculation is off.
     //
 
-    AllocationSize += sizeof(ULONG) * (BoMemoryMap.TotalSpace >> PageShift);
+    AllocationSize += sizeof(UINTN) * (BoMemoryMap.TotalSpace >> PageShift);
     AllocationSize += PageSize;
     AllocationSize = ALIGN_RANGE_UP(AllocationSize, PageSize);
     Status = BopAllocateKernelBuffer(AllocationSize,

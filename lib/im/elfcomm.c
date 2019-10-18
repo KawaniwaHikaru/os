@@ -100,7 +100,7 @@ ELF_LIBRARY_PATH_VARIABLE_ENTRY ElfLibraryPathVariables[] = {
 
 KSTATUS
 ImpElfOpenWithPathList (
-    PLOADED_IMAGE Parent,
+    PLOADED_IMAGE PathImage,
     PCSTR LibraryName,
     PSTR PathList,
     PIMAGE_FILE_INFORMATION File,
@@ -115,7 +115,9 @@ Routine Description:
 
 Arguments:
 
-    Parent - Supplies a pointer to the image that needs the library.
+    PathImage - Supplies a pointer to the image that owns the path list. This
+        will be the image that needs the library or an ancestor of the image
+        that needs the library.
 
     LibraryName - Supplies the name of the library to load.
 
@@ -175,6 +177,8 @@ Return Value:
                 Status = STATUS_INSUFFICIENT_RESOURCES;
                 break;
             }
+
+            CompletePathCapacity = CompletePathSize;
         }
 
         if (PrefixLength != 0) {
@@ -190,7 +194,7 @@ Return Value:
                       LibraryLength);
 
         CompletePath[PrefixLength + LibraryLength] = '\0';
-        Status = ImpElfPerformLibraryPathSubstitutions(Parent,
+        Status = ImpElfPerformLibraryPathSubstitutions(PathImage,
                                                        &CompletePath,
                                                        &CompletePathCapacity);
 
@@ -198,7 +202,7 @@ Return Value:
             break;
         }
 
-        Status = ImOpenFile(Parent->SystemContext, CompletePath, File);
+        Status = ImOpenFile(PathImage->SystemContext, CompletePath, File);
         if (KSUCCESS(Status)) {
             break;
         }
@@ -230,7 +234,7 @@ Return Value:
 
 ULONG
 ImpElfOriginalHash (
-    PSTR SymbolName
+    PCSTR SymbolName
     )
 
 /*++
@@ -271,7 +275,7 @@ Return Value:
 
 ULONG
 ImpElfGnuHash (
-    PSTR SymbolName
+    PCSTR SymbolName
     )
 
 /*++
@@ -350,7 +354,7 @@ Return Value:
 
 KSTATUS
 ImpElfPerformLibraryPathSubstitutions (
-    PLOADED_IMAGE Image,
+    PLOADED_IMAGE PathImage,
     PSTR *Path,
     PUINTN PathCapacity
     )
@@ -363,8 +367,8 @@ Routine Description:
 
 Arguments:
 
-    Image - Supplies a pointer to the image loading the library (not the
-        library itself obviously, that hasn't been loaded yet).
+    PathImage - Supplies a pointer to the image that owns the library path (not
+        the library itself obviously, that hasn't been loaded yet).
 
     Path - Supplies a pointer that on input contains the complete path. On
         output this will contain the complete path with variables expanded.
@@ -383,8 +387,8 @@ Return Value:
 
 {
 
+    PSTR CurrentCharacter;
     PSTR CurrentPath;
-    PSTR CurrentVariable;
     UINTN Delta;
     PELF_LIBRARY_PATH_VARIABLE_ENTRY Entry;
     UINTN EntryCount;
@@ -393,50 +397,54 @@ Return Value:
     PSTR Name;
     UINTN NameLength;
     PSTR NewBuffer;
+    UINTN RemainderOffset;
     PSTR Replacement;
     UINTN ReplacementLength;
-    UINTN ReplaceSize;
-    UINTN ReplaceStart;
+    PSTR Separator;
     KSTATUS Status;
+    UINTN VariableLength;
+    UINTN VariableOffset;
+    PSTR VariableStart;
 
     EntryCount = sizeof(ElfLibraryPathVariables) /
                  sizeof(ElfLibraryPathVariables[0]);
 
-    CurrentVariable = RtlStringFindCharacter(*Path, '$', -1);
-    while (CurrentVariable != NULL) {
+    CurrentCharacter = RtlStringFindCharacter(*Path, '$', -1);
+    while (CurrentCharacter != NULL) {
 
         //
         // Find the name of the variable and the size of the region to replace.
         //
 
-        ReplaceStart = (UINTN)CurrentVariable - (UINTN)(*Path);
-        CurrentVariable += 1;
-        if (*CurrentVariable == '{') {
-            CurrentVariable += 1;
-            Name = CurrentVariable;
-            while ((*CurrentVariable != '\0') && (*CurrentVariable != '}')) {
-                CurrentVariable += 1;
+        VariableStart = CurrentCharacter;
+        CurrentCharacter += 1;
+        if (*CurrentCharacter == '{') {
+            CurrentCharacter += 1;
+            Name = CurrentCharacter;
+            while ((*CurrentCharacter != '\0') && (*CurrentCharacter != '}')) {
+                CurrentCharacter += 1;
             }
 
-            if (*CurrentVariable != '}') {
+            if (*CurrentCharacter != '}') {
                 RtlDebugPrint("ELF: Missing closing brace on %s.\n", *Path);
                 Status = STATUS_INVALID_SEQUENCE;
                 goto ElfPerformLibraryPathSubstitutionsEnd;
             }
 
-            NameLength = (UINTN)CurrentVariable - (UINTN)Name;
-            CurrentVariable += 1;
+            NameLength = (UINTN)CurrentCharacter - (UINTN)Name;
+            CurrentCharacter += 1;
 
         } else {
-            Name = CurrentVariable;
-            while (RtlIsCharacterAlphabetic(*CurrentVariable) != FALSE) {
-                CurrentVariable += 1;
+            Name = CurrentCharacter;
+            while (RtlIsCharacterAlphabetic(*CurrentCharacter) != FALSE) {
+                CurrentCharacter += 1;
             }
 
-            NameLength = (UINTN)CurrentVariable - (UINTN)Name;
+            NameLength = (UINTN)CurrentCharacter - (UINTN)Name;
         }
 
-        ReplaceSize = (UINTN)CurrentVariable - (UINTN)ReplaceStart;
+        VariableLength = (UINTN)CurrentCharacter - (UINTN)VariableStart;
+        VariableOffset = (UINTN)VariableStart - (UINTN)(*Path);
 
         //
         // Decode the variable.
@@ -456,24 +464,59 @@ Return Value:
                           Name);
 
         } else {
-
-            //
-            // TODO: Get the correct variable values.
-            //
-
-            ASSERT(FALSE);
-
+            ReplacementLength = 0;
             switch (Entry->Variable) {
             case ElfLibraryPathOrigin:
-                Replacement = ".";
+                Separator = RtlStringFindCharacterRight(PathImage->FileName,
+                                                        '/',
+                                                        -1);
+
+                if (Separator != NULL) {
+                    Replacement = PathImage->FileName;
+                    ReplacementLength = (UINTN)Separator - (UINTN)Replacement;
+
+                } else {
+                    Replacement = ".";
+                }
+
                 break;
 
             case ElfLibraryPathLib:
-                Replacement = "lib";
+                if (PathImage->Format == ImageElf64) {
+                    Replacement = "lib64";
+
+                } else {
+                    Replacement = "lib";
+                }
+
                 break;
 
             case ElfLibraryPathPlatform:
-                Replacement = "i386";
+                switch (PathImage->Machine) {
+                case ImageMachineTypeX86:
+                    Replacement = "i686";
+                    break;
+
+                case ImageMachineTypeX64:
+                    Replacement = "x86_64";
+                    break;
+
+                case ImageMachineTypeArm32:
+                    Replacement = "armv7";
+                    break;
+
+                case ImageMachineTypeArm64:
+                    Replacement = "armv8";
+                    break;
+
+                default:
+
+                    ASSERT(FALSE);
+
+                    Replacement = ".";
+                    break;
+                }
+
                 break;
 
             default:
@@ -484,37 +527,39 @@ Return Value:
                 break;
             }
 
-            ReplacementLength = RtlStringLength(Replacement);
+            if (ReplacementLength == 0) {
+                ReplacementLength = RtlStringLength(Replacement);
+            }
 
             //
-            // If the replacement is shorter than the original, then just
-            // copy the replacement over followed by the rest.
+            // If the replacement is shorter than the original variable, then
+            // just copy the replacement over and shift the rest to the left.
             //
 
-            if (ReplacementLength <= ReplaceSize) {
-                CurrentPath = *Path;
-                RtlCopyMemory(CurrentPath + ReplaceStart,
+            if (ReplacementLength <= VariableLength) {
+                RtlCopyMemory(VariableStart,
                               Replacement,
                               ReplacementLength);
 
-                Delta = ReplaceSize - ReplacementLength;
+                Delta = VariableLength - ReplacementLength;
                 if (Delta != 0) {
-                    for (Index = ReplaceStart + ReplaceSize;
+                    CurrentPath = *Path;
+                    for (Index = VariableOffset + ReplacementLength;
                          Index < *PathCapacity - Delta;
                          Index += 1) {
 
                         CurrentPath[Index] = CurrentPath[Index + Delta];
                     }
 
-                    CurrentVariable -= Delta;
+                    CurrentCharacter -= Delta;
                 }
 
             //
-            // The replacement is bigger than the region it's replacing.
+            // The replacement is bigger than the variable it's replacing.
             //
 
             } else {
-                Delta = ReplacementLength - ReplaceSize;
+                Delta = ReplacementLength - VariableLength;
                 NewBuffer = ImAllocateMemory(*PathCapacity + Delta,
                                              IM_ALLOCATION_TAG);
 
@@ -523,20 +568,22 @@ Return Value:
                     goto ElfPerformLibraryPathSubstitutionsEnd;
                 }
 
-                RtlCopyMemory(NewBuffer, *Path, ReplaceStart);
-                RtlCopyMemory(NewBuffer + ReplaceStart,
+                RtlCopyMemory(NewBuffer, *Path, VariableOffset);
+                RtlCopyMemory(NewBuffer + VariableOffset,
                               Replacement,
                               ReplacementLength);
 
-                RtlCopyMemory(NewBuffer + ReplaceStart + ReplacementLength,
-                              *Path + ReplaceSize,
-                              *PathCapacity - (ReplaceStart + ReplaceSize));
+                RemainderOffset = VariableOffset + VariableLength;
+                RtlCopyMemory(NewBuffer + VariableOffset + ReplacementLength,
+                              *Path + RemainderOffset,
+                              *PathCapacity - (RemainderOffset));
 
-                CurrentVariable = (PSTR)((UINTN)CurrentVariable -
-                                         (UINTN)(*Path) +
-                                         (UINTN)NewBuffer);
+                CurrentCharacter = (PSTR)((UINTN)NewBuffer +
+                                          VariableOffset +
+                                          ReplacementLength);
 
                 ImFreeMemory(*Path);
+                *Path = NewBuffer;
                 *PathCapacity += Delta;
             }
         }
@@ -545,7 +592,7 @@ Return Value:
         // Find the next variable.
         //
 
-        CurrentVariable = RtlStringFindCharacter(CurrentVariable, '$', -1);
+        CurrentCharacter = RtlStringFindCharacter(CurrentCharacter, '$', -1);
     }
 
     Status = STATUS_SUCCESS;

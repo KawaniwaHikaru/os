@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -53,7 +52,7 @@ typedef long long blkcnt_t;
 // Define a type used for block sizes.
 //
 
-typedef unsigned long blksize_t;
+typedef unsigned long long blksize_t;
 
 //
 // Define a type for file system block counts.
@@ -177,6 +176,83 @@ typedef signed long long time_t;
 //
 
 typedef unsigned int useconds_t;
+
+//
+// Define the key type used for interprocess communication.
+//
+
+typedef int key_t;
+
+//
+// Define some pthread types.
+//
+
+//
+// Define the type of a thread identifier.
+//
+
+typedef long pthread_t;
+
+//
+// Define the type used for a "once" object.
+//
+
+typedef int pthread_once_t;
+
+//
+// Define the type used for a key object.
+//
+
+typedef int pthread_key_t;
+
+//
+// Define pthread structures. Their internals are not exposed.
+//
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_mutex_t;
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_mutexattr_t;
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_cond_t;
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_condattr_t;
+
+typedef union {
+    char Data[48];
+    long int AlignMember;
+} pthread_rwlock_t;
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_rwlockattr_t;
+
+typedef union {
+    char Data[64];
+    long int AlignMember;
+} pthread_attr_t;
+
+typedef union {
+    char Data[32];
+    long int AlignMember;
+} pthread_barrier_t;
+
+typedef union {
+    char Data[16];
+    long int AlignMember;
+} pthread_barrierattr_t;
 
 //
 // Define some old BSD types.

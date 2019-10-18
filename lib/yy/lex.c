@@ -31,6 +31,7 @@ Environment:
 // ------------------------------------------------------------------- Includes
 //
 
+#include <assert.h>
 #include "yyp.h"
 
 //
@@ -246,7 +247,7 @@ Return Value:
 
         }
 
-        ASSERT(Position <= Lexer->InputSize);
+        assert(Position <= Lexer->InputSize);
 
         if (Position > Lexer->InputSize) {
             Position = Lexer->InputSize;
@@ -285,7 +286,7 @@ Return Value:
 
     } while (Ignore != FALSE);
 
-    ASSERT(Token->Value != 0);
+    assert(Token->Value != 0);
 
     //
     // Update the stats.
@@ -365,7 +366,7 @@ Return Value:
         Match = YypMatchSubexpression(Lexer, &NextPosition, &Expression);
         if (Match != FALSE) {
 
-            ASSERT(*Expression == '\0');
+            assert(*Expression == '\0');
 
             if (NextPosition > WinnerPosition) {
                 Winner = Index;
@@ -539,16 +540,15 @@ Return Value:
             } else if (*NextExpression == '|') {
                 if (Match != FALSE) {
                     YypSkipExpression(&NextExpression, FALSE);
+                    Expression = NextExpression;
 
                 //
                 // The last element did not match. Simply move to the next.
                 //
 
                 } else {
-                    NextExpression += 1;
+                    break;
                 }
-
-                Expression = NextExpression;
 
             //
             // If this is not a control character and it didn't match, then
@@ -579,9 +579,10 @@ Return Value:
 
         if (*Expression == '|') {
 
-            ASSERT(Match == FALSE);
+            assert(Match == FALSE);
 
             Expression += 1;
+            NextPosition = *Position;
             continue;
         }
 

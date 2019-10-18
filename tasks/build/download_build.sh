@@ -1,5 +1,10 @@
 #!/bin/sh
-## Copyright (c) 2014 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2014 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -41,7 +46,7 @@ fi
 
 file=minoca-bin-$ARCH$VARIANT$DEBUG.tar.gz
 echo "Downloading $file from schedule instance ID $last_native_build"
-python ../../client.py --pull $file $file $last_native_build
+python ../../client.py --pull schedule $file $file $last_native_build
 echo "Extracting $file"
 tar -xzf $file
 rm $file

@@ -70,7 +70,7 @@ IopCreateMountPoint (
     PPATH_POINT Mount,
     PPATH_POINT Target,
     PSTR TargetPath,
-    ULONG TargetPathSize,
+    UINTN TargetPathSize,
     ULONG Flags
     );
 
@@ -85,7 +85,7 @@ IopCreateAndCopyMountPoint (
     PPATH_POINT Target,
     PLIST_ENTRY MountList,
     PSTR TargetPath,
-    ULONG TargetPathSize,
+    UINTN TargetPathSize,
     ULONG Flags
     );
 
@@ -278,9 +278,7 @@ Return Value:
                          &MountPointPath,
                          &MountPointPathSize,
                          OPEN_FLAG_NO_MOUNT_POINT,
-                         IoObjectInvalid,
                          NULL,
-                         FILE_PERMISSION_NONE,
                          &MountPathPoint);
 
     //
@@ -301,9 +299,7 @@ Return Value:
                          &TargetPath,
                          &TargetPathSize,
                          0,
-                         IoObjectInvalid,
                          NULL,
-                         FILE_PERMISSION_NONE,
                          &TargetPathPoint);
 
     if (!KSUCCESS(Status)) {
@@ -592,9 +588,7 @@ Return Value:
                          &MountPointPath,
                          &MountPointPathSize,
                          0,
-                         IoObjectInvalid,
                          NULL,
-                         FILE_PERMISSION_NONE,
                          &PathPoint);
 
     //
@@ -1164,7 +1158,7 @@ Return Value:
     PATH_POINT RootCopy;
     KSTATUS Status;
     PSTR TargetPath;
-    ULONG TargetPathSize;
+    UINTN TargetPathSize;
 
     LockHeld = FALSE;
     MountCountIncremented = FALSE;
@@ -1660,7 +1654,7 @@ IopCreateMountPoint (
     PPATH_POINT Mount,
     PPATH_POINT Target,
     PSTR TargetPath,
-    ULONG TargetPathSize,
+    UINTN TargetPathSize,
     ULONG Flags
     )
 
@@ -1693,7 +1687,7 @@ Return Value:
 
 {
 
-    ULONG AllocationSize;
+    UINTN AllocationSize;
     PMOUNT_POINT MountPoint;
     POBJECT_HEADER TargetRootObject;
 
@@ -1807,7 +1801,7 @@ IopCreateAndCopyMountPoint (
     PPATH_POINT Target,
     PLIST_ENTRY MountList,
     PSTR TargetPath,
-    ULONG TargetPathSize,
+    UINTN TargetPathSize,
     ULONG Flags
     )
 

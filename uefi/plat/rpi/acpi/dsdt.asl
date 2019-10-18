@@ -1,6 +1,11 @@
 /*++
 
-Copyright (c) 2014 Minoca Corp. All Rights Reserved.
+Copyright (c) 2014 Minoca Corp.
+
+    This file is licensed under the terms of the GNU General Public License
+    version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details. See the LICENSE file at the root of this
+    project for complete licensing information..
 
 Module Name:
 
@@ -41,7 +46,7 @@ DefinitionBlock (
             Name(_UID, 0)
 
             /*
-             * Define the operation region to access the DWC configuration 
+             * Define the operation region to access the DWC configuration
              * space.
              */
 
@@ -55,7 +60,7 @@ DefinitionBlock (
                 SKP2, 8,
                 USRP, 1,
                 UHNP, 1,
-                Offset(0x24),                 
+                Offset(0x24),
                 RXFS, 16,
                 Offset(0x28),
                 NPFO, 16,
@@ -67,15 +72,15 @@ DefinitionBlock (
 
             /*
              * Set the AHB configuration register to have a single burst length
-             * and to wait on all writes. Also set the receive FIFO to 774 
+             * and to wait on all writes. Also set the receive FIFO to 774
              * bytes, the non-periodic transmit FIFO to 256 bytes, and the
              * periodic transmit FIFO to 512 bytes. The Raspberry Pi's DWC USB
-             * controller allows dynamic FIFO sizes and the maximum FIFO depth 
+             * controller allows dynamic FIFO sizes and the maximum FIFO depth
              * is greater than the total FIFO sizes programmed here. Lastly,
              * the host is both SRP and HNP capable.
-             */       
-            
-            Method(_INI, 0) {                        
+             */
+
+            Method(_INI, 0) {
                 Store(0x306, RXFS)
                 Store(0x306, NPFO)
                 Store(0x100, NPFS)
@@ -178,7 +183,31 @@ DefinitionBlock (
                             0x00001000)
 
                 Interrupt(, Level, ActiveHigh,) {62}
-                FixedDMA(11, 4, Width32Bit, )
+                FixedDMA(11, 0, Width32Bit, )
+            })
+        }
+
+        Device(BPWM) {
+            Name(_HID, EISAID("BCM0002"))
+            Name(_UID, 0)
+            Method(_STA, 0, NotSerialized) {
+                Return(0x0F)
+            }
+
+            Name(_CRS, ResourceTemplate() {
+                DWordMemory(ResourceConsumer, PosDecode, MinFixed, MaxFixed,
+                            NonCacheable, ReadWrite,
+                            0x00000000,
+                            0x2020C000,
+                            0x2020CFFF,
+                            0x00000000,
+                            0x00001000)
+
+                //
+                // PWM owns request line 5, but also must use channel 5.
+                //
+
+                FixedDMA(5, 5, Width32Bit, )
             })
         }
     }

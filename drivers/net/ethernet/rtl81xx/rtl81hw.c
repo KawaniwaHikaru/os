@@ -117,6 +117,11 @@ Rtl81pReapReceivedFramesDefault (
     PRTL81_DEVICE Device
     );
 
+VOID
+Rtl81pUpdateFilterMode (
+    PRTL81_DEVICE Device
+    );
+
 KSTATUS
 Rtl81pReadMacAddress (
     PRTL81_DEVICE Device
@@ -254,10 +259,14 @@ Return Value:
 
 {
 
-    ULONG ChangedFlags;
+    PULONG BooleanOption;
+    PULONG Capabilities;
+    ULONG Capability;
+    ULONG ChangedCapabilities;
     PRTL81_DEVICE Device;
-    PULONG Flags;
+    ULONG EnabledCapabilities;
     KSTATUS Status;
+    ULONG SupportedCapabilities;
     USHORT Value;
 
     Device = (PRTL81_DEVICE)DeviceContext;
@@ -270,22 +279,46 @@ Return Value:
 
         //
         // If the request is a get, just return the device's current checksum
-        // flags.
+        // capabilities.
         //
 
         Status = STATUS_SUCCESS;
-        Flags = (PULONG)Data;
+        Capabilities = (PULONG)Data;
         if (Set == FALSE) {
-            *Flags = Device->ChecksumFlags;
+            *Capabilities = Device->EnabledCapabilities &
+                            NET_LINK_CAPABILITY_CHECKSUM_MASK;
+
             break;
         }
 
         //
-        // Synchronize on the receive lock. There is nothing to do for transmit
-        // changes, so leave that lock out of it.
+        // Scrub the capabilities in case the caller supplied more than the
+        // checksum bits.
         //
 
-        KeAcquireQueuedLock(Device->ReceiveLock);
+        *Capabilities &= NET_LINK_CAPABILITY_CHECKSUM_MASK;
+
+        //
+        // Not all RTL81xx devices support checksum offloading. Make sure the
+        // supplied capabilities are supported.
+        //
+
+        SupportedCapabilities = Device->SupportedCapabilities &
+                                NET_LINK_CAPABILITY_CHECKSUM_MASK;
+
+        if ((*Capabilities & ~SupportedCapabilities) != 0) {
+            Status = STATUS_NOT_SUPPORTED;
+            break;
+        }
+
+        //
+        // Synchronize updates to the enabled capabilities field and the
+        // reprogramming of the hardware register. It would be bad if the field
+        // said checksum offloading was enabled, but the hardware had it
+        // disabled. Future calls to enable it would fail.
+        //
+
+        KeAcquireQueuedLock(Device->ConfigurationLock);
 
         //
         // If it is a set, figure out what is changing. There is nothing to do
@@ -295,46 +328,97 @@ Return Value:
         // offloading, however, need to modify the command 2 register.
         //
 
-        ChangedFlags = *Flags ^ Device->ChecksumFlags;
-        if ((ChangedFlags & NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) != 0) {
+        ChangedCapabilities = (*Capabilities ^ Device->EnabledCapabilities) &
+                              NET_LINK_CAPABILITY_CHECKSUM_MASK;
+
+        if ((ChangedCapabilities &
+             NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK) != 0) {
 
             //
-            // If any of the receive checksum flags are set, then
+            // If any of the receive checksum capapbilities are set, then
             // offloading must remain on for all protocols. There is no
-            // granularity. Turn it on if a flag is set and no flags were
-            // previously set.
+            // granularity.
             //
 
-            if (((*Flags & NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) != 0) &&
-                ((Device->ChecksumFlags &
-                  NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) == 0)) {
+            Value = RTL81_READ_REGISTER16(Device, Rtl81RegisterCommand2);
+            if ((*Capabilities &
+                 NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK) != 0) {
 
-                Value = RTL81_READ_REGISTER16(Device, Rtl81RegisterCommand2);
-                Value |= RTL81_COMMAND_2_REGISTER_DEFAULT;
-                RTL81_WRITE_REGISTER16(Device, Rtl81RegisterCommand2, Value);
-                *Flags |= NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK;
+                Value |= RTL81_COMMAND_2_REGISTER_RECEIVE_CHECKSUM_OFFLOAD;
+                *Capabilities |= NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK;
 
             //
-            // Otherwise, if all flags are off and something was previously
-            // set, turn receive checksum offloadng off.
+            // If all receive capabilities are off, turn receive checksum
+            // offloadng off.
             //
 
-            } else if (((*Flags & NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) == 0) &&
-                       ((Device->ChecksumFlags &
-                         NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) != 0)) {
+            } else if ((*Capabilities &
+                         NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK) == 0) {
 
-                Value = RTL81_READ_REGISTER16(Device, Rtl81RegisterCommand2);
-                Value &= ~RTL81_COMMAND_2_REGISTER_DEFAULT;
-                RTL81_WRITE_REGISTER16(Device, Rtl81RegisterCommand2, Value);
+                Value &= ~RTL81_COMMAND_2_REGISTER_RECEIVE_CHECKSUM_OFFLOAD;
             }
+
+            RTL81_WRITE_REGISTER16(Device, Rtl81RegisterCommand2, Value);
         }
 
         //
         // Update the checksum flags.
         //
 
-        Device->ChecksumFlags = *Flags;
-        KeReleaseQueuedLock(Device->ReceiveLock);
+        Device->EnabledCapabilities &= ~NET_LINK_CAPABILITY_CHECKSUM_MASK;
+        Device->EnabledCapabilities |= *Capabilities;
+        KeReleaseQueuedLock(Device->ConfigurationLock);
+        break;
+
+    case NetLinkInformationMulticastAll:
+    case NetLinkInformationPromiscuousMode:
+        if (*DataSize != sizeof(ULONG)) {
+            Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        Capability = NET_LINK_CAPABILITY_PROMISCUOUS_MODE;
+        if (InformationType == NetLinkInformationMulticastAll) {
+            Capability = NET_LINK_CAPABILITY_MULTICAST_ALL;
+        }
+
+        Status = STATUS_SUCCESS;
+        BooleanOption = (PULONG)Data;
+        if (Set == FALSE) {
+            if ((Device->EnabledCapabilities & Capability) != 0) {
+                *BooleanOption = TRUE;
+
+            } else {
+                *BooleanOption = FALSE;
+            }
+
+            break;
+        }
+
+        //
+        // Fail if the capability is not supported.
+        //
+
+        if ((Device->SupportedCapabilities & Capability) == 0) {
+            Status = STATUS_NOT_SUPPORTED;
+            break;
+        }
+
+        KeAcquireQueuedLock(Device->ConfigurationLock);
+        EnabledCapabilities = Device->EnabledCapabilities;
+        if (*BooleanOption != FALSE) {
+            EnabledCapabilities |= Capability;
+
+        } else {
+            EnabledCapabilities &= ~Capability;
+        }
+
+        if ((EnabledCapabilities ^ Device->EnabledCapabilities) != 0) {
+            Device->EnabledCapabilities = EnabledCapabilities;
+            Rtl81pUpdateFilterMode(Device);
+        }
+
+        KeReleaseQueuedLock(Device->ConfigurationLock);
         break;
 
     default:
@@ -370,6 +454,7 @@ Return Value:
 {
 
     UINTN AllocationSize;
+    ULONG Capabilities;
     PRTL81_DEFAULT_DATA DefaultData;
     PRTL81_RECEIVE_DESCRIPTOR Descriptor;
     ULONG Flags;
@@ -393,6 +478,14 @@ Return Value:
 
     Device->ReceiveLock = KeCreateQueuedLock();
     if (Device->ReceiveLock == NULL) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto InitializeDeviceStructuresEnd;
+    }
+
+    ASSERT(Device->ConfigurationLock == NULL);
+
+    Device->ConfigurationLock = KeCreateQueuedLock();
+    if (Device->ConfigurationLock == NULL) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto InitializeDeviceStructuresEnd;
     }
@@ -443,17 +536,28 @@ Return Value:
     Device->Flags = Flags;
 
     //
+    // All RTL81xx devices support promiscuous and all-multicast modes, but do
+    // not enable them by default.
+    //
+
+    Device->SupportedCapabilities |= NET_LINK_CAPABILITY_PROMISCUOUS_MODE |
+                                     NET_LINK_CAPABILITY_MULTICAST_ALL;
+
+    //
     // Both checksum versions support the same features. So start with checksum
     // offloading enabled for transmit and receive.
     //
 
     if ((Device->Flags & RTL81_FLAG_CHECKSUM_OFFLOAD_MASK) != 0) {
-        Device->ChecksumFlags = NET_LINK_CHECKSUM_FLAG_TRANSMIT_IP_OFFLOAD |
-                                NET_LINK_CHECKSUM_FLAG_RECEIVE_IP_OFFLOAD |
-                                NET_LINK_CHECKSUM_FLAG_TRANSMIT_UDP_OFFLOAD |
-                                NET_LINK_CHECKSUM_FLAG_RECEIVE_UDP_OFFLOAD |
-                                NET_LINK_CHECKSUM_FLAG_TRANSMIT_TCP_OFFLOAD |
-                                NET_LINK_CHECKSUM_FLAG_RECEIVE_TCP_OFFLOAD;
+        Capabilities = NET_LINK_CAPABILITY_TRANSMIT_IP_CHECKSUM_OFFLOAD |
+                       NET_LINK_CAPABILITY_TRANSMIT_UDP_CHECKSUM_OFFLOAD |
+                       NET_LINK_CAPABILITY_TRANSMIT_TCP_CHECKSUM_OFFLOAD |
+                       NET_LINK_CAPABILITY_RECEIVE_IP_CHECKSUM_OFFLOAD |
+                       NET_LINK_CAPABILITY_RECEIVE_UDP_CHECKSUM_OFFLOAD |
+                       NET_LINK_CAPABILITY_RECEIVE_TCP_CHECKSUM_OFFLOAD;
+
+        Device->SupportedCapabilities |= Capabilities;
+        Device->EnabledCapabilities |= Capabilities;
     }
 
     //
@@ -655,12 +759,20 @@ Return Value:
 
 {
 
+    if (Device->InterruptHandle != INVALID_HANDLE){
+        IoDisconnectInterrupt(Device->InterruptHandle);
+    }
+
     if (Device->TransmitLock != NULL) {
         KeDestroyQueuedLock(Device->TransmitLock);
     }
 
     if (Device->ReceiveLock != NULL) {
         KeDestroyQueuedLock(Device->ReceiveLock);
+    }
+
+    if (Device->ConfigurationLock != NULL) {
+        KeDestroyQueuedLock(Device->ConfigurationLock);
     }
 
     if ((Device->Flags & RTL81_FLAG_TRANSMIT_MODE_LEGACY) != 0) {
@@ -785,8 +897,8 @@ Return Value:
         //
 
         Command2 = RTL81_COMMAND_2_REGISTER_DEFAULT;
-        if ((Device->ChecksumFlags &
-            NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK) != 0) {
+        if ((Device->EnabledCapabilities &
+            NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK) != 0) {
 
             Command2 |= RTL81_COMMAND_2_REGISTER_RECEIVE_CHECKSUM_OFFLOAD;
         }
@@ -878,9 +990,17 @@ Return Value:
                          RTL81_RECEIVE_CONFIGURATION_EARLY_TRESHOLD_SHIFT);
     }
 
+    Device->ReceiveConfiguration = ReceiveConfiguration;
     RTL81_WRITE_REGISTER32(Device,
                            Rtl81RegisterReceiveConfiguration,
                            ReceiveConfiguration);
+
+    //
+    // Set the initial reception filtering, which will be based on the
+    // currently enabled capabilities.
+    //
+
+    Rtl81pUpdateFilterMode(Device);
 
     //
     // Configure extra receive registers for non RTL8139 devices.
@@ -1108,6 +1228,12 @@ Return Value:
                                Rtl81RegisterBasicModeControl,
                                RTL81_BASIC_MODE_CONTROL_INITIAL_VALUE);
 
+        //
+        // According the the RealTek RTL8139C+ datasheet, the reset bit is
+        // supposed to be self-clearing. QEMU, however, does not clear the bit.
+        // Ignore timeout failures.
+        //
+
         CurrentTime = KeGetRecentTimeCounter();
         Timeout = CurrentTime + TimeoutTicks;
         do {
@@ -1121,11 +1247,6 @@ Return Value:
             CurrentTime = KeGetRecentTimeCounter();
 
         } while (CurrentTime <= Timeout);
-
-        if (CurrentTime > Timeout) {
-            Status = STATUS_TIMEOUT;
-            goto InitializePhyEnd;
-        }
 
     //
     // RTL8168 and above access the PHY through the MII registers. Reset the
@@ -1951,10 +2072,17 @@ Return Value:
                                   Rtl81RegisterCommand,
                                   CommandRegister);
 
+            //
+            // Updates to the devices receive configuration field and changes
+            // to the register must be synchronized.
+            //
+
+            KeAcquireQueuedLock(Device->ConfigurationLock);
             RTL81_WRITE_REGISTER32(Device,
                                    Rtl81RegisterReceiveConfiguration,
-                                   RTL81_RECEIVE_CONFIGURATION_DEFAULT_OPTIONS);
+                                   Device->ReceiveConfiguration);
 
+            KeReleaseQueuedLock(Device->ConfigurationLock);
             ReadPacketAddress = RTL81_MAXIMUM_RECEIVE_RING_BUFFER_OFFSET -
                                 RTL81_RECEIVE_OFFSET_ADJUSTMENT;
 
@@ -2257,6 +2385,97 @@ Return Value:
         Packet.FooterOffset = Size;
         NetProcessReceivedPacket(Device->NetworkLink, &Packet);
     }
+
+    return;
+}
+
+VOID
+Rtl81pUpdateFilterMode (
+    PRTL81_DEVICE Device
+    )
+
+/*++
+
+Routine Description:
+
+    This routine updates an RTL81xx device's filter mode based on the currently
+    enabled capabilities.
+
+Arguments:
+
+    Device - Supplies a pointer to the RTL81xx device.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    ULONG Configuration;
+    ULONG Multicast[2];
+
+    Configuration = RTL81_READ_REGISTER32(Device,
+                                          Rtl81RegisterReceiveConfiguration);
+
+    //
+    // Broadcast packets and packets whose destination MAC address matches the
+    // local address are always accepted.
+    //
+
+    Configuration |= RTL81_RECEIVE_CONFIGURATION_ACCEPT_BROADCAST_PACKETS |
+                     RTL81_RECEIVE_CONFIGURATION_ACCEPT_PHYSICAL_MATCH_PACKETS;
+
+    //
+    // Enabling the all physical packets flag does not enable the reception of
+    // multicast packets. Those must be specifically allowed.
+    //
+
+    if ((Device->EnabledCapabilities &
+         NET_LINK_CAPABILITY_PROMISCUOUS_MODE) != 0) {
+
+        Configuration |=
+                       RTL81_RECEIVE_CONFIGURATION_ACCEPT_MULTICAST_PACKETS |
+                       RTL81_RECEIVE_CONFIGURATION_ACCEPT_ALL_PHYSICAL_PACKETS;
+
+        Multicast[0] = 0xFFFFFFFF;
+        Multicast[1] = 0xFFFFFFFF;
+
+    } else {
+        Configuration &=
+                      ~RTL81_RECEIVE_CONFIGURATION_ACCEPT_ALL_PHYSICAL_PACKETS;
+
+        if ((Device->EnabledCapabilities &
+             NET_LINK_CAPABILITY_MULTICAST_ALL) != 0) {
+
+            Configuration |=
+                          RTL81_RECEIVE_CONFIGURATION_ACCEPT_MULTICAST_PACKETS;
+
+            Multicast[0] = 0xFFFFFFFF;
+            Multicast[1] = 0xFFFFFFFF;
+
+        } else {
+            Configuration &=
+                         ~RTL81_RECEIVE_CONFIGURATION_ACCEPT_MULTICAST_PACKETS;
+
+            Multicast[0] = 0;
+            Multicast[1] = 0;
+        }
+    }
+
+    Device->ReceiveConfiguration = Configuration;
+    RTL81_WRITE_REGISTER32(Device,
+                           Rtl81RegisterReceiveConfiguration,
+                           Configuration);
+
+    RTL81_WRITE_REGISTER32(Device,
+                           Rtl81RegisterMulticast0,
+                           Multicast[0]);
+
+    RTL81_WRITE_REGISTER32(Device,
+                           Rtl81RegisterMulticast4,
+                           Multicast[1]);
 
     return;
 }

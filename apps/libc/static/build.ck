@@ -27,41 +27,61 @@ Environment:
 
 --*/
 
+from menv import binplace, mconfig, staticLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var archSources;
+    var entry;
+    var entries;
+    var includes;
+    var lib;
+    var sources;
+
     sources = [
         "init.c",
-        "atexit.c"
+        "atexit.c",
+        "dlsym.c"
     ];
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        arch_sources = [
+        archSources = [
             "armv7/aatexit.c",
             "armv7/crt0.S"
         ];
 
     } else if (arch == "x86") {
-        arch_sources = [
+        archSources = [
             "x86/crt0.S"
         ];
 
     } else if (arch == "x64") {
-        arch_sources = [
+        archSources = [
             "x64/crt0.S"
         ];
     }
 
     includes = [
-        "$//apps/libc/include"
+        "$S/apps/libc/include"
     ];
 
     lib = {
         "label": "libc_nonshared",
-        "inputs": arch_sources + sources,
-        "includes": includes
+        "inputs": archSources + sources,
+        "includes": includes,
+        "binplace": "bin"
     };
 
-    entries = static_library(lib);
+    entries = staticLibrary(lib);
+    for (index in 0..entries.length()) {
+        entry = entries[index];
+        if (entry.output.endsWith("crt0.o")) {
+            entries.removeAt(index);
+            entries += binplace(entry);
+            break;
+        }
+    }
+
     return entries;
 }
 
-return build();

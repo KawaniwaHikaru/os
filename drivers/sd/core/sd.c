@@ -391,6 +391,7 @@ DISK_INTERFACE SdDiskInterfaceTemplate = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -807,8 +808,8 @@ Return Value:
 
     ASSERT((Disk->BlockCount != 0) && (Disk->BlockShift != 0));
     ASSERT(Irp->U.ReadWrite.IoBuffer != NULL);
-    ASSERT(IS_ALIGNED(IoOffset, 1 << Disk->BlockShift) != FALSE);
-    ASSERT(IS_ALIGNED(BytesToComplete, 1 << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(IoOffset, 1ULL << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(BytesToComplete, 1ULL << Disk->BlockShift) != FALSE);
 
     //
     // Before acquiring the controller's lock and starting the DMA, prepare
@@ -817,7 +818,7 @@ Return Value:
     //
 
     Status = IoPrepareReadWriteIrp(&(Irp->U.ReadWrite),
-                                   1 << Disk->BlockShift,
+                                   1ULL << Disk->BlockShift,
                                    0,
                                    MAX_ULONG,
                                    IrpReadWriteFlags);
@@ -949,15 +950,13 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectBlockDevice;
             Properties->HardLinkCount = 1;
             Properties->BlockCount = Disk->BlockCount;
-            Properties->BlockSize = 1 << Disk->BlockShift;
-            WRITE_INT64_SYNC(&(Properties->FileSize),
-                             Disk->BlockCount << Disk->BlockShift);
-
+            Properties->BlockSize = 1ULL << Disk->BlockShift;
+            Properties->Size = Disk->BlockCount << Disk->BlockShift;
             Status = STATUS_SUCCESS;
         }
 
@@ -972,11 +971,11 @@ Return Value:
     case IrpMinorSystemControlWriteFileProperties:
         FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
         Properties = FileOperation->FileProperties;
-        READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+        PropertiesFileSize = Properties->Size;
         if ((Properties->FileId != 0) ||
             (Properties->Type != IoObjectBlockDevice) ||
             (Properties->HardLinkCount != 1) ||
-            (Properties->BlockSize != (1 << Disk->BlockShift)) ||
+            (Properties->BlockSize != (1ULL << Disk->BlockShift)) ||
             (Properties->BlockCount != Disk->BlockCount) ||
             (PropertiesFileSize != (Disk->BlockCount << Disk->BlockShift))) {
 
@@ -1293,7 +1292,11 @@ Return Value:
                               sizeof(DISK_INTERFACE));
 
                 Disk->DiskInterface.DiskToken = Disk;
-                Disk->DiskInterface.BlockSize = 1 << Disk->BlockShift;
+                Disk->DiskInterface.BlockSize = 1ULL << Disk->BlockShift;
+
+                ASSERT(Disk->DiskInterface.BlockSize ==
+                       (1ULL << Disk->BlockShift));
+
                 Disk->DiskInterface.BlockCount = Disk->BlockCount;
                 Status = IoCreateInterface(&SdDiskInterfaceUuid,
                                            Disk->Device,
@@ -2394,7 +2397,7 @@ Return Value:
     }
 
     Status = IoPrepareReadWriteIrp(IrpReadWrite,
-                                   1 << Disk->BlockShift,
+                                   1ULL << Disk->BlockShift,
                                    0,
                                    MAX_ULONGLONG,
                                    IrpReadWriteFlags);
@@ -2458,8 +2461,9 @@ Return Value:
 
     BytesRemaining = IrpReadWrite->IoSizeInBytes;
 
-    ASSERT(IS_ALIGNED(BytesRemaining, 1 << Disk->BlockShift) != FALSE);
-    ASSERT(IS_ALIGNED(IrpReadWrite->IoOffset, 1 << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(BytesRemaining, 1ULL << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(IrpReadWrite->IoOffset, 1ULL << Disk->BlockShift) !=
+           FALSE);
 
     BlockOffset = IrpReadWrite->IoOffset >> Disk->BlockShift;
     while (BytesRemaining != 0) {
@@ -2473,7 +2477,7 @@ Return Value:
             BytesThisRound = BytesRemaining;
         }
 
-        ASSERT(IS_ALIGNED(BytesThisRound, (1 << Disk->BlockShift)) != FALSE);
+        ASSERT(IS_ALIGNED(BytesThisRound, (1ULL << Disk->BlockShift)) != FALSE);
 
         BlockCount = BytesThisRound >> Disk->BlockShift;
 

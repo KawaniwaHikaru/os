@@ -25,7 +25,18 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var entries;
+    var includes;
+    var lib;
+    var sources;
+    var stubLib;
+    var stubLib32;
+    var stubSources;
+
     sources = [
         "ftdi.c",
         "hub.c",
@@ -33,12 +44,12 @@ function build() {
         "kdusb.c"
     ];
 
-    stub_sources = [
+    stubSources = [
         "kdnousb/stubs.c"
     ];
 
     includes = [
-        "$//drivers/usb/ehci"
+        "$S/drivers/usb/ehci"
     ];
 
     lib = {
@@ -47,14 +58,25 @@ function build() {
         "includes": includes
     };
 
-    stub_lib = {
+    stubLib = {
         "label": "kdnousb",
-        "inputs": stub_sources
+        "inputs": stubSources
     };
 
-    entries = static_library(lib);
-    entries += static_library(stub_lib);
+    entries = kernelLibrary(lib);
+    entries += kernelLibrary(stubLib);
+    if (arch == "x64") {
+        stubLib32 = {
+            "label": "kdnousb32",
+            "inputs": sources,
+            "includes": includes,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(stubLib32);
+    }
+
     return entries;
 }
 
-return build();

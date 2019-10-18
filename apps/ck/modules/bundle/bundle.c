@@ -34,6 +34,7 @@ Environment:
 
 #include <minoca/lib/types.h>
 #include <minoca/lib/chalk.h>
+#include <minoca/lib/chalk/app.h>
 
 #include <errno.h>
 #include <libgen.h>
@@ -52,11 +53,15 @@ Environment:
 
 #define mkdir(_Path, _Permissions) mkdir(_Path)
 
+#define S_IXGRP 0
+#define S_IXOTH 0
+
 #endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__CYGWIN__) || defined(__FreeBSD__)
 
 #define fseeko64 fseeko
+#define ftello64 ftello
 
 #endif
 
@@ -178,14 +183,7 @@ CK_VARIABLE_DESCRIPTION CkBundleModuleValues[] = {
 };
 
 //
-// Define the location of this executable. This must be set prior to creating
-// or loading a new bundle.
-//
-
-PSTR CkBundleExecName;
-
-//
-// Define the termporary directory name where modules are stored.
+// Define the temporary directory name where modules are stored.
 //
 
 CHAR CkBundleDirectory[256];
@@ -268,7 +266,7 @@ Return Value:
     INT Status;
 
     Buffer = NULL;
-    if (stat(CkBundleExecName, &Stat) != 0) {
+    if (stat(CkAppExecName, &Stat) != 0) {
         Status = errno;
         goto BundleThawEnd;
     }
@@ -279,7 +277,7 @@ Return Value:
         goto BundleThawEnd;
     }
 
-    File = fopen(CkBundleExecName, "rb");
+    File = fopen(CkAppExecName, "rb");
     if (File == NULL) {
         Status = errno;
         goto BundleThawEnd;
@@ -397,6 +395,7 @@ Return Value:
     Executable = NULL;
     File = NULL;
     ForeignFile = NULL;
+    OutputName = NULL;
     if (!CkCheckArguments(Vm, 3, CkTypeString, CkTypeList, CkTypeString)) {
         Status = -1;
         goto BundleCreateEnd;
@@ -409,7 +408,7 @@ Return Value:
     // 3) The expression to execute once all modules are preloaded.
     //
 
-    if (CkBundleExecName == NULL) {
+    if ((CkAppExecName == NULL) || (*CkAppExecName == '\0')) {
         Status = EINVAL;
         goto BundleCreateEnd;
     }
@@ -425,12 +424,12 @@ Return Value:
         goto BundleCreateEnd;
     }
 
-    if (stat(CkBundleExecName, &Stat) != 0) {
+    if (stat(CkAppExecName, &Stat) != 0) {
         Status = errno;
         goto BundleCreateEnd;
     }
 
-    Executable = fopen(CkBundleExecName, "rb");
+    Executable = fopen(CkAppExecName, "rb");
     if (Executable == NULL) {
         Status = errno;
         goto BundleCreateEnd;
@@ -464,7 +463,7 @@ Return Value:
         goto BundleCreateEnd;
     }
 
-    ChecksumOffset = fseeko64(File, 0, SEEK_CUR);
+    ChecksumOffset = ftello64(File);
     if (ChecksumOffset == -1) {
         Status = errno;
         goto BundleCreateEnd;
@@ -695,7 +694,7 @@ Return Value:
     // Write the length in its final place place.
     //
 
-    EndOffset = fseeko64(File, 0, SEEK_CUR);
+    EndOffset = ftello64(File);
     if ((EndOffset == -1) || (EndOffset < ChecksumOffset)) {
         Status = EINVAL;
         goto BundleCreateEnd;
@@ -752,6 +751,9 @@ BundleCreateEnd:
 
     if (File != NULL) {
         fclose(File);
+        if (stat(OutputName, &Stat) == 0) {
+            chmod(OutputName, Stat.st_mode | S_IXUSR | S_IXOTH | S_IXGRP);
+        }
     }
 
     if (ForeignFile != NULL) {
@@ -1067,7 +1069,12 @@ LoadBundleEnd:
         //
 
         if (Expression != NULL) {
-            Status = CkInterpret(Vm, NULL, Expression, ExpressionSize, 1);
+            Status = CkInterpret(Vm,
+                                 NULL,
+                                 Expression,
+                                 ExpressionSize,
+                                 1,
+                                 FALSE);
         }
     }
 

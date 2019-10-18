@@ -40,6 +40,8 @@ Environment:
 
 #include <minoca/kernel/driver.h>
 #include <minoca/net/netdrv.h>
+#include <minoca/net/ip4.h>
+#include <minoca/net/ip6.h>
 #include <minoca/kernel/acpi.h>
 #include <minoca/fw/smbios.h>
 #include "ethernet.h"
@@ -62,6 +64,13 @@ Environment:
 //
 
 #define ETHERNET_DEBUG_FLAG_DROPPED_PACKETS 0x00000001
+
+//
+// Define the IPv4 address mask for the bits that get included in a multicast
+// MAC address.
+//
+
+#define ETHERNET_IP4_MULTICAST_TO_MAC_MASK CPU_TO_NETWORK32(0x007FFFFF)
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -96,9 +105,11 @@ NetpEthernetProcessReceivedPacket (
     PNET_PACKET_BUFFER Packet
     );
 
-VOID
-NetpEthernetGetBroadcastAddress (
-    PNETWORK_ADDRESS PhysicalNetworkAddress
+KSTATUS
+NetpEthernetConvertToPhysicalAddress (
+    PNETWORK_ADDRESS NetworkAddress,
+    PNETWORK_ADDRESS PhysicalAddress,
+    NET_ADDRESS_TYPE NetworkAddressType
     );
 
 ULONG
@@ -139,6 +150,22 @@ ULONG NetEthernetInventedAddress;
 ULONG EthernetDebugFlags = 0;
 
 //
+// Stores the base MAC address for all IPv4 multicast addresses. The lower 23
+// bits are taken from the lower 23-bits of the IPv4 address.
+//
+
+UCHAR NetEthernetIp4MulticastBase[ETHERNET_ADDRESS_SIZE] =
+    {0x01, 0x00, 0x5E, 0x00, 0x00, 0x00};
+
+//
+// Stores the base MAC address for all IPv6 multicast addresses. The last four
+// bytes are taken from last four bytes of the IPv6 address.
+//
+
+UCHAR NetEthernetIp6MulticastBase[ETHERNET_ADDRESS_SIZE] =
+    {0x33, 0x33, 0x00, 0x00, 0x00, 0x00};
+
+//
 // ------------------------------------------------------------------ Functions
 //
 
@@ -176,7 +203,7 @@ Return Value:
     Interface->DestroyLink = NetpEthernetDestroyLink;
     Interface->Send = NetpEthernetSend;
     Interface->ProcessReceivedPacket = NetpEthernetProcessReceivedPacket;
-    Interface->GetBroadcastAddress = NetpEthernetGetBroadcastAddress;
+    Interface->ConvertToPhysicalAddress = NetpEthernetConvertToPhysicalAddress;
     Interface->PrintAddress = NetpEthernetPrintAddress;
     Interface->GetPacketSizeInformation = NetpEthernetGetPacketSizeInformation;
     Status = NetRegisterDataLinkLayer(&DataLinkEntry, &DataLinkHandle);
@@ -536,6 +563,7 @@ Return Value:
     PNET_LINK Link;
     PNET_NETWORK_ENTRY NetworkEntry;
     ULONG NetworkProtocol;
+    NET_RECEIVE_CONTEXT ReceiveContext;
 
     Link = (PNET_LINK)DataLinkContext;
 
@@ -562,29 +590,41 @@ Return Value:
     //
 
     Packet->DataOffset += (2 * ETHERNET_ADDRESS_SIZE) + sizeof(USHORT);
-    NetworkEntry->Interface.ProcessReceivedData(Link, Packet);
+    RtlZeroMemory(&ReceiveContext, sizeof(NET_RECEIVE_CONTEXT));
+    ReceiveContext.Packet = Packet;
+    ReceiveContext.Link = Link;
+    ReceiveContext.Network = NetworkEntry;
+    NetworkEntry->Interface.ProcessReceivedData(&ReceiveContext);
     return;
 }
 
-VOID
-NetpEthernetGetBroadcastAddress (
-    PNETWORK_ADDRESS PhysicalNetworkAddress
+KSTATUS
+NetpEthernetConvertToPhysicalAddress (
+    PNETWORK_ADDRESS NetworkAddress,
+    PNETWORK_ADDRESS PhysicalAddress,
+    NET_ADDRESS_TYPE NetworkAddressType
     )
 
 /*++
 
 Routine Description:
 
-    This routine gets the ethernet broadcast address.
+    This routine converts the given network address to a physical layer address
+    based on the provided network address type.
 
 Arguments:
 
-    PhysicalNetworkAddress - Supplies a pointer where the physical network
-        broadcast address will be returned.
+    NetworkAddress - Supplies a pointer to the network layer address to convert.
+
+    PhysicalAddress - Supplies a pointer to an address that receives the
+        converted physical layer address.
+
+    NetworkAddressType - Supplies the classified type of the given network
+        address, which aids in conversion.
 
 Return Value:
 
-    None.
+    Status code.
 
 --*/
 
@@ -592,16 +632,101 @@ Return Value:
 
     ULONG ByteIndex;
     PUCHAR BytePointer;
+    ULONG Ip4AddressMask;
+    PUCHAR Ip4BytePointer;
+    PIP4_ADDRESS Ip4Multicast;
+    PUCHAR Ip6BytePointer;
+    KSTATUS Status;
 
-    BytePointer = (PUCHAR)(PhysicalNetworkAddress->Address);
-    RtlZeroMemory(BytePointer, sizeof(PhysicalNetworkAddress->Address));
-    PhysicalNetworkAddress->Domain = NetDomainEthernet;
-    PhysicalNetworkAddress->Port = 0;
-    for (ByteIndex = 0; ByteIndex < ETHERNET_ADDRESS_SIZE; ByteIndex += 1) {
-        BytePointer[ByteIndex] = 0xFF;
+    BytePointer = (PUCHAR)(PhysicalAddress->Address);
+    RtlZeroMemory(BytePointer, sizeof(PhysicalAddress->Address));
+    PhysicalAddress->Domain = NetDomainEthernet;
+    PhysicalAddress->Port = 0;
+    Status = STATUS_SUCCESS;
+    switch (NetworkAddressType) {
+
+    //
+    // The broadcast address is the same for all network addresses.
+    //
+
+    case NetAddressBroadcast:
+        for (ByteIndex = 0; ByteIndex < ETHERNET_ADDRESS_SIZE; ByteIndex += 1) {
+            BytePointer[ByteIndex] = 0xFF;
+        }
+
+        break;
+
+    //
+    // A multicast MAC address depends on the domain of the given network
+    // address. This conversion is done at the physical layer because the
+    // network layer shouldn't need to know anything about the underlying
+    // physical layer and the conversion algorithm is specific to the physical
+    // layer's address type.
+    //
+
+    case NetAddressMulticast:
+        switch (NetworkAddress->Domain) {
+        case NetDomainIp4:
+
+            //
+            // The IPv4 address is in network byte order, but the CPU byte
+            // order low 23-bits need to be added to the MAC address. Get the
+            // low bytes, but keep them in network order to avoid doing a swap.
+            //
+
+            Ip4Multicast = (PIP4_ADDRESS)NetworkAddress;
+            Ip4AddressMask = Ip4Multicast->Address &
+                             ETHERNET_IP4_MULTICAST_TO_MAC_MASK;
+
+            //
+            // Copy the static base MAC address.
+            //
+
+            RtlCopyMemory(BytePointer,
+                          NetEthernetIp4MulticastBase,
+                          ETHERNET_ADDRESS_SIZE);
+
+            //
+            // Add the low 23-bits from the IP address to the MAC address,
+            // keeping in mind that the IP bytes are in network order.
+            //
+
+            Ip4BytePointer = (PUCHAR)&Ip4AddressMask;
+            BytePointer[3] |= Ip4BytePointer[1];
+            BytePointer[4] = Ip4BytePointer[2];
+            BytePointer[5] = Ip4BytePointer[3];
+            break;
+
+        case NetDomainIp6:
+
+            //
+            // The IPv6 multicast MAC address is formed by taking the last four
+            // bytes of the IPv6 address and prepending them with two bytes of
+            // 0x33.
+            //
+
+            Ip6BytePointer = (PUCHAR)(NetworkAddress->Address);
+            BytePointer[0] = NetEthernetIp6MulticastBase[0];
+            BytePointer[1] = NetEthernetIp6MulticastBase[1];
+            BytePointer[2] = Ip6BytePointer[12];
+            BytePointer[3] = Ip6BytePointer[13];
+            BytePointer[4] = Ip6BytePointer[14];
+            BytePointer[5] = Ip6BytePointer[15];
+            break;
+
+        default:
+            Status = STATUS_NOT_SUPPORTED;
+            break;
+        }
+
+        break;
+
+    default:
+        Status = STATUS_INVALID_PARAMETER;
+        break;
     }
 
-    return;
+    return Status;
 }
 
 ULONG

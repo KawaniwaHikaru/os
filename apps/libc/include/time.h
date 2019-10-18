@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -792,8 +791,8 @@ Arguments:
 
 Return Value:
 
-    Returns the number of characters written to the output buffer, including
-    the null terminator.
+    Returns the number of characters written to the output buffer, not
+    including the null terminator.
 
 --*/
 

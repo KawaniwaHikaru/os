@@ -84,6 +84,17 @@ Environment:
 #define RAW_MAX_PACKET_SIZE MAX_ULONG
 
 //
+// Define the default protocol entry flags.
+//
+
+#define RAW_DEFAULT_PROTOCOL_FLAGS          \
+    NET_PROTOCOL_FLAG_MATCH_ANY_PROTOCOL |  \
+    NET_PROTOCOL_FLAG_FIND_ALL_SOCKETS |    \
+    NET_PROTOCOL_FLAG_NO_DEFAULT_PROTOCOL | \
+    NET_PROTOCOL_FLAG_PORTLESS |            \
+    NET_PROTOCOL_FLAG_NO_BIND_PERMISSIONS
+
+//
 // ------------------------------------------------------ Data Type Definitions
 //
 
@@ -201,7 +212,8 @@ NetpRawCreateSocket (
     PNET_PROTOCOL_ENTRY ProtocolEntry,
     PNET_NETWORK_ENTRY NetworkEntry,
     ULONG NetworkProtocol,
-    PNET_SOCKET *NewSocket
+    PNET_SOCKET *NewSocket,
+    ULONG Phase
     );
 
 VOID
@@ -255,20 +267,13 @@ NetpRawSend (
 
 VOID
 NetpRawProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    PNET_PROTOCOL_ENTRY ProtocolEntry
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 KSTATUS
 NetpRawProcessReceivedSocketData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 KSTATUS
@@ -306,6 +311,7 @@ NET_PROTOCOL_ENTRY NetRawProtocol = {
     {NULL, NULL},
     NetSocketRaw,
     SOCKET_INTERNET_PROTOCOL_RAW,
+    RAW_DEFAULT_PROTOCOL_FLAGS,
     NULL,
     NULL,
     {{0}, {0}, {0}},
@@ -365,6 +371,12 @@ RAW_SOCKET_OPTION NetRawSocketOptions[] = {
 };
 
 //
+// Store the number of raw sockets that could potentially receive a packet.
+//
+
+volatile UINTN NetRawSocketCount = 0;
+
+//
 // ------------------------------------------------------------------ Functions
 //
 
@@ -414,7 +426,8 @@ NetpRawCreateSocket (
     PNET_PROTOCOL_ENTRY ProtocolEntry,
     PNET_NETWORK_ENTRY NetworkEntry,
     ULONG NetworkProtocol,
-    PNET_SOCKET *NewSocket
+    PNET_SOCKET *NewSocket,
+    ULONG Phase
     )
 
 /*++
@@ -439,7 +452,13 @@ Arguments:
         socket structure will be returned. The caller is responsible for
         allocating the socket (and potentially a larger structure for its own
         context). The core network library will fill in the standard socket
-        structure after this routine returns.
+        structure after this routine returns. In phase 1, this will contain
+        a pointer to the socket allocated during phase 0.
+
+    Phase - Supplies the socket creation phase. Phase 0 is the allocation phase
+        and phase 1 is the advanced initialization phase, which is invoked
+        after net core is done filling out common portions of the socket
+        structure.
 
 Return Value:
 
@@ -449,6 +468,7 @@ Return Value:
 
 {
 
+    NETWORK_ADDRESS LocalAddress;
     PNET_SOCKET NetSocket;
     PNET_PACKET_SIZE_INFORMATION PacketSizeInformation;
     PRAW_SOCKET RawSocket;
@@ -458,49 +478,107 @@ Return Value:
     ASSERT(ProtocolEntry->ParentProtocolNumber == SOCKET_INTERNET_PROTOCOL_RAW);
 
     NetSocket = NULL;
-    RawSocket = MmAllocatePagedPool(sizeof(RAW_SOCKET),
-                                    RAW_PROTOCOL_ALLOCATION_TAG);
-
-    if (RawSocket == NULL) {
-        Status = STATUS_INSUFFICIENT_RESOURCES;
-        goto RawCreateSocketEnd;
-    }
-
-    RtlZeroMemory(RawSocket, sizeof(RAW_SOCKET));
-    NetSocket = &(RawSocket->NetSocket);
-    NetSocket->KernelSocket.Protocol = NetworkProtocol;
-    NetSocket->KernelSocket.ReferenceCount = 1;
-    INITIALIZE_LIST_HEAD(&(RawSocket->ReceivedPacketList));
-    RawSocket->ReceiveTimeout = WAIT_TIME_INDEFINITE;
-    RawSocket->ReceiveBufferTotalSize = RAW_DEFAULT_RECEIVE_BUFFER_SIZE;
-    RawSocket->ReceiveBufferFreeSize = RawSocket->ReceiveBufferTotalSize;
-    RawSocket->ReceiveMinimum = RAW_DEFAULT_RECEIVE_MINIMUM;
-    RawSocket->MaxPacketSize = RAW_MAX_PACKET_SIZE;
-    RawSocket->ReceiveLock = KeCreateQueuedLock();
-    if (RawSocket->ReceiveLock == NULL) {
-        Status = STATUS_INSUFFICIENT_RESOURCES;
-        goto RawCreateSocketEnd;
-    }
+    RawSocket = NULL;
 
     //
-    // Give the lower layers a chance to initialize. Start the maximum packet
-    // size at the largest possible value.
+    // The thread must have permission to create raw sockets.
     //
 
-    ASSERT(RAW_MAX_PACKET_SIZE == MAX_ULONG);
-
-    PacketSizeInformation = &(NetSocket->PacketSizeInformation);
-    PacketSizeInformation->MaxPacketSize = RAW_MAX_PACKET_SIZE;
-    Status = NetworkEntry->Interface.InitializeSocket(ProtocolEntry,
-                                                      NetworkEntry,
-                                                      NetworkProtocol,
-                                                      NetSocket);
-
+    Status = PsCheckPermission(PERMISSION_NET_RAW);
     if (!KSUCCESS(Status)) {
         goto RawCreateSocketEnd;
     }
 
-    Status = STATUS_SUCCESS;
+    //
+    // Phase 0 allocates the socket and begins initialization.
+    //
+
+    if (Phase == 0) {
+        RawSocket = MmAllocatePagedPool(sizeof(RAW_SOCKET),
+                                        RAW_PROTOCOL_ALLOCATION_TAG);
+
+        if (RawSocket == NULL) {
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto RawCreateSocketEnd;
+        }
+
+        RtlZeroMemory(RawSocket, sizeof(RAW_SOCKET));
+        NetSocket = &(RawSocket->NetSocket);
+        NetSocket->KernelSocket.Protocol = NetworkProtocol;
+        NetSocket->KernelSocket.ReferenceCount = 1;
+        INITIALIZE_LIST_HEAD(&(RawSocket->ReceivedPacketList));
+        RawSocket->ReceiveTimeout = WAIT_TIME_INDEFINITE;
+        RawSocket->ReceiveBufferTotalSize = RAW_DEFAULT_RECEIVE_BUFFER_SIZE;
+        RawSocket->ReceiveBufferFreeSize = RawSocket->ReceiveBufferTotalSize;
+        RawSocket->ReceiveMinimum = RAW_DEFAULT_RECEIVE_MINIMUM;
+        RawSocket->MaxPacketSize = RAW_MAX_PACKET_SIZE;
+        RawSocket->ReceiveLock = KeCreateQueuedLock();
+        if (RawSocket->ReceiveLock == NULL) {
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto RawCreateSocketEnd;
+        }
+
+        //
+        // Set some kernel socket fields. A raw socket needs to be bound to the
+        // any address and made ready to receive as soon as create returns. To
+        // avoid requiring common code to handle this, initialize the kernel
+        // socket so that the bind routines can be invoked.
+        //
+
+        NetSocket->KernelSocket.IoState = IoCreateIoObjectState(FALSE, FALSE);
+        if (NetSocket->KernelSocket.IoState == NULL) {
+            Status = STATUS_INSUFFICIENT_RESOURCES;
+            goto RawCreateSocketEnd;
+        }
+
+        NetSocket->KernelSocket.Domain = NetworkEntry->Domain;
+        NetSocket->KernelSocket.Type = ProtocolEntry->Type;
+
+        //
+        // Give the lower layers a chance to initialize. Start the maximum
+        // packet size at the largest possible value.
+        //
+
+        ASSERT(RAW_MAX_PACKET_SIZE == MAX_ULONG);
+
+        PacketSizeInformation = &(NetSocket->PacketSizeInformation);
+        PacketSizeInformation->MaxPacketSize = RAW_MAX_PACKET_SIZE;
+        Status = NetworkEntry->Interface.InitializeSocket(ProtocolEntry,
+                                                          NetworkEntry,
+                                                          NetworkProtocol,
+                                                          NetSocket);
+
+        if (!KSUCCESS(Status)) {
+            goto RawCreateSocketEnd;
+        }
+
+        RtlAtomicAdd(&NetRawSocketCount, 1);
+        Status = STATUS_SUCCESS;
+
+    //
+    // Phase 1 finishes raw specific initialization after netcore is done with
+    // its initialization steps.
+    //
+
+    } else {
+
+        ASSERT(Phase == 1);
+        ASSERT(*NewSocket != NULL);
+        ASSERT(RawSocket == NULL);
+
+        NetSocket = *NewSocket;
+
+        //
+        // Perform the implicit bind to the any address.
+        //
+
+        RtlZeroMemory(&LocalAddress, sizeof(NETWORK_ADDRESS));
+        LocalAddress.Domain = NetSocket->KernelSocket.Domain;
+        Status = NetpRawBindToAddress(NetSocket, NULL, &LocalAddress);
+        if (!KSUCCESS(Status)) {
+            goto RawCreateSocketEnd;
+        }
+    }
 
 RawCreateSocketEnd:
     if (!KSUCCESS(Status)) {
@@ -572,8 +650,13 @@ Return Value:
            RawSocket->ReceiveBufferTotalSize);
 
     KeReleaseQueuedLock(RawSocket->ReceiveLock);
+    if (Socket->Network->Interface.DestroySocket != NULL) {
+        Socket->Network->Interface.DestroySocket(Socket);
+    }
+
     KeDestroyQueuedLock(RawSocket->ReceiveLock);
     MmFreePagedPool(RawSocket);
+    RtlAtomicAdd(&NetRawSocketCount, (UINTN)-1);
     return;
 }
 
@@ -608,6 +691,7 @@ Return Value:
 
 {
 
+    ULONG Flags;
     ULONG OriginalPort;
     KSTATUS Status;
 
@@ -623,26 +707,30 @@ Return Value:
     }
 
     //
-    // Currently only IPv4 addresses are supported.
-    //
-
-    if (Address->Domain != NetDomainIp4) {
-        Status = STATUS_NOT_SUPPORTED;
-        goto RawBindToAddressEnd;
-    }
-
-    //
-    // The port doesn't make a difference on raw sockets, so zero it out.
+    // The port doesn't make a difference on raw sockets. Set it to the
+    // protocol value, which is storked in the kernel socket.
     //
 
     OriginalPort = Address->Port;
-    Address->Port = 0;
+    Address->Port = Socket->KernelSocket.Protocol;
 
     //
-    // Pass the request down to the network layer.
+    // Pass the request down to the network layer. Raw sockets have slightly
+    // different bind behavior than other socket types. Indicate this with the
+    // flags.
     //
 
-    Status = Socket->Network->Interface.BindToAddress(Socket, Link, Address);
+    Flags = NET_SOCKET_BINDING_FLAG_ALLOW_REBIND |
+            NET_SOCKET_BINDING_FLAG_ALLOW_UNBIND |
+            NET_SOCKET_BINDING_FLAG_NO_PORT_ASSIGNMENT |
+            NET_SOCKET_BINDING_FLAG_OVERWRITE_LOCAL |
+            NET_SOCKET_BINDING_FLAG_SKIP_ADDRESS_VALIDATION;
+
+    Status = Socket->Network->Interface.BindToAddress(Socket,
+                                                      Link,
+                                                      Address,
+                                                      Flags);
+
     Address->Port = OriginalPort;
     if (!KSUCCESS(Status)) {
         goto RawBindToAddressEnd;
@@ -757,7 +845,15 @@ Return Value:
     KSTATUS Status;
 
     //
-    // The port doesn't make a different on raw sockets, so zero it out.
+    // Ports don't mean anything to raw sockets. Zero it out. Other
+    // implementations seem to keep the port and return it for APIs like
+    // getpeername(). This is confusing as a packet is never matched to a
+    // socket based on the port. Setting it to zero also makes life easier when
+    // searching for sockets during packet reception. The received packet has
+    // no raw protocol port. If the socket were connected to some user defined
+    // port, then the search compare routines would have to know to skip port
+    // validation. Setting the port to zero allows the default compare routines
+    // to be used.
     //
 
     OriginalPort = Address->Port;
@@ -959,6 +1055,10 @@ Return Value:
         }
 
         Destination = &(Socket->RemoteAddress);
+
+    } else if (Destination->Domain != Socket->KernelSocket.Domain) {
+        Status = STATUS_DOMAIN_NOT_SUPPORTED;
+        goto RawSendEnd;
     }
 
     //
@@ -1001,25 +1101,16 @@ Return Value:
 
     if (Socket->Link == NULL) {
         Status = NetFindLinkForRemoteAddress(Destination, &LinkInformation);
-        if (KSUCCESS(Status)) {
-
-            //
-            // Synchronously get the correct header, footer, and max packet
-            // sizes.
-            //
-
-            Status = NetInitializeSocketLinkOverride(Socket,
-                                                     &LinkInformation,
-                                                     &LinkOverrideBuffer);
-
-            if (KSUCCESS(Status)) {
-                LinkOverride = &LinkOverrideBuffer;
-            }
-        }
-
-        if (!KSUCCESS(Status) && (Status != STATUS_CONNECTION_EXISTS)) {
+        if (!KSUCCESS(Status)) {
             goto RawSendEnd;
         }
+
+        //
+        // Synchronously get the correct header, footer, and max packet sizes.
+        //
+
+        LinkOverride = &LinkOverrideBuffer;
+        NetInitializeSocketLinkOverride(Socket, &LinkInformation, LinkOverride);
     }
 
     //
@@ -1114,11 +1205,7 @@ RawSendEnd:
 
 VOID
 NetpRawProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    PNET_PROTOCOL_ENTRY ProtocolEntry
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -1129,22 +1216,8 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space while this routine
-        executes and the packet travels up the stack, but will not be accessed
-        after this routine returns.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
-
-    ProtocolEntry - Supplies a pointer to this protocol's protocol entry.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1155,23 +1228,74 @@ Return Value:
 
 {
 
+    PNET_SOCKET PreviousSocket;
+    PNET_SOCKET Socket;
+    KSTATUS Status;
+
+    ASSERT(KeGetRunLevel() == RunLevelLow);
+
     //
-    // No incoming packets should match the raw socket protocol. Raw sockets
-    // receive data directly from net core and not their networking layer.
+    // If no raw sockets are present, then immediately exit.
     //
 
-    ASSERT(FALSE);
+    if (NetRawSocketCount == 0) {
+        return;
+    }
 
+    //
+    // Each raw sockets' local receive address was initialized with the port
+    // set to the protocol number. Each raw socket's remote address was set to
+    // 0 when it was fully bound. Initialize the receive context in this way
+    // as well so that the ports will match any activated sockets.
+    //
+
+    ReceiveContext->Source->Port = 0;
+    ReceiveContext->Destination->Port = ReceiveContext->ParentProtocolNumber;;
+
+    //
+    // Find all the sockets willing to take this packet.
+    //
+
+    Socket = NULL;
+    PreviousSocket = NULL;
+    do {
+        Status = NetFindSocket(ReceiveContext, &Socket);
+        if (!KSUCCESS(Status) && (Status != STATUS_MORE_PROCESSING_REQUIRED)) {
+            break;
+        }
+
+        //
+        // Pass the packet onto the socket for copying and safe keeping until
+        // the data is read.
+        //
+
+        NetpRawProcessReceivedSocketData(Socket, ReceiveContext);
+
+        //
+        // Release the reference on the previous socket added by the find
+        // socket call.
+        //
+
+        if (PreviousSocket != NULL) {
+            IoSocketReleaseReference(&(PreviousSocket->KernelSocket));
+        }
+
+        PreviousSocket = Socket;
+
+    } while (Status == STATUS_MORE_PROCESSING_REQUIRED);
+
+    if (PreviousSocket != NULL) {
+        IoSocketReleaseReference(&(PreviousSocket->KernelSocket));
+    }
+
+    ReceiveContext->Destination->Port = 0;
     return;
 }
 
 KSTATUS
 NetpRawProcessReceivedSocketData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -1183,22 +1307,10 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the network link that received the packet.
-
     Socket - Supplies a pointer to the socket that received the packet.
 
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        Use of this structure depends on its flags. If it is a multicast
-        packet, then it cannot be modified by this routine. Otherwise it can
-        be used as scratch space and modified.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1210,6 +1322,7 @@ Return Value:
 
     ULONG AllocationSize;
     ULONG Length;
+    PNET_PACKET_BUFFER Packet;
     PRAW_RECEIVED_PACKET RawPacket;
     PRAW_SOCKET RawSocket;
     KSTATUS Status;
@@ -1218,6 +1331,7 @@ Return Value:
     ASSERT(Socket != NULL);
 
     RawSocket = (PRAW_SOCKET)Socket;
+    Packet = ReceiveContext->Packet;
     Length = Packet->FooterOffset - Packet->DataOffset;
 
     //
@@ -1234,7 +1348,7 @@ Return Value:
     }
 
     RtlCopyMemory(&(RawPacket->Address),
-                  SourceAddress,
+                  ReceiveContext->Source,
                   sizeof(NETWORK_ADDRESS));
 
     RawPacket->DataBuffer = (PVOID)(RawPacket + 1);

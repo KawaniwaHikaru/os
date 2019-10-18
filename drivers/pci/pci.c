@@ -236,6 +236,7 @@ UUID PciBusDriverDeviceUuid =
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -1221,10 +1222,10 @@ Return Value:
 
             } else {
                 BitNumber = 31;
-                Maximum = 1 << BitNumber;
+                Maximum = 1ULL << BitNumber;
                 while ((Maximum & Value) == 0) {
                     BitNumber -= 1;
-                    Maximum = 1 << BitNumber;
+                    Maximum = 1ULL << BitNumber;
                 }
 
                 //
@@ -3742,6 +3743,10 @@ Return Value:
             return "IDE";
         }
 
+        if (Subclass == PCI_CLASS_MASS_STORAGE_SATA) {
+            return "AHCI";
+        }
+
         break;
 
     case PCI_CLASS_BRIDGE:
@@ -3778,9 +3783,19 @@ Return Value:
 
         break;
 
+    case PCI_CLASS_MULTIMEDIA:
+        switch (Subclass) {
+        case PCI_CLASS_MULTIMEDIA_AUDIO:
+            return "Audio";
+
+        default:
+            break;
+        }
+
+        break;
+
     case PCI_CLASS_NETWORK:
     case PCI_CLASS_DISPLAY:
-    case PCI_CLASS_MULTIMEDIA:
     case PCI_CLASS_MEMORY:
         break;
 

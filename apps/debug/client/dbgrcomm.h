@@ -2361,7 +2361,8 @@ Return Value:
 PSTR
 DbgGetAddressSymbol (
     PDEBUGGER_CONTEXT Context,
-    ULONGLONG Address
+    ULONGLONG Address,
+    PFUNCTION_SYMBOL *Function
     );
 
 /*++
@@ -2379,6 +2380,9 @@ Arguments:
     Address - Supplies the virtual address of the target to get information
         about.
 
+    Function - Supplies an optional pointer where the function symbol will be
+        returned if this turned out to be a function.
+
 Return Value:
 
     Returns a null-terminated string if successfull, or NULL on failure.
@@ -2389,7 +2393,7 @@ BOOL
 DbgGetDataSymbolTypeInformation (
     PDATA_SYMBOL DataSymbol,
     PTYPE_SYMBOL *TypeSymbol,
-    PULONG TypeSize
+    PUINTN TypeSize
     );
 
 /*++
@@ -2732,3 +2736,60 @@ Return Value:
 
 --*/
 
+BOOL
+EvalGetRegister (
+    PDEBUGGER_CONTEXT Context,
+    PCSTR Register,
+    PULONGLONG Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine gets the value of a register by name.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+    Register - Supplies the name of the register to get.
+
+    Value - Supplies a pointer where the value of the register will be returned.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE on failure.
+
+--*/
+
+BOOL
+EvalSetRegister (
+    PDEBUGGER_CONTEXT Context,
+    PCSTR Register,
+    ULONGLONG Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine sets the value of a register by name.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+    Register - Supplies the name of the register to get.
+
+    Value - Supplies the value to set in the register.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE on failure.
+
+--*/

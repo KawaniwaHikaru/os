@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -37,23 +42,18 @@ all:
 ##
 
 OS ?= $(shell uname -s)
+ifneq ($(findstring CYGWIN,$(shell uname -s)),)
+OS := cygwin
+endif
+
 BUILD_ARCH = $(shell uname -m)
 ifeq ($(BUILD_ARCH), $(filter i686 i586,$(BUILD_ARCH)))
 BUILD_ARCH := x86
-BUILD_BFD_ARCH := i386
-BUILD_OBJ_FORMAT := elf32-i386
-ifeq ($(OS),Windows_NT)
-BUILD_OBJ_FORMAT := pe-i386
-endif
 
 else ifeq ($(BUILD_ARCH), $(filter armv7 armv6,$(BUILD_ARCH)))
-BUILD_BFD_ARCH := arm
-BUILD_OBJ_FORMAT := elf32-littlearm
 
-else ifeq ($(BUILD_ARCH), x86_64)
+else ifeq ($(BUILD_ARCH), $(filter x86_64 amd64,$(BUILD_ARCH)))
 BUILD_ARCH := x64
-BUILD_OBJ_FORMAT := elf64-x86-64
-BUILD_BFD_ARCH := i386
 else
 $(error Unknown architecture $(BUILD_ARCH))
 endif
@@ -105,6 +105,16 @@ Makefile: ;
 %.mk :: ;
 % :: $(OBJDIR) ; @:
 
+##
+## If the current directory appears to be outside of SRCROOT, then there's a
+## problem. Having a symlink somewhere in SRCROOT causes this.
+##
+
+ifeq ($(CURDIR), $(subst $(SRCROOT),,$(CURDIR)))
+$(error The current directory $(CURDIR) does not appear to be a subdirectory \
+of SRCROOT=$(SRCROOT). Do you have a symlink in SRCROOT?)
+endif
+
 else
 
 THISDIR := $(subst $(OBJROOT)/,,$(CURDIR))
@@ -137,8 +147,6 @@ CC := i686-pc-minoca-gcc
 AR := i686-pc-minoca-ar
 OBJCOPY := i686-pc-minoca-objcopy
 STRIP := i686-pc-minoca-strip
-BFD_ARCH := i386
-OBJ_FORMAT := elf32-i386
 
 endif
 
@@ -148,8 +156,6 @@ AR := i586-pc-minoca-ar
 OBJCOPY := i586-pc-minoca-objcopy
 STRIP := i586-pc-minoca-strip
 RCC := windres
-BFD_ARCH := i386
-OBJ_FORMAT := elf32-i386
 endif
 
 ifeq (x64, $(ARCH))
@@ -157,8 +163,6 @@ CC := x86_64-pc-minoca-gcc
 AR := x86_64-pc-minoca-ar
 OBJCOPY := x86_64-pc-minoca-objcopy
 STRIP := x86_64-pc-minoca-strip
-BFD_ARCH := x86-64
-OBJ_FORMAT := elf64-x86-64
 endif
 
 ifeq (armv7, $(ARCH))
@@ -166,8 +170,6 @@ CC := arm-none-minoca-gcc
 AR := arm-none-minoca-ar
 OBJCOPY := arm-none-minoca-objcopy
 STRIP := arm-none-minoca-strip
-BFD_ARCH := arm
-OBJ_FORMAT := elf32-littlearm
 endif
 
 ifeq (armv6, $(ARCH))
@@ -175,8 +177,6 @@ CC := arm-none-minoca-gcc
 AR := arm-none-minoca-ar
 OBJCOPY := arm-none-minoca-objcopy
 STRIP := arm-none-minoca-strip
-BFD_ARCH := arm
-OBJ_FORMAT := elf32-littlearm
 endif
 
 ##
@@ -203,11 +203,12 @@ INCLUDES += $(SRCROOT)/os/include
 ## Define default CFLAGS if none were specified elsewhere.
 ##
 
+# LTO_OPT ?= -flto
 CFLAGS ?= -Wall -Werror
 ifeq ($(DEBUG),rel)
-CFLAGS += -O2 -Wno-unused-but-set-variable
+CFLAGS += -O2 $(LTO_OPT) -Wno-unused-but-set-variable
 else
-CFLAGS += -O1
+CFLAGS += -O1 $(LTO_OPT)
 endif
 
 ##
@@ -227,10 +228,18 @@ EXTRA_CPPFLAGS_FOR_BUILD := $(EXTRA_CPPFLAGS)
 EXTRA_CFLAGS += -fno-builtin -fno-omit-frame-pointer -g -save-temps=obj \
                 -ffunction-sections -fdata-sections -fvisibility=hidden
 
+ifeq ($(ARCH),x64)
+KERNEL_CFLAGS += -mno-sse -mno-red-zone
+endif
+
 EXTRA_CFLAGS_FOR_BUILD := $(EXTRA_CFLAGS)
 
+ifneq (,$(filter klibrary driver staticapp,$(BINARYTYPE)))
+EXTRA_CFLAGS += $(KERNEL_CFLAGS)
+endif
+
 EXTRA_CFLAGS += -fpic
-ifneq ($(OS),Windows_NT)
+ifneq ($(OS),$(filter Windows_NT cygwin,$(OS)))
 EXTRA_CFLAGS_FOR_BUILD += -fpic
 endif
 
@@ -245,7 +254,7 @@ endif
 ##
 
 ifeq (armv6, $(ARCH))
-ifneq ($(BINARYTYPE), $(filter ntconsole win32 dll,$(BINARYTYPE)))
+ifneq ($(BINARYTYPE), build)
 EXTRA_CPPFLAGS += -march=armv6zk -marm -mfpu=vfp
 endif
 endif
@@ -258,7 +267,7 @@ EXTRA_CFLAGS += -mno-ms-bitfields
 ##
 
 ifeq ($(VARIANT),q)
-ifneq ($(BINARYTYPE), $(filter ntconsole win32 dll,$(BINARYTYPE)))
+ifneq ($(BINARYTYPE), build)
 EXTRA_CPPFLAGS += -Wa,-momit-lock-prefix=yes -march=i586
 endif
 endif
@@ -272,15 +281,6 @@ ifeq ($(OS),Darwin)
 STRIP_FLAGS :=
 else
 STRIP_FLAGS := -p
-endif
-
-##
-## TODO: Either driver should be its own type, or all the driver makefiles
-## should have ENTRY := DriverEntry in them.
-##
-
-ifeq ($(BINARYTYPE)$(BUILD),so)
-ENTRY ?= DriverEntry
 endif
 
 ##
@@ -301,21 +301,25 @@ endif
 ##
 
 ifneq (,$(TEXT_ADDRESS))
-EXTRA_LDFLAGS += -Wl,-Ttext-segment=$(TEXT_ADDRESS) -Wl,-Ttext=$(TEXT_ADDRESS)
+EXTRA_LDFLAGS +=  -Wl,--section-start,.init=$(TEXT_ADDRESS) \
+ -Wl,-Ttext-segment=$(TEXT_ADDRESS)
+
 endif
 
 ifneq (,$(LINKER_SCRIPT))
 EXTRA_LDFLAGS += -T$(LINKER_SCRIPT)
 endif
 
+ifeq ($(BINARYTYPE),driver)
+EXTRA_LDFLAGS += -nostdlib -Wl,--no-undefined
+ENTRY ?= DriverEntry
+BINARYTYPE := so
+endif
+
 ifneq ($(ENTRY),)
 EXTRA_LDFLAGS += -Wl,-e,$(ENTRY)                            \
                  -Wl,-u,$(ENTRY)                            \
 
-endif
-
-ifeq ($(BINARYTYPE),so)
-EXTRA_LDFLAGS += -nodefaultlibs -nostartfiles -nostdlib
 endif
 
 ##
@@ -348,8 +352,6 @@ override CC = $(CC_FOR_BUILD)
 override AR = $(AR_FOR_BUILD)
 override STRIP = $(STRIP_FOR_BUILD)
 override CFLAGS = -Wall -Werror -O1
-override BFD_ARCH = $(BUILD_BFD_ARCH)
-override OBJ_FORMAT = $(BUILD_OBJ_FORMAT)
 ifeq ($(DEBUG),rel)
 override CFLAGS += -Wno-unused-but-set-variable
 endif
@@ -436,19 +438,7 @@ $(BINARY): $(ALLOBJS) $(TARGETLIBS)
 	@echo Linking - $@
 	@$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -static -o $@ -Wl,--start-group $^ -Wl,--end-group -Bdynamic $(DYNLIBS)
     endif
-    ifeq ($(BINARYTYPE),ntconsole)
-	@echo Linking - $@
-	@$(CC) -o $@ $^ $(TARGETLIBS) -Bdynamic $(DYNLIBS)
-    endif
-    ifeq ($(BINARYTYPE),win32)
-	@echo Linking - $@
-	@$(CC) -mwindows -o $@ $^ $(TARGETLIBS) -Bdynamic $(DYNLIBS)
-    endif
-    ifeq ($(BINARYTYPE),dll)
-	@echo Linking - $@
-	@$(CC) -shared -o $@ $^ $(TARGETLIBS) -Bdynamic $(DYNLIBS)
-    endif
-    ifeq ($(BINARYTYPE),library)
+    ifneq (,$(filter library klibrary,$(BINARYTYPE)))
 	@echo Building Library - $@
 	@$(AR) rcs $@ $^ $(TARGETLIBS)
     endif
@@ -472,7 +462,11 @@ $(BINARY): $(ALLOBJS) $(TARGETLIBS)
     endif
     ifeq ($(BINARYTYPE),build)
 	@echo Linking - $@
-	@$(CC) $(LDFLAGS) -o $@ $^ $(TARGETLIBS) -Bdynamic $(DYNLIBS)
+	@$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(LDFLAGS) $(EXTRA_LDFLAGS) -o $@ $^ $(TARGETLIBS) -Bdynamic $(DYNLIBS)
+    endif
+    ifeq ($(BINARYTYPE),custom)
+	@echo Building - $@
+	@$(BUILD_COMMAND)
     endif
     ifneq ($(BINPLACE),)
 	@echo Binplacing - $(OUTROOT)/$(BINPLACE)/$(BINARY)

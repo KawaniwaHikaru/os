@@ -108,7 +108,8 @@ Environment:
            (IP_MULTICAST_IF == SocketIp4OptionMulticastInterface) &&     \
            (IP_MULTICAST_TTL == SocketIp4OptionMulticastTimeToLive) &&   \
            (IP_MULTICAST_LOOP == SocketIp4OptionMulticastLoopback) &&    \
-           (IP_TTL == SocketIp4OptionTimeToLive))
+           (IP_TTL == SocketIp4OptionTimeToLive) &&                      \
+           (IP_TOS == SocketIp4DifferentiatedServicesCodePoint))
 
 #define ASSERT_SOCKET_IPV6_OPTIONS_EQUIVALENT()                         \
     ASSERT((IPV6_JOIN_GROUP == SocketIp6OptionJoinMulticastGroup) &&    \
@@ -414,6 +415,10 @@ Return Value:
 
     KSTATUS Status;
 
+    if (Backlog < 0) {
+        Backlog = 0;
+    }
+
     Status = OsSocketListen((HANDLE)(UINTN)Socket, Backlog);
     if (!KSUCCESS(Status)) {
         if (Status == STATUS_NOT_SUPPORTED) {
@@ -657,9 +662,6 @@ Return Value:
 
         } else if (Status == STATUS_TIMEOUT) {
             errno = ETIMEDOUT;
-
-        } else if (Status == STATUS_UNEXPECTED_TYPE) {
-            errno = EAFNOSUPPORT;
 
         } else {
             errno = ClConvertKstatusToErrorNumber(Status);
@@ -1379,7 +1381,13 @@ Return Value:
 
 {
 
+    UINTN CopySize;
+    KSTATUS ErrorStatus;
+    INT ErrorValue;
+    INT LeadingZeros;
+    INT Mask;
     socklen_t OriginalOptionLength;
+    INT Shift;
     KSTATUS Status;
 
     ASSERT_SOCKET_TYPES_EQUIVALENT();
@@ -1409,6 +1417,41 @@ Return Value:
     if (!KSUCCESS(Status)) {
         errno = ClConvertKstatusToErrorNumber(Status);
         return -1;
+
+    //
+    // If this is the SO_ERROR option, then the status code must be converted
+    // from a KSTATUS to an errno value.
+    //
+
+    } else if ((Level == SOL_SOCKET) && (OptionName == SO_ERROR)) {
+        CopySize = *OptionLength;
+        if (CopySize > sizeof(KSTATUS)) {
+            CopySize = sizeof(KSTATUS);
+        }
+
+        ErrorStatus = 0;
+        RtlCopyMemory(&ErrorStatus, OptionValue, CopySize);
+
+        //
+        // If the error status is positive, then the option length is probably
+        // less than sizeof(KSTATUS). All of the KSTATUS values are negative,
+        // so the error status needs to be sign extended.
+        //
+
+        if (ErrorStatus > 0) {
+
+            assert(CopySize < sizeof(KSTATUS));
+
+            LeadingZeros = RtlCountLeadingZeros32(ErrorStatus);
+            Shift = (sizeof(KSTATUS) * BITS_PER_BYTE) - LeadingZeros;
+            Mask = ~((1 << Shift) - 1);
+            ErrorStatus |= Mask;
+
+            assert(ErrorStatus < 0);
+        }
+
+        ErrorValue = ClConvertKstatusToErrorNumber(ErrorStatus);
+        RtlCopyMemory(OptionValue, &ErrorValue, *OptionLength);
     }
 
     return 0;
@@ -1718,7 +1761,7 @@ Return Value:
     if (NetworkAddress->Domain == NetDomainIp4) {
         Ip4Address.sin_family = AF_INET;
         Ip4Address.sin_port = htons((USHORT)(NetworkAddress->Port));
-        Ip4Address.sin_addr.s_addr = *((PULONG)(NetworkAddress->Address));
+        Ip4Address.sin_addr.s_addr = (ULONG)(NetworkAddress->Address[0]);
         TotalSize = sizeof(Ip4Address);
         Source = &Ip4Address;
 

@@ -246,6 +246,7 @@ UUID SpecialPseudoRandomInterfaceUuid = UUID_PSEUDO_RANDOM_SOURCE_INTERFACE;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -255,8 +256,8 @@ DriverEntry (
 
 Routine Description:
 
-    This routine is the entry point for the null driver. It registers its other
-    dispatch functions, and performs driver-wide initialization.
+    This routine is the entry point for the special driver. It registers its
+    other dispatch functions, and performs driver-wide initialization.
 
 Arguments:
 
@@ -816,17 +817,19 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectCharacterDevice;
             Properties->HardLinkCount = 1;
             Properties->BlockSize = 1;
             Properties->BlockCount = 0;
+            Properties->UserId = 0;
+            Properties->GroupId = 0;
             Properties->StatusChangeTime = Device->CreationTime;
             Properties->ModifiedTime = Properties->StatusChangeTime;
             Properties->AccessTime = Properties->StatusChangeTime;
             Properties->Permissions = FILE_PERMISSION_ALL;
-            WRITE_INT64_SYNC(&(Properties->FileSize), 0);
+            Properties->Size = 0;
             Status = STATUS_SUCCESS;
         }
 

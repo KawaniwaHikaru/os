@@ -89,6 +89,12 @@ Author:
 #define E100_ALLOCATION_TAG 0x30303145 // '001E'
 
 //
+// Define how often to check the link for connect/disconnect, in seconds.
+//
+
+#define E100_LINK_CHECK_INTERVAL 5
+
+//
 // Define the size of receive frame data.
 //
 
@@ -279,6 +285,31 @@ Author:
 #define E100_EEPROM_INDIVIDUAL_ADDRESS_OFFSET 0
 
 //
+// Define the EEPROM PHY device record offset and bit mask information.
+//
+
+#define E100_EEPROM_PHY_DEVICE_RECORD_OFFSET 6
+#define E100_EEPROM_PHY_DEVICE_RECORD_10MBPS_ONLY   0x8000
+#define E100_EEPROM_PHY_DEVICE_RECORD_VENDOR_CODE   0x4000
+#define E100_EEPROM_PHY_DEVICE_RECORD_CODE_MASK     0x3F00
+#define E100_EEPROM_PHY_DEVICE_RECORD_CODE_SHIFT    8
+#define E100_EEPROM_PHY_DEVICE_RECORD_ADDRESS_MASK  0x00FF
+#define E100_EEPROM_PHY_DEVICE_RECORD_ADDRESS_SHIFT 0
+
+#define E100_EEPROM_PHY_DEVICE_CODE_NO_PHY      0x0
+#define E100_EEPROM_PHY_DEVICE_CODE_I82553AB    0x1
+#define E100_EEPROM_PHY_DEVICE_CODE_I82553C     0x2
+#define E100_EEPROM_PHY_DEVICE_CODE_I82503      0x3
+#define E100_EEPROM_PHY_DEVICE_CODE_DP83840     0x4
+#define E100_EEPROM_PHY_DEVICE_CODE_S80C240     0x5
+#define E100_EEPROM_PHY_DEVICE_CODE_S80C24      0x6
+#define E100_EEPROM_PHY_DEVICE_CODE_I82555      0x7
+#define E100_EEPROM_PHY_DEVICE_CODE_MICROLINEAR 0x8
+#define E100_EEPROM_PHY_DEVICE_CODE_LEVEL_ONE   0x9
+#define E100_EEPROM_PHY_DEVICE_CODE_DP83840A    0xA
+#define E100_EEPROM_PHY_DEVICE_CODE_ICS1890     0xB
+
+//
 // Define PORT opcodes.
 //
 
@@ -301,6 +332,44 @@ Author:
 
 #define E100_CONTROL_STATUS_LINK_UP  0x01
 #define E100_CONTROL_STATUS_100_MBPS 0x02
+
+//
+// Define the E100 revision IDs.
+//
+
+#define E100_REVISION_82557_A   0x01
+#define E100_REVISION_82557_B   0x02
+#define E100_REVISION_82557_C   0x03
+#define E100_REVISION_82558_A   0x04
+#define E100_REVISION_82558_B   0x05
+#define E100_REVISION_82559_A   0x06
+#define E100_REVISION_82559_B   0x07
+#define E100_REVISION_82559_C   0x08
+#define E100_REVISION_82559ER_A 0x09
+#define E100_REVISION_82550_A   0x0C
+#define E100_REVISION_82550_B   0x0D
+#define E100_REVISION_82550_C   0x0E
+#define E100_REVISION_82551_A   0x0F
+#define E100_REVISION_82551_B   0x10
+
+//
+// Define the E100 configuration values.
+//
+
+#define E100_CONFIG_BYTE3_MWI_ENABLE 0x01
+
+#define E100_CONFIG_BYTE6_SAVE_BAD_FRAMES 0x80
+
+#define E100_CONFIG_BYTE7_DISCARD_SHORT_RECEIVE 0x01
+
+#define E100_CONFIG_BYTE8_MII_MODE 0x01
+
+#define E100_CONFIG_BYTE12_LINEAR_PRIORITY_MODE 0x01
+
+#define E100_CONFIG_BYTE15_CRS_OR_CDT  0x80
+#define E100_CONFIG_BYTE15_PROMISCUOUS 0x01
+
+#define E100_CONFIG_BYTE21_MULTICAST_ALL 0x08
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -387,8 +456,10 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _E100_COMMAND {
-    ULONG Command;
+    volatile ULONG Command;
     ULONG NextCommand;
     union {
         struct {
@@ -396,7 +467,7 @@ typedef struct _E100_COMMAND {
         } PACKED SetAddress;
 
         struct {
-            ULONG Configuration[6];
+            UCHAR Configuration[24];
         } PACKED Configure;
 
         struct {
@@ -446,6 +517,8 @@ typedef struct _E100_RECEIVE_FRAME {
     ULONG Sizes;
     ULONG ReceiveFrame[RECEIVE_FRAME_DATA_SIZE / sizeof(ULONG)];
 } PACKED E100_RECEIVE_FRAME, *PE100_RECEIVE_FRAME;
+
+#pragma pack(pop)
 
 /*++
 
@@ -501,6 +574,9 @@ Members:
     CommandNextToUse - Stores the index where the next command should be placed.
         If this equals the next index to be reaped, then the list is full.
 
+    CommandFreeCount - Stores the number of command ring entries that are
+        currently free to use.
+
     CommandListLock - Stores the lock protecting simultaneous software access
         to the command list.
 
@@ -508,8 +584,15 @@ Members:
 
     LinkActive - Stores a boolean indicating if there is an active network link.
 
+    LinkSpeed - Stores a the current link speed of the device.
+
     LinkCheckTimer - Stores a pointer to the timer that fires periodically to
         see if the link is active.
+
+    LinkCheckDpc - Stores a pointer to the DPC associated with the link check
+        timer.
+
+    WorkItem - Stores a pointer to the work item queued from the DPC.
 
     PendingStatusBits - Stores the bitfield of status bits that have yet to be
         dealt with by software.
@@ -518,6 +601,29 @@ Members:
         supports.
 
     EepromMacAddress - Stores the default MAC address of the device.
+
+    SupportedCapabilities - Stores the set of capabilities that this device
+        supports. See NET_LINK_CAPABILITY_* for definitions.
+
+    EnabledCapabilities - Stores the currently enabled capabilities on the
+        devices. See NET_LINK_CAPABILITY_* for definitions.
+
+    ConfigurationLock - Stores a queued lock that synchronizes changes to the
+        enabled capabilities field and their supporting hardware registers.
+
+    PciConfigInterface - Stores the interface to access PCI configuration space.
+
+    PciConfigInterfaceAvailable - Stores a boolean indicating if the PCI
+        config interface is actively available.
+
+    RegisteredForPciConfigInterfaces - Stores a boolean indicating whether or
+        not the driver has regsistered for PCI Configuration Space interface
+        access.
+
+    Revision - Stores the E100 device revision gathered from PCI configuration
+        space.
+
+    MiiPresent - Stores a boolean indicating whether or not a MII is present.
 
 --*/
 
@@ -538,13 +644,25 @@ typedef struct _E100_DEVICE {
     PNET_PACKET_BUFFER *CommandPacket;
     ULONG CommandLastReaped;
     ULONG CommandNextToUse;
+    ULONG CommandFreeCount;
     PQUEUED_LOCK CommandListLock;
     NET_PACKET_LIST TransmitPacketList;
     BOOL LinkActive;
+    ULONGLONG LinkSpeed;
     PKTIMER LinkCheckTimer;
+    PDPC LinkCheckDpc;
+    PWORK_ITEM WorkItem;
     ULONG PendingStatusBits;
     ULONG EepromAddressBits;
     BYTE EepromMacAddress[ETHERNET_ADDRESS_SIZE];
+    ULONG SupportedCapabilities;
+    ULONG EnabledCapabilities;
+    PQUEUED_LOCK ConfigurationLock;
+    INTERFACE_PCI_CONFIG_ACCESS PciConfigInterface;
+    BOOL PciConfigInterfaceAvailable;
+    BOOL RegisteredForPciConfigInterfaces;
+    ULONG Revision;
+    BOOL MiiPresent;
 } E100_DEVICE, *PE100_DEVICE;
 
 //

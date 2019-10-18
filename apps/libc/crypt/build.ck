@@ -26,24 +26,35 @@ Environment:
 
 --*/
 
+from menv import sharedLibrary;
+
 function build() {
+    var dynlibs;
+    var entries;
+    var linkConfig;
+    var so;
+    var sources;
+
     sources = [
         "crypt.c"
     ];
 
     dynlibs = [
-        "//apps/libc/dynamic:libc"
+        "apps/libc/dynamic:libc"
     ];
+
+    linkConfig = {
+        "LDFLAGS": ["-nostdlib"]
+    };
 
     so = {
         "label": "libcrypt",
         "inputs": sources + dynlibs,
+        "config": linkConfig,
         "major_version": "1"
     };
 
-    entries = shared_library(so);
+    entries = sharedLibrary(so);
     return entries;
 }
-
-return build();
 

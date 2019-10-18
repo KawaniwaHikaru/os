@@ -375,6 +375,8 @@ Author:
 #define A3E_ALE_ENTRY_TYPE_INDEX 7
 
 #define A3E_ALE_VLAN_ENTRY_MEMBER_LIST_INDEX 0
+#define A3E_ALE_VLAN_ENTRY_UNREGISTERED_MULTICAST_MASK_INDEX 1
+#define A3E_ALE_VLAN_ENTRY_REGISTERED_MULTICAST_MASK_INDEX 2
 #define A3E_ALE_VLAN_ENTRY_FRC_UNTAG_EGR_INDEX 3
 #define A3E_ALE_VLAN_ENTRY_ID_BIT0_BIT7_INDEX 6
 #define A3E_ALE_VLAN_ENTRY_TYPE_ID_BIT8_BIT11_INDEX 7
@@ -588,12 +590,16 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _A3E_DESCRIPTOR {
     ULONG NextDescriptor;
     ULONG Buffer;
     ULONG BufferLengthOffset;
     ULONG PacketLengthFlags;
 } PACKED ALIGNED16 A3E_DESCRIPTOR, *PA3E_DESCRIPTOR;
+
+#pragma pack(pop)
 
 /*++
 
@@ -719,6 +725,15 @@ Members:
 
     GigabitCapable - Stores a boolean indicating if this device can do 1000Mbps.
 
+    SupportedCapabilities - Stores the set of capabilities that this device
+        supports. See NET_LINK_CAPABILITY_* for definitions.
+
+    EnabledCapabilities - Stores the currently enabled capabilities on the
+        devices. See NET_LINK_CAPABILITY_* for definitions.
+
+    ConfigurationLock - Stores a queued lock that synchronizes changes to the
+        enabled capabilities field and their supporting hardware registers.
+
 --*/
 
 typedef struct _A3E_DEVICE {
@@ -762,6 +777,9 @@ typedef struct _A3E_DEVICE {
     ULONG PhyId;
     ULONG DataAlignment;
     BOOL GigabitCapable;
+    ULONG SupportedCapabilities;
+    ULONG EnabledCapabilities;
+    PQUEUED_LOCK ConfigurationLock;
 } A3E_DEVICE, *PA3E_DEVICE;
 
 //

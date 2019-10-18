@@ -227,6 +227,7 @@ UUID OneRingUsbLedMiniDeviceInformationUuid =
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -760,7 +761,7 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectCharacterDevice;
             Properties->HardLinkCount = 1;
@@ -770,7 +771,7 @@ Return Value:
             Properties->ModifiedTime = Properties->StatusChangeTime;
             Properties->AccessTime = Properties->StatusChangeTime;
             Properties->Permissions = FILE_PERMISSION_ALL;
-            WRITE_INT64_SYNC(&(Properties->FileSize), 0);
+            Properties->Size = 0;
             Status = STATUS_SUCCESS;
         }
 

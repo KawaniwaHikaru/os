@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -36,6 +41,12 @@ X86_OBJS = x86/archsupc.o \
            x86/paging.o   \
            x86/kernxfr.o  \
 
+X64_OBJS = x64/kernxfr.o  \
+           x64/paging.o   \
+           x86/archsupc.o \
+           x86/dbgparch.o \
+           x86/entry.o    \
+
 ARMV7_OBJS = armv7/archsupc.o \
              armv7/dbgparch.o \
              armv7/paging.o   \
@@ -50,22 +61,18 @@ TARGETLIBS = $(OBJROOT)/os/kernel/kd/boot/kdboot.a         \
              $(OBJROOT)/os/kernel/kd/kdusb/kdusb.a         \
              $(OBJROOT)/os/lib/rtl/base/boot/basertlb.a    \
              $(OBJROOT)/os/lib/rtl/kmode/krtl.a            \
-             $(OBJROOT)/os/lib/im/im.a                     \
+             $(OBJROOT)/os/lib/im/native/imn.a             \
              $(OBJROOT)/os/lib/fatlib/fat.a                \
              $(OBJROOT)/os/lib/basevid/basevid.a           \
              $(OBJROOT)/os/lib/bconflib/bconflib.a         \
              $(OBJROOT)/os/kernel/hl/boot/hlboot.a         \
              $(OBJROOT)/os/kernel/mm/boot/mmboot.a         \
 
-ifeq ($(ARCH), armv7)
-TARGETLIBS += $(OBJROOT)/os/kernel/$(ARCH)/boot/armboot.a
-endif
-
-ifeq ($(ARCH), armv6)
+ifneq (,$(filter armv7 armv6,$(ARCH)))
 TARGETLIBS += $(OBJROOT)/os/kernel/$(ARCH)/boot/armboot.a
 endif
 
 LDFLAGS += -pie -nodefaultlibs -nostartfiles -nostdlib
 
-EXTRA_SRC_DIRS = x86 armv7 armv6
+EXTRA_SRC_DIRS = x86 x64 armv7 armv6
 

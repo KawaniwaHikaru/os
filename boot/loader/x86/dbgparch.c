@@ -31,7 +31,6 @@ Environment:
 
 #include <minoca/kernel/kernel.h>
 #include <minoca/kernel/ioport.h>
-#include <minoca/kernel/x86.h>
 #include "firmware.h"
 #include "bootlib.h"
 #include "loader.h"
@@ -956,7 +955,7 @@ Return Value:
     //
 
     if ((Fadt != NULL) &&
-        ((Fadt->Flags & FADT_HARDWARE_REDUCED_ACPI) != 0)) {
+        ((Fadt->Flags & FADT_FLAG_HARDWARE_REDUCED_ACPI) != 0)) {
 
         return STATUS_NO_ELIGIBLE_DEVICES;
     }

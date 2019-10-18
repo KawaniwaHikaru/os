@@ -86,7 +86,8 @@ KSTATUS
 NetlinkpBindToAddress (
     PNET_SOCKET Socket,
     PNET_LINK Link,
-    PNETWORK_ADDRESS Address
+    PNETWORK_ADDRESS Address,
+    ULONG Flags
     );
 
 KSTATUS
@@ -120,8 +121,7 @@ NetlinkpSend (
 
 VOID
 NetlinkpProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 ULONG
@@ -143,29 +143,26 @@ NetlinkpGetSetInformation (
 
 VOID
 NetlinkpProcessReceivedPackets (
-    PNET_LINK Link,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    PNET_PACKET_LIST PacketList,
-    PNET_PROTOCOL_ENTRY Protocol
+    PNET_RECEIVE_CONTEXT ReceiveContext,
+    PNET_PACKET_LIST PacketList
     );
 
 VOID
 NetlinkpProcessReceivedSocketData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 VOID
 NetlinkpProcessReceivedKernelData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
+    );
+
+VOID
+NetlinkpBroadcastPackets (
+    PNET_RECEIVE_CONTEXT ReceiveContext,
+    PNET_PACKET_LIST PacketList
     );
 
 VOID
@@ -189,6 +186,31 @@ NetlinkpLeaveMulticastGroup (
 
 LIST_ENTRY NetlinkMulticastSocketList;
 PSHARED_EXCLUSIVE_LOCK NetlinkMulticastLock;
+
+NET_NETWORK_ENTRY NetNetlinkNetwork = {
+    {NULL, NULL},
+    NetDomainNetlink,
+    INVALID_PROTOCOL_NUMBER,
+    {
+        NetlinkpInitializeLink,
+        NetlinkpDestroyLink,
+        NetlinkpInitializeSocket,
+        NULL,
+        NetlinkpBindToAddress,
+        NetlinkpListen,
+        NetlinkpConnect,
+        NetlinkpDisconnect,
+        NetlinkpClose,
+        NetlinkpSend,
+        NetlinkpProcessReceivedData,
+        NetlinkpPrintAddress,
+        NetlinkpGetSetInformation,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    }
+};
 
 //
 // ------------------------------------------------------------------ Functions
@@ -217,7 +239,6 @@ Return Value:
 
 {
 
-    NET_NETWORK_ENTRY NetworkEntry;
     KSTATUS Status;
 
     INITIALIZE_LIST_HEAD(&NetlinkMulticastSocketList);
@@ -232,21 +253,7 @@ Return Value:
     // Register the netlink handlers with the core networking library.
     //
 
-    NetworkEntry.Domain = NetDomainNetlink;
-    NetworkEntry.ParentProtocolNumber = 0;
-    NetworkEntry.Interface.InitializeLink = NetlinkpInitializeLink;
-    NetworkEntry.Interface.DestroyLink = NetlinkpDestroyLink;
-    NetworkEntry.Interface.InitializeSocket = NetlinkpInitializeSocket;
-    NetworkEntry.Interface.BindToAddress = NetlinkpBindToAddress;
-    NetworkEntry.Interface.Listen = NetlinkpListen;
-    NetworkEntry.Interface.Connect = NetlinkpConnect;
-    NetworkEntry.Interface.Disconnect = NetlinkpDisconnect;
-    NetworkEntry.Interface.Close = NetlinkpClose;
-    NetworkEntry.Interface.Send = NetlinkpSend;
-    NetworkEntry.Interface.ProcessReceivedData = NetlinkpProcessReceivedData;
-    NetworkEntry.Interface.PrintAddress = NetlinkpPrintAddress;
-    NetworkEntry.Interface.GetSetInformation = NetlinkpGetSetInformation;
-    Status = NetRegisterNetworkLayer(&NetworkEntry, NULL);
+    Status = NetRegisterNetworkLayer(&NetNetlinkNetwork, NULL);
     if (!KSUCCESS(Status)) {
 
         ASSERT(FALSE);
@@ -388,7 +395,8 @@ KSTATUS
 NetlinkpBindToAddress (
     PNET_SOCKET Socket,
     PNET_LINK Link,
-    PNETWORK_ADDRESS Address
+    PNETWORK_ADDRESS Address,
+    ULONG Flags
     )
 
 /*++
@@ -404,6 +412,9 @@ Arguments:
     Link - Supplies an optional pointer to a link to bind to.
 
     Address - Supplies a pointer to the address to bind the socket to.
+
+    Flags - Supplies a bitmask of binding flags. See NET_SOCKET_BINDING_FLAG_*
+        for definitions.
 
 Return Value:
 
@@ -444,7 +455,7 @@ Return Value:
         // bound is port zero. Fail if this is not the case.
         //
 
-        BindingFlags = 0;
+        BindingFlags = Flags;
         if ((Socket->Flags & NET_SOCKET_FLAG_KERNEL) != 0) {
             if (NetlinkAddress->Port != 0) {
                 Status = STATUS_INVALID_PARAMETER;
@@ -458,7 +469,7 @@ Return Value:
             BindingFlags |= NET_SOCKET_BINDING_FLAG_NO_PORT_ASSIGNMENT;
         }
 
-        LocalAddress = &(LocalInformation.LocalAddress);
+        LocalAddress = &(LocalInformation.ReceiveAddress);
         RtlCopyMemory(LocalAddress, Address, sizeof(NETWORK_ADDRESS));
 
         //
@@ -469,6 +480,15 @@ Return Value:
 
         LocalNetlinkAddress = (PNETLINK_ADDRESS)LocalAddress;
         LocalNetlinkAddress->Group = 0;
+
+        //
+        // For netlink sockets, the receive and send addresses are always the
+        // same.
+        //
+
+        RtlCopyMemory(&(LocalInformation.SendAddress),
+                      LocalAddress,
+                      sizeof(NETWORK_ADDRESS));
 
         //
         // There are no "unbound" netlink sockets. The Port ID is either filled
@@ -493,10 +513,12 @@ Return Value:
     //
 
     } else {
-        if (Socket->LocalAddress.Port != Address->Port) {
+        if (Socket->LocalReceiveAddress.Port != Address->Port) {
             Status = STATUS_INVALID_PARAMETER;
             goto BindToAddressEnd;
         }
+
+        ASSERT(Socket->LocalSendAddress.Port == Address->Port);
     }
 
     //
@@ -550,7 +572,7 @@ Return Value:
     if (Socket->BindingType == SocketBindingInvalid) {
         RtlZeroMemory(&LocalAddress, sizeof(NETWORK_ADDRESS));
         LocalAddress.Domain = NetDomainNetlink;
-        Status = NetlinkpBindToAddress(Socket, NULL, &LocalAddress);
+        Status = NetlinkpBindToAddress(Socket, NULL, &LocalAddress, 0);
         if (!KSUCCESS(Status)) {
             goto ListenEnd;
         }
@@ -755,19 +777,30 @@ Return Value:
 
 {
 
-    NetlinkpProcessReceivedPackets(Socket->Link,
-                                   &Socket->LocalAddress,
-                                   Destination,
-                                   PacketList,
-                                   Socket->Protocol);
+    NET_RECEIVE_CONTEXT ReceiveContext;
 
+    //
+    // Upper layers should have failed on destination address's that do not
+    // match the socket's domain.
+    //
+
+    ASSERT(Destination->Domain == Socket->KernelSocket.Domain);
+
+    ReceiveContext.Link = Socket->Link;
+    ReceiveContext.Protocol = Socket->Protocol;
+    ReceiveContext.Network = Socket->Network;
+    ReceiveContext.Source = &(Socket->LocalSendAddress);
+    ReceiveContext.Destination = Destination;
+    ReceiveContext.ParentProtocolNumber =
+                                        Socket->Protocol->ParentProtocolNumber;
+
+    NetlinkpProcessReceivedPackets(&ReceiveContext, PacketList);
     return STATUS_SUCCESS;
 }
 
 VOID
 NetlinkpProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -778,12 +811,8 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space while this routine
-        executes and the packet travels up the stack, but will not be accessed
-        after this routine returns.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link and packet information.
 
 Return Value:
 
@@ -905,7 +934,7 @@ Arguments:
     Data - Supplies a pointer to the data buffer where the data is either
         returned for a get operation or given for a set operation.
 
-    DataSize - Supplies a pointer that on input constains the size of the data
+    DataSize - Supplies a pointer that on input contains the size of the data
         buffer. On output, this contains the required size of the data buffer.
 
     Set - Supplies a boolean indicating if this is a get operation (FALSE) or
@@ -1226,7 +1255,7 @@ Return Value:
         goto AppendHeaderEnd;
     }
 
-    SourceAddress = (PNETLINK_ADDRESS)&(Socket->LocalAddress);
+    SourceAddress = (PNETLINK_ADDRESS)&(Socket->LocalSendAddress);
     Header = Packet->Buffer + Packet->DataOffset;
     Header->Length = Length;
     Header->Type = Type;
@@ -1549,11 +1578,8 @@ Return Value:
 
 VOID
 NetlinkpProcessReceivedPackets (
-    PNET_LINK Link,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    PNET_PACKET_LIST PacketList,
-    PNET_PROTOCOL_ENTRY Protocol
+    PNET_RECEIVE_CONTEXT ReceiveContext,
+    PNET_PACKET_LIST PacketList
     )
 
 /*++
@@ -1565,19 +1591,10 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packets.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
     PacketList - Supplies a list of packets to process.
-
-    Protocol - Supplies a pointer to this protocol's protocol entry.
 
 Return Value:
 
@@ -1587,112 +1604,48 @@ Return Value:
 
 {
 
-    ULONG Count;
     PNETLINK_ADDRESS Destination;
-    ULONG GroupIndex;
-    ULONG GroupMask;
-    PULONG MulticastBitmap;
-    PNETLINK_SOCKET NetlinkSocket;
     PNET_PACKET_BUFFER Packet;
-    PLIST_ENTRY PacketEntry;
     PNET_SOCKET Socket;
-    PLIST_ENTRY SocketEntry;
+    KSTATUS Status;
+
+    Socket = NULL;
 
     //
-    // If a group ID is supplied in the address, then send the packet to all
-    // sockets listening to that multicast group. A socket must match on the
-    // protocol and have its bitmap set for the group. If a port is also
-    // specified in the address, do not send it to the socket with the port
-    // during multicast processing; fall through and do that at the end.
+    // Attempt broadcast processing on the packet list.
     //
 
-    Destination = (PNETLINK_ADDRESS)DestinationAddress;
-    if (Destination->Group != 0) {
-        PacketEntry = PacketList->Head.Next;
-        while (PacketEntry != &(PacketList->Head)) {
-            Packet = LIST_VALUE(PacketEntry, NET_PACKET_BUFFER, ListEntry);
-            Packet->Flags |= NET_PACKET_FLAG_MULTICAST;
-            GroupIndex = NETLINK_SOCKET_BITMAP_INDEX(Destination->Group);
-            GroupMask = NETLINK_SOCKET_BITMAP_MASK(Destination->Group);
-            KeAcquireSharedExclusiveLockShared(NetlinkMulticastLock);
-            SocketEntry = NetlinkMulticastSocketList.Next;
-            while (SocketEntry != &NetlinkMulticastSocketList) {
-                NetlinkSocket = LIST_VALUE(SocketEntry,
-                                           NETLINK_SOCKET,
-                                           MulticastListEntry);
+    NetlinkpBroadcastPackets(ReceiveContext, PacketList);
 
-                Socket = &(NetlinkSocket->NetSocket);
-                SocketEntry = SocketEntry->Next;
-                if (Socket->Protocol != Protocol) {
-                    continue;
-                }
+    //
+    // The kernel should never get any multicast packets, so just drop it
+    // now before getting to the kernel.
+    //
 
-                if (Socket->LocalAddress.Port == Destination->Port) {
-                    continue;
-                }
+    Destination = (PNETLINK_ADDRESS)ReceiveContext->Destination;
+    if ((Destination->Group != 0) &&
+        (Destination->Port == NETLINK_KERNEL_PORT_ID)) {
 
-                Count = NETLINK_SOCKET_BITMAP_GROUP_ID_COUNT(NetlinkSocket);
-                if (Destination->Group >= Count) {
-                    continue;
-                }
-
-                MulticastBitmap = NetlinkSocket->MulticastBitmap;
-                if ((MulticastBitmap[GroupIndex] & GroupMask) == 0) {
-                    continue;
-                }
-
-                //
-                // This needs to be reconsidered if kernel sockets are signed
-                // up for multicast groups. Kernel sockets are known to respond
-                // to requests with multicast messages as an event notification
-                // mechanism. This could potentially deadlock as the lock is
-                // held during packet processing.
-                //
-
-                ASSERT((Socket->Flags & NET_SOCKET_FLAG_KERNEL) == 0);
-
-                NetlinkpProcessReceivedSocketData(Link,
-                                                  Socket,
-                                                  Packet,
-                                                  SourceAddress,
-                                                  DestinationAddress);
-            }
-
-            KeReleaseSharedExclusiveLockShared(NetlinkMulticastLock);
-
-            //
-            // Clear out the multicast group and send it on to the socket
-            // specified by the port.
-            //
-
-            Packet->Flags &= ~NET_PACKET_FLAG_MULTICAST;
-            PacketEntry = PacketEntry->Next;
-        }
-
-        Destination->Group = 0;
-        Socket = NULL;
-
-        //
-        // The kernel should never get any multicast packets, so just drop it
-        // now before getting to the kernel.
-        //
-
-        if (Destination->Port == NETLINK_KERNEL_PORT_ID) {
-            NetDestroyBufferList(PacketList);
-            goto ProcessReceivedPacketsEnd;
-        }
+        NetDestroyBufferList(PacketList);
+        goto ProcessReceivedPacketsEnd;
     }
+
+    //
+    // Zero out the group so that sockets can match.
+    //
+
+    Destination->Group = 0;
 
     //
     // Find the socket targeted by the destination address.
     //
 
-    Socket = NetFindSocket(Protocol, DestinationAddress, SourceAddress);
-    if (Socket == NULL) {
+    Status = NetFindSocket(ReceiveContext, &Socket);
+    if (!KSUCCESS(Status)) {
         goto ProcessReceivedPacketsEnd;
     }
 
-    ASSERT(Socket->Protocol == Protocol);
+    ASSERT(Socket->Protocol == ReceiveContext->Protocol);
 
     //
     // Send each packet on to the protocol layer for processing. The packet
@@ -1709,11 +1662,8 @@ Return Value:
 
         ASSERT((Packet->Flags & NET_PACKET_FLAG_MULTICAST) == 0);
 
-        NetlinkpProcessReceivedSocketData(Link,
-                                          Socket,
-                                          Packet,
-                                          SourceAddress,
-                                          DestinationAddress);
+        ReceiveContext->Packet = Packet;
+        NetlinkpProcessReceivedSocketData(Socket, ReceiveContext);
     }
 
 ProcessReceivedPacketsEnd:
@@ -1726,11 +1676,8 @@ ProcessReceivedPacketsEnd:
 
 VOID
 NetlinkpProcessReceivedSocketData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -1741,22 +1688,10 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the network link that received the packet.
-
     Socket - Supplies a pointer to the socket that received the packet.
 
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        Use of this structure depends on its flags. If it is a multicast
-        packet, then it cannot be modified by this routine. Otherwise it can
-        be used as scratch space and modified.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1774,19 +1709,11 @@ Return Value:
     //
 
     if ((Socket->Flags & NET_SOCKET_FLAG_KERNEL) != 0) {
-        NetlinkpProcessReceivedKernelData(Link,
-                                          Socket,
-                                          Packet,
-                                          SourceAddress,
-                                          DestinationAddress);
+        NetlinkpProcessReceivedKernelData(Socket, ReceiveContext);
 
     } else {
         Protocol = Socket->Protocol;
-        Protocol->Interface.ProcessReceivedSocketData(Link,
-                                                      Socket,
-                                                      Packet,
-                                                      SourceAddress,
-                                                      DestinationAddress);
+        Protocol->Interface.ProcessReceivedSocketData(Socket, ReceiveContext);
     }
 
     return;
@@ -1794,11 +1721,8 @@ Return Value:
 
 VOID
 NetlinkpProcessReceivedKernelData (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     )
 
 /*++
@@ -1809,21 +1733,10 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the network link that received the packet.
-
     Socket - Supplies a pointer to the socket that received the packet.
 
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space and this routine will
-        release it when it is done.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1835,11 +1748,13 @@ Return Value:
 
     PNETLINK_HEADER Header;
     ULONG MessageSize;
+    PNET_PACKET_BUFFER Packet;
     ULONG PacketLength;
     PNET_PROTOCOL_PROCESS_RECEIVED_SOCKET_DATA ProcessReceivedSocketData;
     PNET_PROTOCOL_ENTRY Protocol;
     KSTATUS Status;
 
+    Packet = ReceiveContext->Packet;
     Protocol = Socket->Protocol;
     ProcessReceivedSocketData = Protocol->Interface.ProcessReceivedSocketData;
 
@@ -1883,12 +1798,7 @@ Return Value:
         }
 
         Packet->FooterOffset = Packet->DataOffset + MessageSize;
-        Status = ProcessReceivedSocketData(Link,
-                                           Socket,
-                                           Packet,
-                                           SourceAddress,
-                                           DestinationAddress);
-
+        Status = ProcessReceivedSocketData(Socket, ReceiveContext);
         if (!KSUCCESS(Status)) {
             goto ProcessReceivedKernelDataNextMessage;
         }
@@ -1904,7 +1814,7 @@ ProcessReceivedKernelDataNextMessage:
             ((Header->Flags & NETLINK_HEADER_FLAG_ACK) != 0)) {
 
             Packet->FooterOffset = Packet->DataOffset + MessageSize;
-            NetlinkpSendAck(Socket, Packet, SourceAddress, Status);
+            NetlinkpSendAck(Socket, Packet, ReceiveContext->Source, Status);
         }
 
         Packet->DataOffset += MessageSize;
@@ -1912,6 +1822,133 @@ ProcessReceivedKernelDataNextMessage:
     }
 
     NetFreeBuffer(Packet);
+    return;
+}
+
+VOID
+NetlinkpBroadcastPackets (
+    PNET_RECEIVE_CONTEXT ReceiveContext,
+    PNET_PACKET_LIST PacketList
+    )
+
+/*++
+
+Routine Description:
+
+    This routine broadcasts a list of packets to all netlink sockets listening
+    on the destination address's multicast group.
+
+Arguments:
+
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
+
+    PacketList - Supplies a list of packets to process.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    ULONG Count;
+    PNETLINK_ADDRESS Destination;
+    ULONG GroupIndex;
+    ULONG GroupMask;
+    PULONG MulticastBitmap;
+    PNETLINK_SOCKET NetlinkSocket;
+    PNET_PACKET_BUFFER Packet;
+    PLIST_ENTRY PacketEntry;
+    PNET_SOCKET Socket;
+    PLIST_ENTRY SocketEntry;
+    KSTATUS Status;
+
+    //
+    // If a group ID is not supplied, then this is a unicast list of packets.
+    //
+
+    Destination = (PNETLINK_ADDRESS)ReceiveContext->Destination;
+    if (Destination->Group == 0) {
+        return;
+    }
+
+    //
+    // Threads sending to multiple sockets must have the broadcast permission
+    // set.
+    //
+
+    Status = PsCheckPermission(PERMISSION_NET_BROADCAST);
+    if (!KSUCCESS(Status)) {
+        return;
+    }
+
+    //
+    // Send the packet to all sockets listening to that multicast group. A
+    // socket must match on the protocol and have its bitmap set for the group.
+    // If a port is also specified in the address, do not send it to the socket
+    // with the port during multicast processing.
+    //
+
+    PacketEntry = PacketList->Head.Next;
+    while (PacketEntry != &(PacketList->Head)) {
+        Packet = LIST_VALUE(PacketEntry, NET_PACKET_BUFFER, ListEntry);
+        Packet->Flags |= NET_PACKET_FLAG_MULTICAST;
+        GroupIndex = NETLINK_SOCKET_BITMAP_INDEX(Destination->Group);
+        GroupMask = NETLINK_SOCKET_BITMAP_MASK(Destination->Group);
+        KeAcquireSharedExclusiveLockShared(NetlinkMulticastLock);
+        SocketEntry = NetlinkMulticastSocketList.Next;
+        while (SocketEntry != &NetlinkMulticastSocketList) {
+            NetlinkSocket = LIST_VALUE(SocketEntry,
+                                       NETLINK_SOCKET,
+                                       MulticastListEntry);
+
+            Socket = &(NetlinkSocket->NetSocket);
+            SocketEntry = SocketEntry->Next;
+            if (Socket->Protocol != ReceiveContext->Protocol) {
+                continue;
+            }
+
+            if (Socket->LocalReceiveAddress.Port == Destination->Port) {
+                continue;
+            }
+
+            Count = NETLINK_SOCKET_BITMAP_GROUP_ID_COUNT(NetlinkSocket);
+            if (Destination->Group >= Count) {
+                continue;
+            }
+
+            MulticastBitmap = NetlinkSocket->MulticastBitmap;
+            if ((MulticastBitmap[GroupIndex] & GroupMask) == 0) {
+                continue;
+            }
+
+            //
+            // This needs to be reconsidered if kernel sockets are signed
+            // up for multicast groups. Kernel sockets are known to respond
+            // to requests with multicast messages as an event notification
+            // mechanism. This could potentially deadlock as the lock is
+            // held during packet processing.
+            //
+
+            ASSERT((Socket->Flags & NET_SOCKET_FLAG_KERNEL) == 0);
+
+            ReceiveContext->Packet = Packet;
+            NetlinkpProcessReceivedSocketData(Socket, ReceiveContext);
+        }
+
+        KeReleaseSharedExclusiveLockShared(NetlinkMulticastLock);
+
+        //
+        // Clear out the multicast group and send it on to the socket
+        // specified by the port.
+        //
+
+        Packet->Flags &= ~NET_PACKET_FLAG_MULTICAST;
+        PacketEntry = PacketEntry->Next;
+    }
+
     return;
 }
 

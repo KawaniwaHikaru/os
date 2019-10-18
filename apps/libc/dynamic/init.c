@@ -51,10 +51,10 @@ Environment:
 // ------------------------------------------------------------------ Functions
 //
 
-LIBC_API
+__CONSTRUCTOR
 void
-ClInitialize (
-    void *Environment
+ClpInitialize (
+    void
     )
 
 /*++
@@ -67,8 +67,7 @@ Routine Description:
 
 Arguments:
 
-    Environment - Supplies a pointer to the environment information to be passed
-        on to the OS Base library.
+    None.
 
 Return Value:
 
@@ -78,7 +77,6 @@ Return Value:
 
 {
 
-    OsInitializeLibrary(Environment);
     ClpInitializeEnvironment();
     ClpInitializeTimeZoneSupport();
     ClpInitializeFileIo();

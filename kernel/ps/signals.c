@@ -1234,7 +1234,8 @@ Return Value:
         if ((SignalQueueEntry != NULL) &&
             (SignalQueueEntry->CompletionRoutine != NULL)) {
 
-            SignalQueueEntry->ListEntry.Next = NULL;
+            ASSERT(SignalQueueEntry->ListEntry.Next == NULL);
+
             if (SignalNumber != SIGNAL_CHILD_PROCESS_ACTIVITY) {
                 SignalQueueEntry->CompletionRoutine(SignalQueueEntry);
 
@@ -1466,6 +1467,106 @@ Return Value:
     return;
 }
 
+VOID
+PsApplyPendingSignals (
+    PTRAP_FRAME TrapFrame
+    )
+
+/*++
+
+Routine Description:
+
+    This routine dispatches any pending signals that should be run on the
+    current thread.
+
+Arguments:
+
+    TrapFrame - Supplies a pointer to the current trap frame. If this trap frame
+        is not destined for user mode, this function exits immediately.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    ULONG SignalNumber;
+    SIGNAL_PARAMETERS SignalParameters;
+
+    while (TRUE) {
+        SignalNumber = PsDequeuePendingSignal(&SignalParameters, TrapFrame);
+        if (SignalNumber == (ULONG)-1) {
+            break;
+        }
+
+        PsApplySynchronousSignal(TrapFrame, &SignalParameters, FALSE);
+    }
+
+    return;
+}
+
+VOID
+PsApplyPendingSignalsOrRestart (
+    PTRAP_FRAME TrapFrame
+    )
+
+/*++
+
+Routine Description:
+
+    This routine dispatches any pending signals that should be run on the
+    current thread. If no signals were dispatched, it attempts to restart a
+    system call.
+
+Arguments:
+
+    TrapFrame - Supplies a pointer to the current trap frame. If this trap frame
+        is not destined for user mode, this function exits immediately.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    BOOL Applied;
+    ULONG SignalNumber;
+    SIGNAL_PARAMETERS SignalParameters;
+    PKTHREAD Thread;
+
+    Applied = FALSE;
+    while (TRUE) {
+        SignalNumber = PsDequeuePendingSignal(&SignalParameters, TrapFrame);
+        if (SignalNumber == (ULONG)-1) {
+            break;
+        }
+
+        Applied = TRUE;
+        PsApplySynchronousSignal(TrapFrame, &SignalParameters, TRUE);
+    }
+
+    //
+    // If a signal did not get applied, restore the signal mask if necessary
+    // and potentially restart the system call.
+    //
+
+    if (Applied == FALSE) {
+        Thread = KeGetCurrentThread();
+        if ((Thread->Flags & THREAD_FLAG_RESTORE_SIGNALS) != 0) {
+            Thread->Flags &= ~THREAD_FLAG_RESTORE_SIGNALS;
+            PsSetSignalMask(&(Thread->RestoreSignals), NULL);
+        }
+
+        PspArchRestartSystemCall(TrapFrame);
+    }
+
+    return;
+}
+
 KSTATUS
 PspCancelQueuedSignal (
     PKPROCESS Process,
@@ -1518,84 +1619,6 @@ Return Value:
     }
 
     return Status;
-}
-
-BOOL
-PsDispatchPendingSignalsOnCurrentThread (
-    PTRAP_FRAME TrapFrame,
-    ULONG SystemCallNumber,
-    PVOID SystemCallParameter
-    )
-
-/*++
-
-Routine Description:
-
-    This routine dispatches any pending signals that should be run on the
-    current thread.
-
-Arguments:
-
-    TrapFrame - Supplies a pointer to the current trap frame. If this trap frame
-        is not destined for user mode, this function exits immediately.
-
-    SystemCallNumber - Supplies the number of the system call that is
-        attempting to dispatch a pending signal. Supply SystemCallInvalid if
-        the caller is not a system call.
-
-    SystemCallParameter - Supplies a pointer to the parameters supplied with
-        the system call that is attempting to dispatch a signal. Supply NULL if
-        the caller is not a system call.
-
-Return Value:
-
-    FALSE if no signals are pending.
-
-    TRUE if a signal was applied.
-
---*/
-
-{
-
-    BOOL Applied;
-    ULONG SignalNumber;
-    SIGNAL_PARAMETERS SignalParameters;
-    PKTHREAD Thread;
-
-    Applied = FALSE;
-    while (TRUE) {
-        SignalNumber = PsDequeuePendingSignal(&SignalParameters, TrapFrame);
-        if (SignalNumber == -1) {
-            break;
-        }
-
-        Applied = TRUE;
-        PsApplySynchronousSignal(TrapFrame,
-                                 &SignalParameters,
-                                 SystemCallNumber,
-                                 SystemCallParameter);
-    }
-
-    //
-    // If a signal did not get applied, restore the signal mask if necessary
-    // and potentially restart the system call.
-    //
-
-    if (SystemCallNumber != SystemCallInvalid) {
-        if (Applied == FALSE) {
-            Thread = KeGetCurrentThread();
-            if ((Thread->Flags & THREAD_FLAG_RESTORE_SIGNALS) != 0) {
-                Thread->Flags &= ~THREAD_FLAG_RESTORE_SIGNALS;
-                PsSetSignalMask(&(Thread->RestoreSignals), NULL);
-            }
-
-            PspArchRestartSystemCall(TrapFrame,
-                                     SystemCallNumber,
-                                     SystemCallParameter);
-        }
-    }
-
-    return Applied;
 }
 
 ULONG
@@ -1955,8 +1978,7 @@ Return Value:
             if ((SignalNumber == SIGNAL_CONTINUE) &&
                 (SignalNumber == DequeuedSignal) &&
                 ((Process->DebugData == NULL) ||
-                 (Process->DebugData->TracingProcess !=
-                  Process->Parent))) {
+                 (Process->DebugData->TracingProcess != Process->Parent))) {
 
                 PspQueueChildSignalToParent(
                                        Process,
@@ -3121,22 +3143,26 @@ Return Value:
     BOOL FirstThread;
     BOOL InRange;
     PVOID InstructionPointer;
-    BOOL LockHeld;
     ULONG NewSignal;
     ULONG OriginalSignal;
     PKPROCESS Process;
+    BOOL ProcessLockHeld;
     USHORT Reason;
     BOOL StopHandled;
     BOOL StopSent;
     PKTHREAD Thread;
+    BOOL TracerLockHeld;
+    PKPROCESS TracingProcess;
 
     ASSERT((ThreadAlreadyStopped == FALSE) || (ThreadStopHandled != NULL));
 
-    LockHeld = FALSE;
+    ProcessLockHeld = FALSE;
+    TracerLockHeld = FALSE;
     StopHandled = FALSE;
     Thread = KeGetCurrentThread();
     Process = Thread->OwningProcess;
     DebugData = Process->DebugData;
+    TracingProcess = NULL;
 
     //
     // If debugging is not enabled or there's no other process debugging this
@@ -3175,8 +3201,8 @@ Return Value:
     //
 
     while (TRUE) {
-        LockHeld = KeTryToAcquireSpinLock(&(DebugData->TracerLock));
-        if (LockHeld != FALSE) {
+        TracerLockHeld = KeTryToAcquireSpinLock(&(DebugData->TracerLock));
+        if (TracerLockHeld != FALSE) {
             break;
         }
 
@@ -3189,16 +3215,6 @@ Return Value:
             ThreadAlreadyStopped = FALSE;
             StopHandled = TRUE;
         }
-    }
-
-    //
-    // If the tracer pulled out while the lock was being acquired, just end it
-    // now. The tracer stop requested variable was never set, so there should
-    // be no stopped threads or anything to wake up.
-    //
-
-    if (DebugData->TracingProcess == NULL) {
-        goto TracerBreakEnd;
     }
 
     ASSERT(DebugData->TracerStopRequested == FALSE);
@@ -3250,6 +3266,16 @@ Return Value:
     }
 
     //
+    // If the tracer pulled out while the lock was being acquired, just end it
+    // now. The tracer stop requested variable was never set, so there should
+    // be no stopped threads or anything to wake up.
+    //
+
+    if (DebugData->TracingProcess == NULL) {
+        goto TracerBreakEnd;
+    }
+
+    //
     // Copy the signal information over.
     //
 
@@ -3267,8 +3293,8 @@ Return Value:
     //
 
     KeAcquireQueuedLock(Process->QueuedLock);
+    ProcessLockHeld = TRUE;
     if (IS_SIGNAL_SET(Process->PendingSignals, SIGNAL_KILL) != FALSE) {
-        KeReleaseQueuedLock(Process->QueuedLock);
         goto TracerBreakEnd;
     }
 
@@ -3277,7 +3303,7 @@ Return Value:
     // command to invalid to keep the tracing alive until the tracer continues.
     //
 
-    Process->DebugData->DebugCommand.Command = DebugCommandInvalid;
+    DebugData->DebugCommand.Command = DebugCommandInvalid;
 
     //
     // If this is not a stop signal, then none of the other threads should be
@@ -3287,7 +3313,22 @@ Return Value:
     //
 
     KeSignalEvent(Process->StopEvent, SignalOptionUnsignal);
+
+    //
+    // The tracing process may disappear at any moment if it terminates. To
+    // communicate its termination to the tracee, it NULLs its pointer while
+    // holding the tracee's lock. Attempt to grab it and take a reference if it
+    // is found.
+    //
+
+    TracingProcess = DebugData->TracingProcess;
+    if (TracingProcess == NULL) {
+        goto TracerBreakEnd;
+    }
+
+    ObAddReference(TracingProcess);
     KeReleaseQueuedLock(Process->QueuedLock);
+    ProcessLockHeld = FALSE;
 
     //
     // If the thread is not already stopped, then mark it stopped. Request a
@@ -3306,7 +3347,7 @@ Return Value:
     // exited this routine somewhere above.
     //
 
-    Process->DebugData->TracerStopRequested = TRUE;
+    DebugData->TracerStopRequested = TRUE;
 
     //
     // The other threads might be running around thinking everything is just
@@ -3327,11 +3368,9 @@ Return Value:
         StopSent = TRUE;
     }
 
-    KeWaitForEvent(Process->DebugData->AllStoppedEvent,
-                   FALSE,
-                   WAIT_TIME_INDEFINITE);
+    KeWaitForEvent(DebugData->AllStoppedEvent, FALSE, WAIT_TIME_INDEFINITE);
 
-    ASSERT(Process->DebugData->TracerStopRequested != FALSE);
+    ASSERT(DebugData->TracerStopRequested != FALSE);
 
     //
     // This thread can only reach this point after the last thread has signaled
@@ -3354,6 +3393,7 @@ Return Value:
 
     if ((Signal->SignalNumber == SIGNAL_STOP) || (StopSent != FALSE)) {
         KeAcquireQueuedLock(Process->QueuedLock);
+        ProcessLockHeld = TRUE;
         if (Signal->SignalNumber == SIGNAL_STOP) {
             if (IS_SIGNAL_SET(Thread->PendingSignals, SIGNAL_STOP) != FALSE) {
                 REMOVE_SIGNAL(Thread->PendingSignals, SIGNAL_STOP);
@@ -3373,6 +3413,7 @@ Return Value:
         }
 
         KeReleaseQueuedLock(Process->QueuedLock);
+        ProcessLockHeld = FALSE;
     }
 
     //
@@ -3380,10 +3421,7 @@ Return Value:
     // the tracing process cannot be released during this period.
     //
 
-    PspQueueChildSignal(Process,
-                        DebugData->TracingProcess,
-                        Signal->SignalNumber,
-                        Reason);
+    PspQueueChildSignal(Process, TracingProcess, Signal->SignalNumber, Reason);
 
     //
     // Wait for the tracer to continue this process.
@@ -3444,12 +3482,20 @@ Return Value:
     }
 
 TracerBreakEnd:
-    if (LockHeld != FALSE) {
+    if (ProcessLockHeld != FALSE) {
+        KeReleaseQueuedLock(Process->QueuedLock);
+    }
+
+    if (TracerLockHeld != FALSE) {
         KeReleaseSpinLock(&(DebugData->TracerLock));
     }
 
     if (ThreadStopHandled != NULL) {
         *ThreadStopHandled = StopHandled;
+    }
+
+    if (TracingProcess != NULL) {
+        ObReleaseReference(TracingProcess);
     }
 
     return;
@@ -3793,10 +3839,14 @@ Return Value:
                         }
 
                         //
-                        // Kill is the only signal that wakes all threads.
+                        // Kill, stop, and continue are the only signals that
+                        // wake all threads.
                         //
 
-                        if (SignalNumber != SIGNAL_KILL) {
+                        if ((SignalNumber != SIGNAL_KILL) &&
+                            (SignalNumber != SIGNAL_STOP) &&
+                            (SignalNumber != SIGNAL_CONTINUE)) {
+
                             break;
                         }
                     }

@@ -26,7 +26,33 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary, staticLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var armv7BootSources;
+    var armv7Intrinsics;
+    var armv7Sources;
+    var baseRtl32Lib;
+    var baseRtl32Sources;
+    var baseRtlLib;
+    var bootLib;
+    var bootSources;
+    var buildBaseRtlLib;
+    var buildSources;
+    var entries;
+    var includes;
+    var intrinsics;
+    var intrinsicsLib;
+    var intrinsicsSourcesConfig;
+    var sources;
+    var targetSources;
+    var wideLib;
+    var wideSources;
+    var x64Sources;
+    var x86Intrinsics;
+    var x86Sources;
+
     sources = [
         "crc32.c",
         "heap.c",
@@ -42,28 +68,28 @@ function build() {
         "wchar.c"
     ];
 
-    wide_sources = [
+    wideSources = [
         "wprint.c",
         "wscan.c",
         "wstring.c",
         "wtime.c"
     ];
 
-    x86_intrinsics = [
+    x86Intrinsics = [
         "x86/intrinsc.c"
     ];
 
-    x86_sources = x86_intrinsics + [
+    x86Sources = x86Intrinsics + [
         "x86/rtlarch.S",
         "x86/rtlmem.S"
     ];
 
-    armv7_intrinsics = [
+    armv7Intrinsics = [
         "armv7/intrinsa.S",
         "armv7/intrinsc.c"
     ];
 
-    armv7_sources = armv7_intrinsics + [
+    armv7Sources = armv7Intrinsics + [
         "armv7/rtlarch.S",
         "armv7/rtlmem.S",
         "fp2int.c"
@@ -74,7 +100,7 @@ function build() {
     // library just so they get exercise.
     //
 
-    armv7_boot_sources = armv7_intrinsics + [
+    armv7BootSources = armv7Intrinsics + [
         "armv7/aeabisfp.c",
         "armv7/rtlmem.S",
         "boot/armv7/rtlarch.S",
@@ -82,7 +108,7 @@ function build() {
         "softfp.c"
     ];
 
-    x64_sources = [
+    x64Sources = [
         "x64/rtlarch.S",
         "x64/rtlmem.S"
     ];
@@ -91,38 +117,40 @@ function build() {
     // Put together the target sources by architecture.
     //
 
-    boot_sources = sources;
     if (arch == "x86") {
-        target_sources = sources + x86_sources;
-        intrinsics = x86_intrinsics;
-        boot_sources = sources + x86_sources;
+        targetSources = sources + x86Sources;
+        intrinsics = x86Intrinsics;
 
     } else if ((arch == "armv7") || (arch == "armv6")) {
-        target_sources = sources + armv7_sources;
-        intrinsics = armv7_intrinsics;
-        boot_sources = sources + armv7_boot_sources;
+        targetSources = sources + armv7Sources;
+        intrinsics = armv7Intrinsics;
+        bootSources = sources + armv7BootSources;
 
     } else if (arch == "x64") {
-        target_sources = sources + x64_sources;
+        targetSources = sources + x64Sources;
         intrinsics = null;
+        bootSources = sources + x64Sources;
+        baseRtl32Sources = sources + x86Sources;
     }
 
     //
     // Put together the build sources by architecture.
     //
 
-    build_sources = sources + wide_sources;
-    if (build_arch == "x86") {
-        build_sources += x86_sources + [
+    buildSources = sources + wideSources;
+    if (mconfig.build_arch == "x86") {
+        buildSources += x86Sources + [
             "fp2int.c",
             "softfp.c"
         ];
 
-    } else if ((build_arch == "armv7") || (build_arch == "armv6")) {
-        build_sources += armv7_sources;
+    } else if ((mconfig.build_arch == "armv7") ||
+               (mconfig.build_arch == "armv6")) {
 
-    } else if (build_arch == "x64") {
-        build_sources += + x64_sources + [
+        buildSources += armv7Sources;
+
+    } else if (mconfig.build_arch == "x64") {
+        buildSources += x64Sources + [
             "fp2int.c",
             "softfp.c"
         ];
@@ -130,7 +158,7 @@ function build() {
 
     entries = [];
     includes = [
-        "$//lib/rtl"
+        "$S/lib/rtl"
     ];
 
     //
@@ -145,19 +173,19 @@ function build() {
         // another binary.
         //
 
-        intrinsics_sources_config = {
+        intrinsicsSourcesConfig = {
             "CPPFLAGS": ["-DRTL_API=__DLLIMPORT"]
         };
 
-        intrinsics_lib = {
+        intrinsicsLib = {
             "label": "intrins",
             "inputs": intrinsics,
-            "sources_config": intrinsics_sources_config,
+            "sources_config": intrinsicsSourcesConfig,
             "includes": includes,
             "prefix": "intrins"
         };
 
-        entries += static_library(intrinsics_lib);
+        entries += kernelLibrary(intrinsicsLib);
     }
 
     //
@@ -165,54 +193,67 @@ function build() {
     // version except on ARM it contains no ldrex/strex.
     //
 
-    boot_lib = {
-        "label": "basertlb",
-        "inputs": boot_sources,
-        "prefix": "boot",
-        "includes": includes,
-    };
+    if (bootSources) {
+        bootLib = {
+            "label": "basertlb",
+            "inputs": bootSources,
+            "prefix": "boot",
+            "includes": includes,
+        };
 
-    entries += static_library(boot_lib);
+        entries += kernelLibrary(bootLib);
+    }
 
     //
     // Compile the wide library support.
     //
 
-    wide_lib = {
+    wideLib = {
         "label": "basertlw",
-        "inputs": wide_sources,
+        "inputs": wideSources,
         "includes": includes,
     };
 
-    entries += static_library(wide_lib);
+    entries += kernelLibrary(wideLib);
 
     //
     // Compile the main Rtl base library.
     //
 
-    basertl_lib = {
+    baseRtlLib = {
         "label": "basertl",
-        "inputs": target_sources,
+        "inputs": targetSources,
         "includes": includes,
     };
 
-    entries += static_library(basertl_lib);
+    entries += kernelLibrary(baseRtlLib);
 
     //
     // Compile the build version of the Rtl base library.
     //
 
-    build_basertl_lib = {
+    buildBaseRtlLib = {
         "label": "build_basertl",
         "output": "basertl",
-        "inputs": build_sources,
+        "inputs": buildSources,
         "includes": includes,
         "prefix": "build",
-        "build": TRUE
+        "build": true
     };
 
-    entries += static_library(build_basertl_lib);
+    entries += staticLibrary(buildBaseRtlLib);
+    if (arch == "x64") {
+        baseRtl32Lib = {
+            "label": "basertl32",
+            "inputs": baseRtl32Sources,
+            "includes": includes,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(baseRtl32Lib);
+    }
+
     return entries;
 }
 
-return build();

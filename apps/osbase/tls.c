@@ -46,48 +46,6 @@ Environment:
 // ------------------------------------------------------ Data Type Definitions
 //
 
-/*++
-
-Structure Description:
-
-    This structure stores the thread control block, a structure used in user
-    mode to contain information unique to each thread.
-
-Members:
-
-    Self - Stores a pointer to the thread control block itself. This member
-        is mandated by many application ABIs.
-
-    TlsVector - Stores an array of pointers to TLS regions for each module. The
-        first element is a generation number, indicating whether or not the
-        array needs to be resized. This member is access directly from assembly.
-
-    ModuleCount - Stores the count of loaded modules this thread is aware of.
-
-    BaseAllocation - Stores a pointer to the actual allocation pointer returned
-        to free this structure and all the initial TLS blocks.
-
-    StackGuard - Stores the stack guard value. This is referenced directly by
-        GCC, and must be at offset 0x14 on 32-bit systems, 0x28 on 64-bit
-        systems.
-
-    BaseAllocationSize - Stores the size of the base allocation region in bytes.
-
-    ListEntry - Stores pointers to the next and previous threads in the OS
-        Library thread list.
-
---*/
-
-typedef struct _THREAD_CONTROL_BLOCK {
-    PVOID Self;
-    PVOID *TlsVector;
-    UINTN ModuleCount;
-    PVOID BaseAllocation;
-    UINTN StackGuard;
-    UINTN BaseAllocationSize;
-    LIST_ENTRY ListEntry;
-} THREAD_CONTROL_BLOCK, *PTHREAD_CONTROL_BLOCK;
-
 //
 // ----------------------------------------------- Internal Function Prototypes
 //
@@ -389,7 +347,8 @@ Return Value:
 KSTATUS
 OspTlsAllocate (
     PLIST_ENTRY ImageList,
-    PVOID *ThreadData
+    PVOID *ThreadData,
+    BOOL CopyInitImage
     )
 
 /*++
@@ -408,6 +367,11 @@ Arguments:
         returned on success. It is the callers responsibility to destroy this
         thread data.
 
+    CopyInitImage - Supplies a boolean indicating whether or not to copy the
+        initial image over to the new TLS area or not. If this is the initial
+        program load and images have not yet been relocated, then the copies
+        are skipped since they need to be done after relocations are applied.
+
 Return Value:
 
     Status code.
@@ -418,6 +382,7 @@ Return Value:
 
     PVOID Allocation;
     UINTN AllocationSize;
+    BOOL AnyAssigned;
     PLIST_ENTRY CurrentEntry;
     PVOID CurrentPointer;
     UINTN CurrentSize;
@@ -429,10 +394,11 @@ Return Value:
     UINTN VectorSize;
 
     Allocation = NULL;
+    AnyAssigned = FALSE;
 
     //
     // Figure out how much to allocate for the thread control block and the
-    // initial TLS allocations.
+    // static TLS allocations.
     //
 
     ModuleCount = 0;
@@ -446,12 +412,16 @@ Return Value:
             ModuleCount = Image->ModuleNumber;
         }
 
-        if (Image->TlsAlignment <= 1) {
-            AllocationSize += Image->TlsSize;
+        if (((Image->Flags & IMAGE_FLAG_STATIC_TLS) != 0) ||
+            ((Image->LoadFlags & IMAGE_LOAD_FLAG_PRIMARY_EXECUTABLE) != 0)) {
 
-        } else {
-            AllocationSize = ALIGN_RANGE_UP(AllocationSize + Image->TlsSize,
-                                            Image->TlsAlignment);
+            if (Image->TlsAlignment <= 1) {
+                AllocationSize += Image->TlsSize;
+
+            } else {
+                AllocationSize = ALIGN_RANGE_UP(AllocationSize + Image->TlsSize,
+                                                Image->TlsAlignment);
+            }
         }
     }
 
@@ -512,7 +482,10 @@ Return Value:
         ASSERT((Image->ModuleNumber <= ThreadControlBlock->ModuleCount) &&
                (Image->ModuleNumber != 0));
 
-        if (Image->TlsSize == 0) {
+        if ((Image->TlsSize == 0) ||
+            (((Image->Flags & IMAGE_FLAG_STATIC_TLS) == 0) &&
+             ((Image->LoadFlags & IMAGE_LOAD_FLAG_PRIMARY_EXECUTABLE) == 0))) {
+
             continue;
         }
 
@@ -524,10 +497,27 @@ Return Value:
                                          Image->TlsAlignment);
         }
 
-        ASSERT((Image->TlsOffset == (UINTN)-1) ||
-               (Image->TlsOffset == CurrentSize));
+        //
+        // If static TLS offsets have not been assigned, then assign one now.
+        //
 
-        Image->TlsOffset = CurrentSize;
+        if (Image->TlsOffset == (UINTN)-1) {
+            Image->TlsOffset = CurrentSize;
+            AnyAssigned = TRUE;
+
+        //
+        // Otherwise, use the TLS offset previously assigned. There must not be
+        // a mix of assigned and unassigned, since the required sizes would
+        // come out differently depending on order.
+        //
+
+        } else {
+
+            ASSERT(AnyAssigned == FALSE);
+
+            CurrentSize = Image->TlsOffset;
+        }
+
         CurrentPointer = ((PVOID)ThreadControlBlock) - CurrentSize;
 
         //
@@ -542,7 +532,7 @@ Return Value:
         //
 
         ThreadControlBlock->TlsVector[Image->ModuleNumber] = CurrentPointer;
-        if (Image->TlsImageSize != 0) {
+        if ((CopyInitImage != FALSE) && (Image->TlsImageSize != 0)) {
 
             ASSERT(Image->TlsImageSize <= Image->TlsSize);
 

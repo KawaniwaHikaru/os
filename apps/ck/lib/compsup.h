@@ -264,6 +264,28 @@ typedef struct _CK_CLASS_COMPILER {
 
 Structure Description:
 
+    This structure contains the array of function declarations.
+
+Members:
+
+    Signature - Stores the function signature symbol index.
+
+    Symbol - Stores the symbol where the function resides.
+
+    Scope - Stores the scope where the function resides.
+
+--*/
+
+typedef struct _CK_FUNCTION_DECLARATION {
+    CK_SYMBOL_INDEX Signature;
+    CK_SYMBOL_INDEX Symbol;
+    LONG Scope;
+} CK_FUNCTION_DECLARATION, *PCK_FUNCTION_DECLARATION;
+
+/*++
+
+Structure Description:
+
     This structure contains the context for a Chalk bytecode compiler.
 
 Members:
@@ -279,6 +301,13 @@ Members:
 
     UpvalueCapacity - Stores the maximum number of upvalues before the array
         will have to be reallocated.
+
+    Declarations - Stores the array of declarations.
+
+    DeclarationCount - Stores the number of valid elements in the declaration
+        array.
+
+    DeclarationCapacity - Stores the size of the declaration array.
 
     ScopeDepth - Stores the current scope number being compiled.
 
@@ -320,6 +349,9 @@ Members:
     FinallyOffset - Stores the offset of the finally block if a try-except
         block is being compiled.
 
+    Flags - Stores a bitfield of flags governing the compiler behavior. See
+        CK_COMPILE_* definitions.
+
 --*/
 
 struct _CK_COMPILER {
@@ -328,6 +360,9 @@ struct _CK_COMPILER {
     ULONG LocalCapacity;
     PCK_COMPILER_UPVALUE Upvalues;
     ULONG UpvalueCapacity;
+    PCK_FUNCTION_DECLARATION Declarations;
+    ULONG DeclarationCount;
+    ULONG DeclarationCapacity;
     LONG ScopeDepth;
     LONG StackSlots;
     PCK_LOOP Loop;
@@ -342,6 +377,7 @@ struct _CK_COMPILER {
     PUCHAR LastLineOp;
     BOOL Assign;
     UINTN FinallyOffset;
+    ULONG Flags;
 };
 
 //
@@ -693,8 +729,7 @@ Arguments:
 
 Return Value:
 
-    Returns the index into the giant table of methods for this function's
-    signature.
+    Returns the index into the table of methods for this function's signature.
 
 --*/
 
@@ -719,8 +754,7 @@ Arguments:
 
 Return Value:
 
-    Returns the index into the giant table of methods for this function's
-    signature.
+    Returns the index into the table of methods for this function's signature.
 
 --*/
 
@@ -749,7 +783,7 @@ Arguments:
 
 Return Value:
 
-    Returns the index in the giant symbol table of method names.
+    Returns the index in the symbol table of method names.
 
 --*/
 
@@ -1127,6 +1161,33 @@ Arguments:
         lvalue.
 
     ExpressionName - Supplies a pointer to the name of the expression.
+
+Return Value:
+
+    None.
+
+--*/
+
+VOID
+CkpAddFunctionDeclaration (
+    PCK_COMPILER Compiler,
+    PCK_FUNCTION_SIGNATURE Signature,
+    PLEXER_TOKEN NameToken
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds a function declaration.
+
+Arguments:
+
+    Compiler - Supplies a pointer to the compiler.
+
+    Signature - Supplies the function signature.
+
+    NameToken - Supplies the name token of the variable.
 
 Return Value:
 

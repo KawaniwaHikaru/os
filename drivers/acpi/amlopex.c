@@ -379,6 +379,7 @@ Return Value:
 {
 
     UCHAR AccessFlags;
+    PACPI_OBJECT BankRegister;
     PUCHAR InstructionPointer;
     PACPI_OBJECT NewArgument;
     PACPI_OBJECT OperationRegion;
@@ -453,6 +454,14 @@ Return Value:
         return STATUS_NOT_FOUND;
     }
 
+    BankRegister =
+               AcpipGetNamespaceObject(Statement->Argument[1]->U.String.String,
+                                       Context->CurrentScope);
+
+    if (BankRegister == NULL) {
+        return STATUS_NOT_FOUND;
+    }
+
     //
     // Parse the field list.
     //
@@ -460,7 +469,7 @@ Return Value:
     Status = AcpipParseFieldList(Context,
                                  Statement->Type,
                                  OperationRegion,
-                                 Statement->Argument[1],
+                                 BankRegister,
                                  Statement->Argument[2],
                                  NULL,
                                  NULL,
@@ -2843,6 +2852,22 @@ Return Value:
 
     if (!KSUCCESS(Status)) {
         return Status;
+    }
+
+    //
+    // If this was a C method or an empty method, complete it right away.
+    //
+
+    if (Method->U.Method.AmlCodeSize == 0) {
+        Statement->Reduction = Context->ReturnValue;
+        AcpipObjectAddReference(Statement->Reduction);
+        Context->IndentationLevel -= 1;
+        if (Context->PrintStatements != FALSE) {
+            AcpipPrintIndentedNewLine(Context);
+            RtlDebugPrint("}");
+        }
+
+        return STATUS_SUCCESS;
     }
 
     return STATUS_MORE_PROCESSING_REQUIRED;
@@ -7142,6 +7167,9 @@ Return Value:
             break;
 
         default:
+
+            ASSERT(FALSE);
+
             return STATUS_NOT_SUPPORTED;
         }
 

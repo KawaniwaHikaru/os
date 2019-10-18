@@ -27,7 +27,15 @@ Environment:
 
 --*/
 
+from menv import kernelLibrary, addConfig, mconfig;
+
 function build() {
+    var arch = mconfig.arch;
+    var archSources;
+    var entries;
+    var lib;
+    var sources;
+
     sources = [
         "crash.c",
         "crashdmp.c",
@@ -45,14 +53,13 @@ function build() {
         "sysclock.c",
         "sysres.c",
         "timer.c",
-        "timezone.c",
         "version.c",
         "video.c",
         "workitem.c"
     ];
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        arch_sources = [
+        archSources = [
             "armv7/archinit.c",
             "armv7/ctxswap.S",
             "armv7/ctxswapc.c",
@@ -60,22 +67,33 @@ function build() {
             "armv7/proc.c"
         ];
 
-    } else if ((arch == "x86") || (arch == "x64")) {
-        arch_sources = [
+    } else if (arch == "x86") {
+        archSources = [
             "x86/archinit.c",
             "x86/ctxswap.S",
             "x86/ctxswapc.c",
             "x86/dispatch.c",
+            "x86/pcexcept.c",
+            "x86/proc.c"
+        ];
+
+    } else if (arch == "x64") {
+        archSources = [
+            "x64/ctxswap.S",
+            "x64/ctxswapc.c",
+            "x64/dispatch.c",
+            "x86/archinit.c",
+            "x86/pcexcept.c",
             "x86/proc.c"
         ];
     }
 
     lib = {
         "label": "ke",
-        "inputs": sources + arch_sources,
+        "inputs": sources + archSources,
     };
 
-    entries = static_library(lib);
+    entries = kernelLibrary(lib);
 
     //
     // Add the include and dependency for version.c.
@@ -83,8 +101,8 @@ function build() {
 
     for (entry in entries) {
         if (entry["output"] == "version.o") {
-            add_config(entry, "CPPFLAGS", "-I$^/kernel");
-            entry["implicit"] = ["//kernel:version.h", "//.git/HEAD"];
+            addConfig(entry, "CPPFLAGS", "-I$O/kernel");
+            entry["implicit"] = ["kernel:version.h"];
             break;
         }
     }
@@ -92,4 +110,3 @@ function build() {
     return entries;
 }
 
-return build();

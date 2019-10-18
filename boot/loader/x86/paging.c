@@ -344,6 +344,10 @@ Return Value:
             BoPageDirectory[DirectoryIndex].Entry =
                                               ((ULONG)PageTable) >> PAGE_SHIFT;
 
+            if (CurrentVirtual >= (UINTN)KERNEL_VA_START) {
+                BoPageDirectory[DirectoryIndex].Global = 1;
+            }
+
             BoPageDirectory[DirectoryIndex].Present = 1;
 
         } else {
@@ -755,7 +759,7 @@ Return Value:
     *PageTableStage = (PVOID)-1;
     Status = BoMapPhysicalAddress(PageTableStage,
                                   0,
-                                  PAGE_SIZE,
+                                  SWAP_VA_PAGES * PAGE_SIZE,
                                   MAP_FLAG_READ_ONLY,
                                   MemoryTypeLoaderPermanent);
 

@@ -91,10 +91,10 @@ Author:
 // This macro dispatches pending signals on the given thread if there are any.
 //
 
-#define PsDispatchPendingSignals(_Thread, _TrapFrame)     \
-    ((_Thread)->SignalPending == ThreadNoSignalPending) ? \
-    FALSE :                                               \
-    PsDispatchPendingSignalsOnCurrentThread(_TrapFrame, SystemCallInvalid, NULL)
+#define PsDispatchPendingSignals(_Thread, _TrapFrame)        \
+    if ((_Thread)->SignalPending != ThreadNoSignalPending) { \
+        PsApplyPendingSignals(_TrapFrame);                   \
+    }
 
 //
 // This macro performs a quick inline check to see if any of the runtime timers
@@ -237,7 +237,7 @@ Author:
 //   * Setting debug options on sockets.
 //   * Modifying routing tables.
 //   * Setting arbitraty process and process group ownership on sockets.
-//   * Binding to any address.
+//   * Binding to any address for transparent proxying.
 //   * Setting promiscuous mode.
 //   * Clearing statistics.
 //   * Multicasting.
@@ -337,11 +337,17 @@ Author:
 #define PERMISSION_MOUNT 25
 
 //
+// This permission allows arbitrary control over IPC objects.
+//
+
+#define PERMISSION_IPC 26
+
+//
 // Define the mask of valid permission. It must be kept up to date if new
 // permissions are added.
 //
 
-#define PERMISSION_MAX PERMISSION_MOUNT
+#define PERMISSION_MAX PERMISSION_IPC
 #define PERMISSION_MASK (PERMISSION_TO_MASK(PERMISSION_MAX + 1) - 1)
 
 //
@@ -455,6 +461,7 @@ Author:
 #define PS_FPU_CONTEXT_ALLOCATION_TAG 0x46637250 // 'FcrP'
 #define PS_IMAGE_ALLOCATION_TAG 0x6D497350 // 'mIsP'
 #define PS_GROUP_ALLOCATION_TAG 0x70477350 // 'pGsP'
+#define PS_UTS_ALLOCATION_TAG 0x74557350 // 'tUsP'
 
 #define PROCESS_INFORMATION_VERSION 1
 
@@ -506,6 +513,23 @@ Author:
 //
 
 #define MAX_USER_ADDRESS ((PVOID)0x7FFFFFFF)
+
+//
+// Define the maximum length of a UTS name.
+//
+
+#define UTS_NAME_MAX 80
+
+//
+// Define flags to the fork call.
+//
+
+//
+// Set this flag to have the child process fork into an independent UTS
+// realm (which stores the host and domain name).
+//
+
+#define FORK_FLAG_REALM_UTS 0x00000001
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -564,6 +588,8 @@ typedef enum _PS_INFORMATION_TYPE {
     PsInformationInvalid,
     PsInformationProcess,
     PsInformationProcessIdList,
+    PsInformationHostName,
+    PsInformationDomainName,
 } PS_INFORMATION_TYPE, *PPS_INFORMATION_TYPE;
 
 typedef enum _PROCESS_ID_TYPE {
@@ -624,6 +650,8 @@ typedef struct _KPROCESS KPROCESS, *PKPROCESS;
 typedef struct _KTHREAD KTHREAD, *PKTHREAD;
 typedef struct _SUPPLEMENTARY_GROUPS
     SUPPLEMENTARY_GROUPS, *PSUPPLEMENTARY_GROUPS;
+
+typedef struct _UTS_REALM UTS_REALM, *PUTS_REALM;
 
 //
 // Define the user and group ID types.
@@ -746,6 +774,8 @@ Members:
 
     StackBase - Stores the base of the stack.
 
+    IgnoredSignals - Stores a mask of which signals are ignored.
+
 --*/
 
 typedef struct _PROCESS_START_DATA {
@@ -758,6 +788,7 @@ typedef struct _PROCESS_START_DATA {
     PVOID ExecutableBase;
     PVOID EntryPoint;
     PVOID StackBase;
+    SIGNAL_SET IgnoredSignals;
 } PROCESS_START_DATA, *PPROCESS_START_DATA;
 
 /*++
@@ -1077,7 +1108,13 @@ Members:
 
     TracingProcess - Stores an optional pointer to the process that is
         tracing (debugging) this process. The tracing process will be notified
-        and this process stopped on every signal and system call.
+        and this process stopped on every signal and system call. The tracee
+        does not have a reference on its tracing process. To freely use the
+        tracer outside of the tracee process' queued lock, the tracee must
+        acquire its lock, check to make sure the tracing process is not NULL,
+        take a reference, and then release the lock. This synchronizes with the
+        tracer's destruction, as it will acquire the tracee's process lock and
+        NULL this pointer.
 
     TraceeListHead - Stores the list of processes this process traces.
 
@@ -1243,6 +1280,22 @@ typedef struct _PROCESS_IDENTIFIERS {
 
 Structure Description:
 
+    This structure defines the set of realms a process can belong to.
+
+Members:
+
+    Uts - Stores a pointer to the UTS realm.
+
+--*/
+
+typedef struct _PROCESS_REALMS {
+    PUTS_REALM Uts;
+} PROCESS_REALMS, *PPROCESS_REALMS;
+
+/*++
+
+Structure Description:
+
     This structure defines system or user process.
 
 Members:
@@ -1290,7 +1343,12 @@ Members:
     ChildListHead - Stores the list of child processes that inherit from this
         process.
 
-    Parent - Stores a pointer to the parent process if it is still alive.
+    Parent - Stores a pointer to the parent process if it is still alive. A
+        child does not have a reference on the parent. To freely use the
+        parent outside of its queued lock, a child must acquire the lock, check
+        to see if the parent is not NULL, take a reference, and then release
+        the lock. This synchronizes with the parent's destruction, as the
+        parent will acquire the child's lock and NULL the parent point.
 
     ThreadCount - Stores the number of threads that belong to this process.
 
@@ -1379,11 +1437,13 @@ Members:
         process doesn't necessarily have a reference to. This pointer should
         not be touched without the terminal list lock held.
 
+    Realm - Stores the set of realms the process belongs to.
+
 --*/
 
 struct _KPROCESS {
     OBJECT_HEADER Header;
-    PSTR BinaryName;
+    PCSTR BinaryName;
     ULONG BinaryNameSize;
     ULONG Flags;
     PVOID QueuedLock;
@@ -1424,6 +1484,7 @@ struct _KPROCESS {
     RESOURCE_USAGE ChildResourceUsage;
     ULONG Umask;
     PVOID ControllingTerminal;
+    PROCESS_REALMS Realm;
 };
 
 /*++
@@ -1887,7 +1948,7 @@ Members:
 
 typedef struct _THREAD_CREATION_PARAMETERS {
     PKPROCESS Process;
-    PSTR Name;
+    PCSTR Name;
     UINTN NameSize;
     PTHREAD_ENTRY_ROUTINE ThreadRoutine;
     PVOID Parameter;
@@ -1912,7 +1973,7 @@ KSTATUS
 PsCreateKernelThread (
     PTHREAD_ENTRY_ROUTINE ThreadRoutine,
     PVOID ThreadParameter,
-    PSTR Name
+    PCSTR Name
     );
 
 /*++
@@ -2779,11 +2840,9 @@ Return Value:
 
 --*/
 
-BOOL
-PsDispatchPendingSignalsOnCurrentThread (
-    PTRAP_FRAME TrapFrame,
-    ULONG SystemCallNumber,
-    PVOID SystemCallParameter
+VOID
+PsApplyPendingSignals (
+    PTRAP_FRAME TrapFrame
     );
 
 /*++
@@ -2798,19 +2857,33 @@ Arguments:
     TrapFrame - Supplies a pointer to the current trap frame. If this trap frame
         is not destined for user mode, this function exits immediately.
 
-    SystemCallNumber - Supplies the number of the system call that is
-        attempting to dispatch a pending signal. Supply SystemCallInvalid if
-        the caller is not a system call.
+Return Value:
 
-    SystemCallParameter - Supplies a pointer to the parameters supplied with
-        the system call that is attempting to dispatch a signal. Supply NULL if
-        the caller is not a system call.
+    None.
+
+--*/
+
+VOID
+PsApplyPendingSignalsOrRestart (
+    PTRAP_FRAME TrapFrame
+    );
+
+/*++
+
+Routine Description:
+
+    This routine dispatches any pending signals that should be run on the
+    current thread. If no signals were dispatched, it attempts to restart a
+    system call.
+
+Arguments:
+
+    TrapFrame - Supplies a pointer to the current trap frame. If this trap frame
+        is not destined for user mode, this function exits immediately.
 
 Return Value:
 
-    FALSE if no signals are pending.
-
-    TRUE if a signal was applied.
+    None.
 
 --*/
 
@@ -2847,8 +2920,7 @@ VOID
 PsApplySynchronousSignal (
     PTRAP_FRAME TrapFrame,
     PSIGNAL_PARAMETERS SignalParameters,
-    ULONG SystemCallNumber,
-    PVOID SystemCallParameter
+    BOOL InSystemCall
     );
 
 /*++
@@ -2866,13 +2938,9 @@ Arguments:
 
     SignalParameters - Supplies a pointer to the signal information to apply.
 
-    SystemCallNumber - Supplies the number of the system call that is
-        attempting to dispatch a pending signal. Supply SystemCallInvalid if
-        the caller is not a system call.
-
-    SystemCallParameter - Supplies a pointer to the parameters supplied with
-        the system call that is attempting to dispatch a signal. Supply NULL if
-        the caller is not a system call.
+    InSystemCall - Supplies a boolean indicating if the trap frame came from
+        a system call, in which case this routine will look inside to
+        potentially prepare restart information.
 
 Return Value:
 
@@ -2882,7 +2950,7 @@ Return Value:
 
 VOID
 PsVolumeArrival (
-    PSTR VolumeName,
+    PCSTR VolumeName,
     ULONG VolumeNameLength,
     BOOL SystemVolume
     );
@@ -3020,7 +3088,7 @@ KSTATUS
 PsGetAllProcessInformation (
     ULONG AllocationTag,
     PVOID *Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     );
 
 /*++
@@ -3060,7 +3128,7 @@ KSTATUS
 PsGetProcessInformation (
     PROCESS_ID ProcessId,
     PPROCESS_INFORMATION Buffer,
-    PULONG BufferSize
+    PUINTN BufferSize
     );
 
 /*++
@@ -3305,7 +3373,7 @@ Return Value:
 
 PKPROCESS
 PsCreateProcess (
-    PSTR CommandLine,
+    PCSTR CommandLine,
     ULONG CommandLineSize,
     PVOID RootDirectoryPathPoint,
     PVOID WorkingDirectoryPathPoint,
@@ -3534,7 +3602,9 @@ PsCopyEnvironment (
     PPROCESS_ENVIRONMENT Source,
     PPROCESS_ENVIRONMENT *Destination,
     BOOL FromUserMode,
-    PKTHREAD DestinationThread
+    PKTHREAD DestinationThread,
+    PSTR OverrideImageName,
+    UINTN OverrideImageNameSize
     );
 
 /*++
@@ -3557,6 +3627,12 @@ Arguments:
         to copy the environment into. Supply NULL to copy the environment to
         a new kernel mode buffer.
 
+    OverrideImageName - Supplies an optional pointer to an image name to use as
+        an override of the image name in the source environment.
+
+    OverrideImageNameSize - Supplies the size of the override image name,
+        including the null terminator.
+
 Return Value:
 
     Status code.
@@ -3565,7 +3641,7 @@ Return Value:
 
 KSTATUS
 PsCreateEnvironment (
-    PSTR CommandLine,
+    PCSTR CommandLine,
     ULONG CommandLineSize,
     PSTR *EnvironmentVariables,
     ULONG EnvironmentVariableCount,

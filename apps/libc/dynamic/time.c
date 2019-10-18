@@ -32,8 +32,13 @@ Environment:
 #include "libcp.h"
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <paths.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -42,13 +47,6 @@ Environment:
 //
 // --------------------------------------------------------------------- Macros
 //
-
-//
-// Define the allocation tag used to create time zone information in the C
-// library: ClTz.
-//
-
-#define C_TIME_ZONE_ALLOCATION_TAG 0x7A546C43
 
 //
 // This macro determines whether or not the process ID can be converted to a
@@ -116,6 +114,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _CUSTOM_TIME_ZONE {
     TIME_ZONE_HEADER Header;
     TIME_ZONE_RULE StandardRule;
@@ -124,6 +124,8 @@ typedef struct _CUSTOM_TIME_ZONE {
     TIME_ZONE_ENTRY ZoneEntry;
     CHAR Strings[32];
 } PACKED CUSTOM_TIME_ZONE, *PCUSTOM_TIME_ZONE;
+
+#pragma pack(pop)
 
 /*++
 
@@ -160,7 +162,7 @@ ClpStructTmToCalendarTime (
     struct tm *StructTm
     );
 
-KSTATUS
+VOID
 ClpInitializeTimeZoneData (
     VOID
     );
@@ -234,11 +236,10 @@ CHAR ClGlobalTimeString[GLOBAL_TIME_STRING_SIZE];
 struct tm ClGlobalTimeStructure;
 
 //
-// Store a boolean indicating whether or not the current time zone data has
-// been initialized or not.
+// Store the path to the time zone data loaded.
 //
 
-BOOL ClTimeZoneDataInitialized;
+PSTR ClTimeZonePath;
 
 //
 // Set this boolean to debug parsing of the TZ variable.
@@ -256,7 +257,7 @@ OS_LOCK ClTimeZoneLock;
 // Store the timer backing the alarm function.
 //
 
-timer_t ClAlarm = -1;
+timer_t ClAlarm = -1L;
 
 //
 // Store the number of days per month in non-leap years.
@@ -330,14 +331,12 @@ Return Value:
     struct itimerspec RemainingTime;
     int Result;
 
-    ASSERT(sizeof(ULONG) == sizeof(timer_t));
-
     //
     // If seconds is zero, cancel any existing alarm.
     //
 
     if (Seconds == 0) {
-        Alarm = RtlAtomicExchange32((PULONG)(&ClAlarm), -1);
+        Alarm = RtlAtomicExchange(&ClAlarm, -1);
         if (Alarm != -1) {
             Result = timer_gettime(Alarm, &RemainingTime);
             timer_delete(Alarm);
@@ -354,13 +353,13 @@ Return Value:
     // yet.
     //
 
-    if (ClAlarm == -1) {
+    if (ClAlarm == -1L) {
         Result = timer_create(CLOCK_REALTIME, NULL, &NewAlarm);
         if (Result != 0) {
             return -1;
         }
 
-        Alarm = RtlAtomicCompareExchange32((PULONG)(&ClAlarm), NewAlarm, -1);
+        Alarm = RtlAtomicCompareExchange(&ClAlarm, NewAlarm, -1);
 
         //
         // If this routine lost the compare exchange, delete the newly created
@@ -1302,12 +1301,7 @@ Return Value:
     SYSTEM_TIME SystemTime;
 
     ClpConvertUnixTimeToSystemTime(&SystemTime, *TimeValue);
-    Status = ClpInitializeTimeZoneData();
-    if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return NULL;
-    }
-
+    ClpInitializeTimeZoneData();
     Status = RtlSystemTimeToLocalCalendarTime(&SystemTime, &CalendarTime);
     if (!KSUCCESS(Status)) {
         errno = ClConvertKstatusToErrorNumber(Status);
@@ -1404,12 +1398,7 @@ Return Value:
     SYSTEM_TIME SystemTime;
 
     ClpStructTmToCalendarTime(&CalendarTime, Time);
-    Status = ClpInitializeTimeZoneData();
-    if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return -1;
-    }
-
+    ClpInitializeTimeZoneData();
     Status = RtlLocalCalendarTimeToSystemTime(&CalendarTime, &SystemTime);
     if (!KSUCCESS(Status)) {
         errno = ClConvertKstatusToErrorNumber(Status);
@@ -1514,8 +1503,8 @@ Arguments:
 
 Return Value:
 
-    Returns the number of characters written to the output buffer, including
-    the null terminator.
+    Returns the number of characters written to the output buffer, not
+    including the null terminator.
 
 --*/
 
@@ -1523,20 +1512,10 @@ Return Value:
 
     CALENDAR_TIME CalendarTime;
     UINTN Result;
-    KSTATUS Status;
 
     ClpStructTmToCalendarTime(&CalendarTime, (struct tm *)Time);
-    Status = ClpInitializeTimeZoneData();
-    if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return 0;
-    }
-
+    ClpInitializeTimeZoneData();
     Result = RtlFormatDate(Buffer, BufferSize, (PSTR)Format, &CalendarTime);
-    if (Result != 0) {
-        return Result - 1;
-    }
-
     return Result;
 }
 
@@ -1583,15 +1562,9 @@ Return Value:
 
     CALENDAR_TIME CalendarTime;
     ULONG Result;
-    KSTATUS Status;
 
     ClpStructTmToCalendarTime(&CalendarTime, (struct tm *)Time);
-    Status = ClpInitializeTimeZoneData();
-    if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return 0;
-    }
-
+    ClpInitializeTimeZoneData();
     Result = RtlFormatDateWide(Buffer,
                                BufferSize,
                                (PWSTR)Format,
@@ -1680,14 +1653,8 @@ Return Value:
 
     CALENDAR_TIME CalendarTime;
     PSTR Result;
-    KSTATUS Status;
 
-    Status = ClpInitializeTimeZoneData();
-    if (!KSUCCESS(Status)) {
-        errno = ClConvertKstatusToErrorNumber(Status);
-        return NULL;
-    }
-
+    ClpInitializeTimeZoneData();
     Result = RtlScanDate((PSTR)Buffer, (PSTR)Format, &CalendarTime);
     if (Result == NULL) {
         return NULL;
@@ -1773,9 +1740,7 @@ Return Value:
         OsGetSystemTime(&SystemTime);
         Seconds = ClpConvertSystemTimeToUnixTime(&SystemTime);
         Time->tv_sec = Seconds;
-        Time->tv_usec = (SystemTime.Nanoseconds +
-                         (NANOSECONDS_PER_MICROSECOND / 2)) /
-                        NANOSECONDS_PER_MICROSECOND;
+        Time->tv_usec = SystemTime.Nanoseconds / NANOSECONDS_PER_MICROSECOND;
     }
 
     return 0;
@@ -3155,7 +3120,7 @@ Return Value:
     return;
 }
 
-KSTATUS
+VOID
 ClpInitializeTimeZoneData (
     VOID
     )
@@ -3173,68 +3138,191 @@ Arguments:
 
 Return Value:
 
-    Status code.
+    None.
 
 --*/
 
 {
 
-    PSTR DaylightName;
+    PCSTR DaylightName;
     LONG DaylightOffset;
+    INT Errno;
+    KSTATUS KStatus;
     PVOID OldData;
     ULONG OldDataSize;
-    PSTR StandardName;
+    PCSTR StandardName;
     LONG StandardOffset;
+    struct stat Stat;
     KSTATUS Status;
     PSTR Variable;
     PVOID ZoneData;
-    ULONG ZoneDataSize;
+    UINTN ZoneDataSize;
+    INT ZoneFile;
+    PSTR ZoneName;
+    PSTR ZonePath;
 
+    Errno = errno;
     OldData = NULL;
     ZoneData = NULL;
+    ZoneName = NULL;
+    ZonePath = _PATH_TZ;
     Variable = getenv("TZ");
-    if ((Variable != NULL) &&
-        ((ClPreviousTzVariable == NULL) ||
-         (strcmp(ClPreviousTzVariable, Variable) != 0))) {
+    if (Variable != NULL) {
+        if ((ClPreviousTzVariable == NULL) ||
+            (strcmp(ClPreviousTzVariable, Variable) != 0)) {
+
+            if (ClPreviousTzVariable != NULL) {
+                free(ClPreviousTzVariable);
+            }
+
+            ClPreviousTzVariable = strdup(Variable);
+            if (ClPreviousTzVariable == NULL) {
+                Status = -1;
+                goto InitializeTimeZoneDataEnd;
+            }
+
+            Variable = ClPreviousTzVariable;
+
+            //
+            // If the variable starts with a colon or has a slash and no comma,
+            // then use the OS-specific format (non-POSIX). This specifies
+            // either a path to a timezone file to use (if it starts with a
+            // slash) or a time zone name.
+            //
+
+            if ((*Variable == ':') ||
+                ((strchr(Variable, '/') != NULL) &&
+                 (strchr(Variable, ',') == NULL))) {
+
+                if (*Variable == ':') {
+                    Variable += 1;
+                }
+
+                if (*Variable == '/') {
+                    ZonePath = Variable;
+
+                } else {
+                    ZonePath = _PATH_TZALMANAC;
+                    ZoneName = Variable;
+                }
+
+            } else {
+                Status = ClpCreateCustomTimeZone(Variable,
+                                                 &ZoneData,
+                                                 &ZoneDataSize);
+
+                if (Status != 0) {
+                    goto InitializeTimeZoneDataEnd;
+                }
+            }
+
+        //
+        // Fast path: The TZ variable is set but has not changed.
+        //
+
+        } else {
+            return;
+        }
+
+    //
+    // TZ is not set.
+    //
+
+    } else {
+
+        //
+        // If the zone data has already been loaded, then everything's already
+        // initialized.
+        //
+
+        if (ClTimeZonePath != NULL) {
+            return;
+        }
+
+        //
+        // If it just went from set to unset, clear the variable value.
+        //
 
         if (ClPreviousTzVariable != NULL) {
             free(ClPreviousTzVariable);
+            ClPreviousTzVariable = NULL;
+        }
+    }
+
+    //
+    // If parsing the TZ variable already created a time zone structure, then
+    // just use that. Clear the path.
+    //
+
+    if (ZoneData != NULL) {
+        if (ClTimeZonePath != NULL) {
+            free(ClTimeZonePath);
         }
 
-        ClPreviousTzVariable = strdup(Variable);
-        ClpCreateCustomTimeZone(Variable, &ZoneData, &ZoneDataSize);
+        ClTimeZonePath = NULL;
+
+    //
+    // Load up the new data if needed.
+    //
+
+    } else if ((ClTimeZonePath == NULL) ||
+               (strcmp(ClTimeZonePath, ZonePath) != 0)) {
+
+        ZoneFile = open(ZonePath, O_RDONLY);
+        if (ZoneFile < 0) {
+            goto InitializeTimeZoneDataEnd;
+        }
+
+        if (fstat(ZoneFile, &Stat) != 0) {
+            close(ZoneFile);
+            goto InitializeTimeZoneDataEnd;
+        }
+
+        ZoneDataSize = Stat.st_size;
+        ZoneData = mmap(NULL,
+                        ZoneDataSize,
+                        PROT_READ,
+                        MAP_PRIVATE,
+                        ZoneFile,
+                        0);
+
+        close(ZoneFile);
+        if (ZoneData == MAP_FAILED) {
+            goto InitializeTimeZoneDataEnd;
+        }
+
+        if (ClTimeZonePath != NULL) {
+            free(ClTimeZonePath);
+        }
+
+        ClTimeZonePath = strdup(ZonePath);
     }
 
     //
-    // If nothing was parsed from the variable and it's already initialized,
-    // do nothing.
+    // If the zone data was never loaded, then it's the same as what was
+    // loaded before. Just the name has changed.
     //
-
-    if ((ZoneData == NULL) && (ClTimeZoneDataInitialized != FALSE)) {
-        return STATUS_SUCCESS;
-    }
 
     if (ZoneData == NULL) {
-        Status = OsGetTimeZoneData(FALSE, NULL, &ZoneData, &ZoneDataSize);
-        if (!KSUCCESS(Status)) {
-            return Status;
-        }
+        KStatus = RtlSelectTimeZone(ZoneName, NULL, NULL);
+
+    } else {
+        KStatus = RtlSetTimeZoneData(ZoneData,
+                                    ZoneDataSize,
+                                    ZoneName,
+                                    &OldData,
+                                    &OldDataSize,
+                                    NULL,
+                                    NULL);
     }
 
-    Status = RtlSetTimeZoneData(ZoneData,
-                                ZoneDataSize,
-                                NULL,
-                                &OldData,
-                                &OldDataSize,
-                                NULL,
-                                NULL);
-
-    if (!KSUCCESS(Status)) {
+    if (!KSUCCESS(KStatus)) {
+        Status = -1;
         goto InitializeTimeZoneDataEnd;
     }
 
-    if (OldData != NULL) {
-        OsHeapFree(OldData);
+    if ((OldData != NULL) && (OldData != ZoneData)) {
+        munmap(OldData, OldDataSize);
     }
 
     //
@@ -3246,8 +3334,8 @@ Return Value:
                         &StandardOffset,
                         &DaylightOffset);
 
-    tzname[0] = StandardName;
-    tzname[1] = DaylightName;
+    tzname[0] = (PSTR)StandardName;
+    tzname[1] = (PSTR)DaylightName;
     timezone = -StandardOffset;
     if (StandardOffset != DaylightOffset) {
         daylight = 1;
@@ -3256,17 +3344,17 @@ Return Value:
         daylight = 0;
     }
 
-    ClTimeZoneDataInitialized = TRUE;
-    Status = STATUS_SUCCESS;
+    Status = 0;
 
 InitializeTimeZoneDataEnd:
-    if (!KSUCCESS(Status)) {
+    if (Status != 0) {
         if (ZoneData != NULL) {
-            OsHeapFree(ZoneData);
+            munmap(ZoneData, ZoneDataSize);
         }
     }
 
-    return Status;
+    errno = Errno;
+    return;
 }
 
 INT
@@ -3289,7 +3377,7 @@ Arguments:
         string.
 
     TimeZoneData - Supplies a pointer where the allocated time zone data will
-        be returned on success. The caller is responsible for freeing this
+        be returned on success. The caller is responsible for munmapping this
         data when finished.
 
     TimeZoneDataSize - Supplies a pointer where the size of the time zone data
@@ -3322,14 +3410,26 @@ Return Value:
     StandardOffset = 0;
     Strings = NULL;
     CustomSize = sizeof(CUSTOM_TIME_ZONE);
-    Custom = OsHeapAllocate(CustomSize, C_TIME_ZONE_ALLOCATION_TAG);
-    if (Custom == NULL) {
-        Status = ENOMEM;
+
+    //
+    // Use mmap because that's what's normally used to map the data file, so
+    // munmap is what gets used to free it.
+    //
+
+    Custom = mmap(NULL,
+                  CustomSize,
+                  PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS,
+                  -1,
+                  0);
+
+    if (Custom == MAP_FAILED) {
+        Custom = NULL;
+        Status = errno;
         goto CreateCustomTimeZoneEnd;
     }
 
     Phase += 1;
-    memset(Custom, 0, CustomSize);
     Custom->Header.Magic = TIME_ZONE_HEADER_MAGIC;
     Custom->Header.RuleOffset = FIELD_OFFSET(CUSTOM_TIME_ZONE, StandardRule);
     Custom->Header.RuleCount = 2;
@@ -3487,7 +3587,7 @@ CreateCustomTimeZoneEnd:
 
     if (Status != 0) {
         if (Custom != NULL) {
-            free(Custom);
+            munmap(Custom, CustomSize);
             Custom = NULL;
             CustomSize = 0;
         }

@@ -707,12 +707,12 @@ Return Value:
     PFILE_OBJECT FileObject;
     ULONG FileObjectFlags;
     PKPROCESS KernelProcess;
+    ULONG MapFlags;
     BOOL Match;
     PARTITION_DEVICE_INFORMATION PartitionInformation;
     UINTN PartitionInformationSize;
     PPATH_POINT PathPoint;
     FILE_PROPERTIES Properties;
-    ULONG RootLookupFlags;
     KSTATUS Status;
     PIO_HANDLE SystemDirectoryHandle;
     BOOL SystemVolume;
@@ -762,19 +762,19 @@ Return Value:
     // participating in the file system and there is nothing to do, really.
     //
 
-    Status = IopSendRootLookupRequest(&(Volume->Device),
-                                      &Properties,
-                                      &RootLookupFlags);
+    Status = IopSendLookupRequest(&(Volume->Device),
+                                  NULL,
+                                  NULL,
+                                  0,
+                                  &Properties,
+                                  &FileObjectFlags,
+                                  &MapFlags);
 
     if (!KSUCCESS(Status)) {
         goto VolumeArrivalEnd;
     }
 
     Properties.DeviceId = Volume->Device.DeviceId;
-    FileObjectFlags = 0;
-    if ((RootLookupFlags & LOOKUP_FLAG_NON_CACHED) != 0) {
-        FileObjectFlags |= FILE_OBJECT_FLAG_NON_CACHED;
-    }
 
     //
     // Create or lookup a file object for the volume.
@@ -783,6 +783,7 @@ Return Value:
     Status = IopCreateOrLookupFileObject(&Properties,
                                          &(Volume->Device),
                                          FileObjectFlags,
+                                         MapFlags,
                                          &FileObject,
                                          &Created);
 
@@ -1259,9 +1260,7 @@ Return Value:
                          &Path,
                          &PathSize,
                          OPEN_FLAG_DIRECTORY,
-                         IoObjectInvalid,
                          NULL,
-                         FILE_PERMISSION_NONE,
                          &RootPathPoint);
 
     if (!KSUCCESS(Status)) {

@@ -39,6 +39,12 @@ Environment:
 //
 
 class Core {
+    static function repr(value) {
+        if (value != null) {
+            Core._write(value.__repr() + "\n");
+        }
+    }
+
     static function print(value) {
         Core._write(value.__str() + "\n");
     }
@@ -75,8 +81,15 @@ class List {
 }
 
 class Exception {
+    function __init() {
+        this.args = null;
+        this.stackTrace = null;
+        return this;
+    }
+
     function __init(args) {
         this.args = args;
+        this.stackTrace = null;
         return this;
     }
 
@@ -244,10 +257,17 @@ class String {
     }
 
     function __mod(arguments) {
-        var argumentCount = arguments.length();
+        var argumentCount = 1;
         var argumentIndex = 0;
         var format = this;
         var result = "";
+
+        if (arguments is List) {
+            argumentCount = arguments.length();
+
+        } else {
+            arguments = [arguments];
+        }
 
         while (1) {
             var index = format.indexOf("%");
@@ -353,6 +373,156 @@ class String {
 
         if (argumentIndex != argumentCount) {
             Core.raise(FormatError("Too few arguments for format"));
+        }
+
+        return result;
+    }
+
+    function __lt(right) {
+        return this.compare(right.__str()) < 0;
+    }
+
+    function __le(right) {
+        return this.compare(right.__str()) <= 0;
+    }
+
+    function __ge(right) {
+        return this.compare(right.__str()) >= 0;
+    }
+
+    function __gt(right) {
+        return this.compare(right.__str()) > 0;
+    }
+
+    function join(iterable) {
+        if (iterable is List) {
+            return this.joinList(iterable);
+        }
+
+        var realList = [];
+        for (item in iterable) {
+            realList.append(item);
+        }
+
+        return this.joinList(realList);
+    }
+
+    function template(substitutions, safe) {
+        var character;
+        var bracket;
+        var end;
+        var index;
+        var input = this;
+        var length;
+        var key;
+        var result = "";
+        var start;
+        var value;
+
+        while (1) {
+
+            //
+            // Get a dollar sign. If none is present, add the remainder of the
+            // string to the result and bail.
+            //
+
+            index = input.indexOf("$");
+            if (index == -1) {
+                result += input;
+                break;
+            }
+
+            result += input[0..index];
+            bracket = false;
+            start = index;
+            index += 1;
+
+            //
+            // $$ translates to a literal $.
+            //
+
+            character = input[index];
+            if (character == "$") {
+                result += "$";
+                index += 1;
+                input = input[index...-1];
+                continue;
+
+            //
+            // Remember and advance past an opening {.
+            //
+
+            } else if (character == "{") {
+                index += 1;
+                bracket = true;
+            }
+
+            //
+            // Advance past the name, which can be A-Z, a-z, 0-9, and _.
+            //
+
+            end = index;
+            length = input.length();
+            while (end < length) {
+                character = input[end];
+                if (((character >= "A") && (character <= "Z")) ||
+                    ((character >= "a") && (character <= "z")) ||
+                    ((character >= "0") && (character <= "9")) ||
+                    (character == "_")) {
+
+                    end += 1;
+
+                } else {
+                    break;
+                }
+            }
+
+            //
+            // Fail an empty variable name.
+            //
+
+            key = input[index..end];
+            if (key == "") {
+                Core.raise(ValueError(
+                       "Invalid template expression at character %d" % start));
+            }
+
+            //
+            // Check for a closing bracket if there was an opening one.
+            //
+
+            if (bracket) {
+                if ((end >= input.length()) ||
+                    (input[end] != "}")) {
+
+                    Core.raise(ValueError(
+                        "Expected '}' for template expression at character %d" %
+                        start));
+                }
+
+                end += 1;
+            }
+
+            //
+            // In safe mode, if the key doesn't exist, just pass the
+            // substitution along to the output. In non-safe mode, raise a
+            // KeyError.
+            //
+
+            if (safe) {
+                try {
+                    value = substitutions[key].__str();
+
+                } except KeyError {
+                    value = input[start..end];
+                }
+
+            } else {
+                value = substitutions[key].__str();
+            }
+
+            result += value;
+            input = input[end...-1];
         }
 
         return result;

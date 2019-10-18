@@ -1477,6 +1477,8 @@ Return Value:
 
     EFI_DEVICE_ERROR if there was a hardware error accessing the device.
 
+    EFI_UNSUPPORTED if the wakeup timer is not supported on this platform.
+
 --*/
 
 typedef
@@ -1502,6 +1504,8 @@ Return Value:
     EFI_INVALID_PARAMETER if a time field is out of range.
 
     EFI_DEVICE_ERROR if there was a hardware error accessing the device.
+
+    EFI_UNSUPPORTED if the wakeup timer is not supported on this platform.
 
 --*/
 
@@ -3217,12 +3221,16 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct {
     EFI_BOOT_KEY_DATA KeyData;
     UINT32 BootOptionCrc;
     UINT16 BootOption;
     //EFI_INPUT_KEY Keys[];
 } PACKED EFI_KEY_OPTION;
+
+#pragma pack(pop)
 
 //
 // -------------------------------------------------------------------- Globals

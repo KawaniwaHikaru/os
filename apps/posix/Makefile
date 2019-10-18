@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2015 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -23,6 +28,8 @@
 include $(SRCROOT)/os/minoca.mk
 
 BINFILES=$(BINROOT)/skel/usr/sbin/update-rc.d       \
+         $(BINROOT)/skel/var/run/utmp               \
+         $(BINROOT)/skel/var/log/wtmp               \
          $(BINROOT)/skel/etc/passwd                 \
          $(BINROOT)/skel/etc/group                  \
          $(BINROOT)/skel/etc/shadow                 \
@@ -30,6 +37,7 @@ BINFILES=$(BINROOT)/skel/usr/sbin/update-rc.d       \
          $(BINROOT)/skel/etc/issue                  \
          $(BINROOT)/skel/etc/init.d/rc              \
          $(BINROOT)/skel/etc/init.d/init-functions  \
+         $(BINROOT)/skel/etc/init.d/hostname.sh     \
 
 BINDIRS=$(BINROOT)/skel/etc/init.d      \
         $(BINROOT)/skel/var/run         \
@@ -77,4 +85,12 @@ $(BINROOT)/skel/etc/init.d/rc: init.d/rc
 $(BINROOT)/skel/etc/init.d/init-functions: init.d/init-functions
 	cp $^ $@
 	chmod 0755 $@
+
+$(BINROOT)/skel/etc/init.d/hostname.sh: init.d/hostname.sh $(BINROOT)/skel/usr/sbin/update-rc.d
+	cp $< $@
+	chmod 0755 $@
+	SYSROOT=$(BINROOT)/skel sh $(BINROOT)/skel/usr/sbin/update-rc.d -f hostname.sh defaults 10
+
+$(BINROOT)/skel/var/run/utmp $(BINROOT)/skel/var/log/wtmp:
+	touch $@
 

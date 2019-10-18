@@ -1,5 +1,10 @@
 #! /bin/sh
-## Copyright (c) 2015 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2015 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -54,11 +59,9 @@ case "$1" in
                 mkdir "$AUTO_ROOT/"
             fi
 
-            if ! [ -r "$AUTO_ROOT/auto_root" ]; then
-                log_daemon_msg "Copying Minoca Build client files" || true
-                cp -Rpv /auto/* "$AUTO_ROOT/"
-                log_end_msg 0 || true
-            fi
+            log_daemon_msg "Copying Minoca Build client files" || true
+            cp -Rp /auto/* "$AUTO_ROOT/"
+            log_end_msg 0 || true
         fi
 
         ##
@@ -66,8 +69,9 @@ case "$1" in
         ##
 
         log_daemon_msg "Running Minoca Build client" || true
-        if start-stop-daemon -S -p /var/run/mbuild.pid -d "$AUTO_ROOT" -bqom \
-            -x /usr/bin/python -- $ARGS ; then
+        if start-stop-daemon -S -p /var/run/mbuild.pid -d "$AUTO_ROOT" -bqomC \
+            -x /usr/bin/python -- $ARGS \
+            >>/var/log/autoclient.log 2>&1; then
 
             log_end_msg 0 || true
 
@@ -79,8 +83,7 @@ case "$1" in
 
     stop)
         log_daemon_msg "Stopping Minoca Build client" || true
-        if start-stop-daemon -K -p /var/run/mbuild.pid -qo -n python \
-            -x /usr/bin/python; then
+        if start-stop-daemon -K -p /var/run/mbuild.pid -qo -n python; then
 
             log_end_msg 0 || true
 
@@ -90,17 +93,8 @@ case "$1" in
         ;;
 
     reload|force-reload|restart)
-        log_daemon_msg "Restarting Minoca Build client"
-        start-stop-daemon -K -p /var/run/mbuild.pid -qo -n python
-        sleep 2
-        if start-stop-daemon -S -p /var/run/mbuild.pid -d /auto -bqom \
-            -x /usr/bin/python -- $ARGS ; then
-
-            log_end_msg 0 || true
-
-        else
-            log_end_msg 1 || true
-        fi
+        $0 stop
+        $0 start
         ;;
 
     *)

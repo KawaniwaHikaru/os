@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2014 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2014 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -50,7 +55,7 @@ OBJS += clock.o                 \
 
 ARMV7_OBJS = armv7/entry.o  \
 
-TEXT_ADDRESS = 0x82000000
+TEXT_ADDRESS := 0x82000000
 
 TARGETLIBS += $(OBJROOT)/os/uefi/dev/sd/core/sd.a            \
               $(OBJROOT)/os/uefi/dev/omapuart/omapuart.a     \

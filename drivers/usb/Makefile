@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -28,11 +33,13 @@ USB_HOST_CONTROLLERS = am3usb  \
                        uhci    \
 
 USB_CLASS_DRIVERS = usbcomp    \
+                    usbhid     \
                     usbhub     \
                     usbmass    \
 
 USB_DEVICE_DRIVERS = onering   \
                      usbkbd    \
+                     usbmouse  \
 
 DIRS = usbcore                 \
        $(USB_CLASS_DRIVERS)    \
@@ -42,4 +49,6 @@ DIRS = usbcore                 \
 include $(SRCROOT)/os/minoca.mk
 
 $(USB_HOST_CONTROLLERS) $(USB_CLASS_DRIVERS) $(USB_DEVICE_DRIVERS): usbcore
+
+usbmouse: usbhid
 

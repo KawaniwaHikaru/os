@@ -336,21 +336,81 @@ Return Value:
 
 {
 
+    PULONG BooleanOption;
+    ULONG Capabilities;
+    ULONG Capability;
+    PATL1C_DEVICE Device;
     PULONG Flags;
     KSTATUS Status;
 
+    Status = STATUS_SUCCESS;
+    Device = (PATL1C_DEVICE)DeviceContext;
     switch (InformationType) {
     case NetLinkInformationChecksumOffload:
         if (*DataSize != sizeof(ULONG)) {
-            return STATUS_INVALID_PARAMETER;
+            Status = STATUS_INVALID_PARAMETER;
+            break;
         }
 
         if (Set != FALSE) {
-            return STATUS_NOT_SUPPORTED;
+            Status = STATUS_NOT_SUPPORTED;
+            break;
         }
 
         Flags = (PULONG)Data;
-        *Flags = 0;
+        *Flags = Device->EnabledCapabilities &
+                 NET_LINK_CAPABILITY_CHECKSUM_MASK;
+
+        break;
+
+    case NetLinkInformationMulticastAll:
+    case NetLinkInformationPromiscuousMode:
+        if (*DataSize != sizeof(ULONG)) {
+            Status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        Capability = NET_LINK_CAPABILITY_PROMISCUOUS_MODE;
+        if (InformationType == NetLinkInformationMulticastAll) {
+            Capability = NET_LINK_CAPABILITY_MULTICAST_ALL;
+        }
+
+        BooleanOption = (PULONG)Data;
+        if (Set == FALSE) {
+            if ((Device->EnabledCapabilities & Capability) != 0) {
+                *BooleanOption = TRUE;
+
+            } else {
+                *BooleanOption = FALSE;
+            }
+
+            break;
+        }
+
+        //
+        // Fail if the capability is not supported.
+        //
+
+        if ((Device->SupportedCapabilities & Capability) == 0) {
+            Status = STATUS_NOT_SUPPORTED;
+            break;
+        }
+
+        KeAcquireQueuedLock(Device->ConfigurationLock);
+        Capabilities = Device->EnabledCapabilities;
+        if (*BooleanOption != FALSE) {
+            Capabilities |= Capability;
+
+        } else {
+            Capabilities &= ~Capability;
+        }
+
+        if ((Capabilities ^ Device->EnabledCapabilities) != 0) {
+            Device->EnabledCapabilities = Capabilities;
+            AtlpSetupReceiveFilters(Device);
+        }
+
+        KeReleaseQueuedLock(Device->ConfigurationLock);
         break;
 
     default:
@@ -409,6 +469,12 @@ Return Value:
 
     Device->ReceiveLock = KeCreateQueuedLock();
     if (Device->ReceiveLock == NULL) {
+        Status = STATUS_INSUFFICIENT_RESOURCES;
+        goto InitializeDeviceStructuresEnd;
+    }
+
+    Device->ConfigurationLock = KeCreateQueuedLock();
+    if (Device->ConfigurationLock == NULL) {
         Status = STATUS_INSUFFICIENT_RESOURCES;
         goto InitializeDeviceStructuresEnd;
     }
@@ -493,6 +559,15 @@ Return Value:
     Device->ReceiveNextToClean = 0;
     Device->TransmitNextToClean = 0;
     Device->TransmitNextToUse = 0;
+
+    //
+    // Promiscuous and multicast all modes are always supported, but start
+    // disabled.
+    //
+
+    Device->SupportedCapabilities = NET_LINK_CAPABILITY_PROMISCUOUS_MODE |
+                                    NET_LINK_CAPABILITY_MULTICAST_ALL;
+
     Status = STATUS_SUCCESS;
 
 InitializeDeviceStructuresEnd:
@@ -503,6 +578,21 @@ InitializeDeviceStructuresEnd:
             Device->TransmitBuffer = NULL;
             Device->ReceiveSlot = NULL;
             Device->ReceivedPacket = NULL;
+        }
+
+        if (Device->TransmitLock != NULL) {
+            KeDestroyQueuedLock(Device->TransmitLock);
+            Device->TransmitLock = NULL;
+        }
+
+        if (Device->ReceiveLock != NULL) {
+            KeDestroyQueuedLock(Device->ReceiveLock);
+            Device->ReceiveLock = NULL;
+        }
+
+        if (Device->ConfigurationLock != NULL) {
+            KeDestroyQueuedLock(Device->ConfigurationLock);
+            Device->ConfigurationLock = NULL;
         }
     }
 
@@ -815,6 +905,7 @@ Return Value:
     // the link is determined to be established.
     //
 
+    KeAcquireQueuedLock(Device->ConfigurationLock);
     Value = ATL_MAC_CONTROL_ADD_CRC | ATL_MAC_CONTROL_PAD |
             ATL_MAC_CONTROL_DUPLEX |
            ((ATL_PREAMBLE_LENGTH &
@@ -824,6 +915,7 @@ Return Value:
 
     ATL_WRITE_REGISTER32(Device, AtlRegisterMacControl, Value);
     AtlpSetupReceiveFilters(Device);
+    KeReleaseQueuedLock(Device->ConfigurationLock);
 
     //
     // Disable hardware stripping of the VLAN tag. If VLAN support is added,
@@ -1246,7 +1338,7 @@ Return Value:
         //
 
         if ((ReceivedPacket->FlagsAndLength &
-             ATL_RECIEVED_PACKET_FLAG_VALID) == 0) {
+             ATL_RECEIVED_PACKET_FLAG_VALID) == 0) {
 
             break;
         }
@@ -1294,7 +1386,7 @@ Return Value:
         //
 
         FramesProcessed += 1;
-        ReceivedPacket->FlagsAndLength &= ~ATL_RECIEVED_PACKET_FLAG_VALID;
+        ReceivedPacket->FlagsAndLength &= ~ATL_RECEIVED_PACKET_FLAG_VALID;
         Device->ReceiveNextToClean += 1;
         if (Device->ReceiveNextToClean == ATL1C_RECEIVE_FRAME_COUNT) {
             Device->ReceiveNextToClean = 0;
@@ -1802,11 +1894,24 @@ Return Value:
 
     ULONG Value;
 
+    ASSERT(KeIsQueuedLockHeld(Device->ConfigurationLock) != FALSE);
+
     Value = ATL_READ_REGISTER32(Device, AtlRegisterMacControl);
     Value &= ~(ATL_MAC_CONTROL_ALL_MULTICAST_ENABLE |
                ATL_MAC_CONTROL_PROMISCUOUS_MODE_ENABLE);
 
     Value |= ATL_MAC_CONTROL_BROADCAST_ENABLED;
+    if ((Device->EnabledCapabilities &
+         NET_LINK_CAPABILITY_PROMISCUOUS_MODE) != 0) {
+
+        Value |= ATL_MAC_CONTROL_PROMISCUOUS_MODE_ENABLE;
+    }
+
+    if ((Device->EnabledCapabilities &
+         NET_LINK_CAPABILITY_MULTICAST_ALL) != 0) {
+
+        Value |= ATL_MAC_CONTROL_ALL_MULTICAST_ENABLE;
+    }
 
     //
     // If there were multiple addresses to receive, this would be the place

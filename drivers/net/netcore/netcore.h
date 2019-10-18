@@ -77,13 +77,6 @@ extern LIST_ENTRY NetDataLinkList;
 extern PSHARED_EXCLUSIVE_LOCK NetPluginListLock;
 
 //
-// Define the list of raw sockets. These do not get put in the socket trees.
-//
-
-extern LIST_ENTRY NetRawSocketsList;
-extern PSHARED_EXCLUSIVE_LOCK NetRawSocketsLock;
-
-//
 // -------------------------------------------------------- Function Prototypes
 //
 
@@ -343,6 +336,48 @@ Return Value:
 --*/
 
 VOID
+NetpIgmpInitialize (
+    VOID
+    );
+
+/*++
+
+Routine Description:
+
+    This routine initializes support for the IGMP protocol.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    None.
+
+--*/
+
+VOID
+NetpIcmp6Initialize (
+    VOID
+    );
+
+/*++
+
+Routine Description:
+
+    This routine initializes support for the ICMPv6 protocol.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    None.
+
+--*/
+
+VOID
 NetpNetlinkGenericInitialize (
     ULONG Phase
     );
@@ -380,6 +415,27 @@ NetpIp4Initialize (
 Routine Description:
 
     This routine initializes support for IPv4 packets.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    None.
+
+--*/
+
+VOID
+NetpIp6Initialize (
+    VOID
+    );
+
+/*++
+
+Routine Description:
+
+    This routine initializes support for IPv6 packets.
 
 Arguments:
 

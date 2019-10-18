@@ -27,15 +27,27 @@ Environment:
 
 --*/
 
+from menv import driver;
+
 function build() {
-    name = "netcore";
+    var drv;
+    var entries;
+    var name = "netcore";
+    var sources;
+
     sources = [
         "addr.c",
-        "arp.c",
         "buf.c",
-        "dhcp.c",
         "ethernet.c",
-        "ip4.c",
+        "ipv4/arp.c",
+        "ipv4/dhcp.c",
+        "ipv4/igmp.c",
+        "ipv4/ip4.c",
+        "ipv6/icmp6.c",
+        "ipv6/ip6.c",
+        "ipv6/mld.c",
+        "ipv6/ndp.c",
+        "mcast.c",
         "netcore.c",
         "netlink/netlink.c",
         "netlink/genctrl.c",
@@ -55,4 +67,3 @@ function build() {
     return entries;
 }
 
-return build();

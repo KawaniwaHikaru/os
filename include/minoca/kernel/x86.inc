@@ -1,6 +1,11 @@
 /*++
 
-Copyright (c) 2012 Minoca Corp. All Rights Reserved
+Copyright (c) 2012 Minoca Corp.
+
+    This file is licensed under the terms of the GNU General Public License
+    version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details. See the LICENSE file at the root of this
+    project for complete licensing information.
 
 Module Name:
 
@@ -20,61 +25,22 @@ Environment:
 
 --*/
 
-##
-## --------------------------------------------------------------- Definitions
-##
+//
+// ------------------------------------------------------------------ Includes
+//
 
-##
-## Processor flags
-##
+#include <minoca/kernel/x86defs.h>
 
-#define IA32_EFLAG_TF        0x00000100
-#define IA32_EFLAG_IF        0x00000200
-#define IA32_EFLAG_IOPL_MASK 0x00003000
-#define IA32_EFLAG_VM        0x00020000
-#define IA32_EFLAG_VIF       0x00080000
+//
+// --------------------------------------------------------------- Definitions
+//
 
-#define SEGMENT_PRIVILEGE_MASK 0x0003
-
-##
-## CR0 flags
-##
-
-#define CR0_PAGING_ENABLE        0x80000000
-#define CR0_CACHE_DISABLE        0x40000000
-#define CR0_NOT_WRITE_THROUGH    0x20000000
-#define CR0_WRITE_PROTECT_ENABLE 0x00010000
-#define CR0_X87_EXCEPTIONS       0x00000020
-#define CR0_TASK_SWITCHED        0x00000008
-#define CR0_EMULATE_FPU          0x00000004
-#define CR0_MONITOR_COPROCESSOR  0x00000002
-#define CR0_PROTECTED_MODE       0x00000001
-
-#define CR0_OR_MASK 0x8001002B
-#define CR0_AND_MASK ~(0x60000004)
-
-##
-## Basic constants.
-##
+//
+// Basic constants.
+//
 
 #define FALSE 0
 #define TRUE 1
-#define NULL 0
-
-##
-## Kernel constants.
-##
-
-#define KERNEL_CS        0x08
-#define KERNEL_DS        0x10
-#define USER_CS          (0x18 | 3)
-#define USER_DS          (0x20 | 3)
-#define GDT_PROCESSOR    0x28
-#define GDT_THREAD       (0x30 | 3)
-#define KERNEL_TSS       0x38
-#define DOUBLE_FAULT_TSS 0x40
-#define NMI_TSS          0x48
-#define GDT_ENTRIES      10
 
 #define EXCEPTION_NMI               0x02
 #define EXCEPTION_BREAK             0x03
@@ -85,24 +51,23 @@ Environment:
 
 #define CONTEXT_SWAP_MAGIC 0x5A4A3A2A
 
-##
-## Relevant TSS structure definitions.
-##
+//
+// Relevant TSS structure definitions.
+//
 
 #define TSS_ESP0  0x04
 
-##
-## Processor block offsets.
-##
+//
+// Processor block offsets.
+//
 
 #define PROCESSOR_BLOCK_TSS 0x0C
 #define PROCESSOR_BLOCK_GDT 0x10
-#define PROCESSOR_BLOCK_RUNNING_THREAD 0x14
 
-##
-## Definition for the TRAP_FRAME structure and the exception stack directly
-## above it.
-##
+//
+// Definition for the TRAP_FRAME structure and the exception stack directly
+// above it.
+//
 
 #define TRAP_DS             0
 #define TRAP_ES             4
@@ -137,46 +102,35 @@ Environment:
 #define PROCESSOR_CONTEXT_SIZE 0x60
 #define SIGNAL_CONTEXT_SIZE 32
 
-##
-## Thread structure offsets.
-##
-
-#define THREAD_SIGNAL_PENDING 84
-
-##
-## Define the thread signal pending state options.
-##
-
-#define ThreadSignalPending 2
-
-##
-## Define the minimum and maximum external interrupt vectors.
-##
+//
+// Define the minimum and maximum external interrupt vectors.
+//
 
 #define MINIMUM_VECTOR 0x30
 #define MAXIMUM_VECTOR 0xFF
 
-##
-## APIC End Of Interrupt Offset.
-##
+//
+// APIC End Of Interrupt Offset.
+//
 
 #define APIC_EOI_OFFSET    0xB
 
-##
-## Define the system call number for resuming after a signal.
-##
+//
+// Define the system call number for resuming after a signal.
+//
 
 #define SystemCallRestoreContext 1
 #define SIGNAL_PARAMETERS_SIZE 24
+#define SIGNAL_CONTEXT_SIZE 32
 
-##
-## -------------------------------------------------------------------- Macros
-##
+//
+// -------------------------------------------------------------------- Macros
+//
 
-##
-## This macro switches the DS and ES data segments to the kernel's data
-## segments.
-##
+//
+// This macro switches the DS and ES data segments to the kernel's data
+// segments.
+//
 
 .macro LoadKernelDataSegments
     movw    $KERNEL_DS, %ax         # Get the data segment selector,
@@ -186,7 +140,7 @@ Environment:
     mov     %ax, %fs                # Load it.
 .endm
 
-#if defined(__WINNT__)
+#if defined(__WINNT__) || defined(__CYGWIN__)
 
 #define FUNCTION(_Name) \
     _Name: \
@@ -201,31 +155,33 @@ Environment:
 
 #elif defined(__ELF__)
 
-##
-## This macro defines a function, callable from C code in any module and
-## capable of being overridden by other functions.
-##
+//
+// This macro defines a function, callable from C code in any module and
+// capable of being overridden by other functions.
+//
 
 #define EXPORTED_FUNCTION(_Name) \
     .func _Name ; \
     .type _Name, %function ; \
     .cfi_startproc ; \
+    .cfi_def_cfa %esp, 4 ; \
+    .cfi_offset %eip, -4 ; \
     .global _Name ; \
     _Name:
 
-##
-## This macro defines a function, callable from C code in the current module
-## only.
-##
+//
+// This macro defines a function, callable from C code in the current module
+// only.
+//
 
 #define FUNCTION(_Name) \
     .hidden _Name ; \
     EXPORTED_FUNCTION(_Name)
 
-##
-## This macro defines a function, callable from C code in any module but always
-## called locally in the current module.
-##
+//
+// This macro defines a function, callable from C code in any module but always
+// called locally in the current module.
+//
 
 #define PROTECTED_FUNCTION(_Name) \
     .protected _Name ; \
@@ -248,4 +204,50 @@ Environment:
 #define END_FUNCTION(_Name)
 
 #endif
+
+//
+// This macro sets the call frame information so that the debugger can unwind
+// a trap frame. It assumes the CFA register is esp, and sets the CFA to the
+// base of the trap frame just to make things easier.
+//
+
+#define CFI_TRAP_FRAME_PUSHED           \
+    .cfi_def_cfa_offset 0 ;             \
+    .cfi_offset %eax, TRAP_EAX ;        \
+    .cfi_offset %ebx, TRAP_EBX ;        \
+    .cfi_offset %ecx, TRAP_ECX ;        \
+    .cfi_offset %edx, TRAP_EDX ;        \
+    .cfi_offset %esi, TRAP_ESI ;        \
+    .cfi_offset %edi, TRAP_EDI ;        \
+    .cfi_offset %ebp, TRAP_EBP ;        \
+    .cfi_offset %eip, TRAP_EIP ;        \
+    .cfi_offset %esp, TRAP_ESP ;        \
+    .cfi_offset %eflags, TRAP_EFLAGS
+
+//
+// This macro sets the call frame information just after a trap frame was
+// restored. It indicates to the debugger that most registers are now in their
+// proper place. It assumes the CFA register is esp+0.
+//
+
+#define CFI_TRAP_FRAME_POPPED \
+    .cfi_same_value %eax ; \
+    .cfi_same_value %ebx ; \
+    .cfi_same_value %ecx ; \
+    .cfi_same_value %edx ; \
+    .cfi_same_value %esi ; \
+    .cfi_same_value %edi ; \
+    .cfi_same_value %ebp ; \
+    .cfi_offset %eip, 4
+
+//
+// Define .cfi directives, macroed so they can be excised if unneeded.
+//
+
+#define CFI_DEF_CFA(_Register, _Offset) .cfi_def_cfa _Register, _Offset
+#define CFI_DEF_CFA_OFFSET(_Offset) .cfi_def_cfa_offset _Offset
+#define CFI_ADJUST_CFA_OFFSET(_Amount) .cfi_adjust_cfa_offset _Amount
+#define CFI_OFFSET(_Register, _Offset) .cfi_offset _Register, _Offset
+#define CFI_UNDEFINED(_Register) .cfi_undefined _Register
+#define CFI_SAME_VALUE(_Register) .cfi_same_value _Register
 

@@ -299,7 +299,7 @@ Return Value:
         // Create the physical address lock.
         //
 
-        MmPhysicalPageLock = KeCreateQueuedLock();
+        MmPhysicalPageLock = KeCreateSharedExclusiveLock();
         if (MmPhysicalPageLock == NULL) {
             Status = STATUS_INSUFFICIENT_RESOURCES;
             goto InitializeEnd;
@@ -410,7 +410,7 @@ Return Value:
 
     VaRequest.Address = NULL;
     VaRequest.Alignment = PageSize;
-    VaRequest.Size = PageSize;
+    VaRequest.Size = SWAP_VA_PAGES * PageSize;
     VaRequest.Min = 0;
     VaRequest.Max = MAX_ADDRESS;
     VaRequest.MemoryType = MemoryTypeReserved;
@@ -465,8 +465,8 @@ Return Value:
     if (StartBlock->SwapPage != NULL) {
         PageSize = MmPageSize();
         MmpFreeAccountingRange(NULL,
-                               StartBlock->SwapPage - PageSize,
-                               3 * PageSize,
+                               StartBlock->SwapPage,
+                               SWAP_VA_PAGES * PageSize,
                                FALSE,
                                0);
 
@@ -507,7 +507,7 @@ Return Value:
 
     PMEMORY_DESCRIPTOR CurrentDescriptor;
     ULONG DescriptorIndex;
-    ULONG PageCount;
+    ULONGLONG PageCount;
     ULONG PageShift;
     PHYSICAL_ADDRESS PhysicalAddress;
     ULONG PhysicalDescriptorCount;
@@ -639,10 +639,15 @@ Return Value:
         CurrentDescriptor = &(PhysicalDescriptors[DescriptorIndex]);
         PhysicalAddress = CurrentDescriptor->BaseAddress;
         PageCount = CurrentDescriptor->Size >> PageShift;
+        while (PageCount > MAX_UINTN) {
+            MmFreePhysicalPages(PhysicalAddress, MAX_UINTN);
+            PhysicalAddress += MAX_UINTN << PageShift;
+            PageCount -= MAX_UINTN;
+        }
 
-        ASSERT((PageCount << PageShift) == CurrentDescriptor->Size);
-
-        MmFreePhysicalPages(PhysicalAddress, PageCount);
+        if (PageCount != 0) {
+            MmFreePhysicalPages(PhysicalAddress, PageCount);
+        }
     }
 
     Status = STATUS_SUCCESS;

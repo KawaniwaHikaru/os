@@ -35,6 +35,7 @@ Environment:
 #include <errno.h>
 #include <glob.h>
 #include <pwd.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/param.h>
 #include <unistd.h>
@@ -68,7 +69,6 @@ Environment:
 
 #define GLOB_META_QUOTE 0x80
 #define GLOB_META_PROTECT 0x40
-#define GLOB_META_MASK 0xFF
 #define GLOB_META_CHARACTER_MASK 0x7F
 
 #define GLOB_META_ALL GLOB_MAKE_META('*')
@@ -798,7 +798,7 @@ Return Value:
             //
 
             if ((CurrentBuffer == PatternBuffer) ||
-                ((UCHAR)*(CurrentBuffer - 1) != GLOB_META_ALL)) {
+                (*(CurrentBuffer - 1) != GLOB_META_ALL)) {
 
                 *CurrentBuffer = GLOB_META_ALL;
                 CurrentBuffer += 1;
@@ -1252,7 +1252,7 @@ Return Value:
     while (Pattern < PatternEnd) {
         PatternCharacter = *Pattern;
         Pattern += 1;
-        switch (PatternCharacter & GLOB_META_MASK) {
+        switch (PatternCharacter) {
         case GLOB_META_ALL:
             if (Pattern == PatternEnd) {
                 return TRUE;
@@ -1289,7 +1289,7 @@ Return Value:
             }
 
             Negated = FALSE;
-            if ((*Pattern & GLOB_META_MASK) == GLOB_META_NOT) {
+            if (*Pattern == GLOB_META_NOT) {
                 Negated = TRUE;
                 Pattern += 1;
             }
@@ -1297,11 +1297,11 @@ Return Value:
             while (TRUE) {
                 PatternCharacter = *Pattern;
                 Pattern += 1;
-                if ((PatternCharacter & GLOB_META_MASK) == GLOB_META_END) {
+                if (PatternCharacter == GLOB_META_END) {
                     break;
                 }
 
-                if ((*Pattern & GLOB_META_MASK) == GLOB_META_RANGE) {
+                if (*Pattern == GLOB_META_RANGE) {
                     if ((GLOB_CHARACTER(NameCharacter) >=
                          GLOB_CHARACTER(PatternCharacter)) &&
                         (GLOB_CHARACTER(NameCharacter) <=

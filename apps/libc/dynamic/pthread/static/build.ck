@@ -26,23 +26,30 @@ Environment:
 
 --*/
 
+from menv import staticLibrary;
+
 function build() {
+    var entries;
+    var includes;
+    var lib;
+    var sources;
+
     sources = [
         "ptatfork.c",
     ];
 
     includes = [
-        "$//apps/libc/include"
+        "$S/apps/libc/include"
     ];
 
     lib = {
         "label": "libpthread_nonshared",
         "inputs": sources,
         "includes": includes,
+        "binplace": "bin",
     };
 
-    entries = static_library(lib);
+    entries = staticLibrary(lib);
     return entries;
 }
 
-return build();

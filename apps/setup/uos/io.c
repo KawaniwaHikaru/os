@@ -39,10 +39,23 @@ Environment:
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+
+#include <sys/disk.h>
+
+#endif
+
+#if defined(__linux__)
+
+#include <sys/mount.h>
+
+#endif
 
 #include "../setup.h"
 
@@ -57,6 +70,12 @@ Environment:
 //
 // ----------------------------------------------- Internal Function Prototypes
 //
+
+INT
+SetupOsGetBlockDeviceSize (
+    INT Descriptor,
+    PULONGLONG Size
+    );
 
 //
 // -------------------------------------------------------------------- Globals
@@ -149,7 +168,21 @@ Return Value:
 
 {
 
-    return symlink(LinkTarget, Path);
+    INT Result;
+
+    //
+    // Create the symlink. If it already exists, attempt to unlink that file
+    // and create a new one.
+    //
+
+    Result = symlink(LinkTarget, Path);
+    if ((Result < 0) && (errno == EEXIST)) {
+        if (unlink(LinkTarget) == 0) {
+            Result = symlink(LinkTarget, Path);
+        }
+    }
+
+    return Result;
 }
 
 PVOID
@@ -415,7 +448,15 @@ Return Value:
     }
 
     if (FileSize != NULL) {
-        *FileSize = Stat.st_size;
+        if (S_ISBLK(Stat.st_mode)) {
+            Result = SetupOsGetBlockDeviceSize((INTN)Handle, FileSize);
+            if (Result != 0) {
+                return Result;
+            }
+
+        } else {
+            *FileSize = Stat.st_size;
+        }
     }
 
     if (ModificationDate != NULL) {
@@ -739,4 +780,82 @@ Return Value:
 //
 // --------------------------------------------------------- Internal Functions
 //
+
+INT
+SetupOsGetBlockDeviceSize (
+    INT Descriptor,
+    PULONGLONG Size
+    )
+
+/*++
+
+Routine Description:
+
+    This routine gets the size of the open block device size.
+
+Arguments:
+
+    Descriptor - Supplies the open file descriptor.
+
+    Size - Supplies a pointer where the block device size will be returned on
+        success.
+
+Return Value:
+
+    0 on success.
+
+    Non-zero on failure.
+
+--*/
+
+{
+
+    //
+    // The IOCTL for Apple devices.
+    //
+
+#ifdef DKIOCGETBLOCKCOUNT
+
+    if (ioctl(Descriptor, DKIOCGETBLOCKCOUNT, Size) >= 0) {
+        *Size *= 512;
+        return 0;
+    }
+
+#endif
+
+    //
+    // The IOCTLs for Linux devices.
+    //
+
+#ifdef BLKGETSIZE64
+
+    if (ioctl(Descriptor, BLKGETSIZE64, Size) >= 0) {
+        return 0;
+    }
+
+#endif
+
+#ifdef BLKGETSIZE
+
+    if (ioctl(Descriptor, BLKGETSIZE, Size) >= 0) {
+        *Size *= 512;
+        return 0;
+    }
+
+#endif
+
+    //
+    // The IOCTL for FreeBSD.
+    //
+
+#ifdef DIOCGMEDIASIZE
+
+    if (ioctl(Descriptor, DIOCGMEDIASIZE, Size) >= 0) {
+        return 0;
+    }
+
+#endif
+
+    return ENOSYS;
+}
 

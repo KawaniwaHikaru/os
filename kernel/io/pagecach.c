@@ -105,6 +105,26 @@ Environment:
 #define PAGE_CACHE_ENTRY_FLAG_MAPPED 0x00000008
 
 //
+// Set this flag if the page cache entry was ever marked dirty.
+//
+
+#define PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY 0x00000010
+
+//
+// Set this flag if the page cache entry belongs to a file object that does not
+// preserve the data to a backing image unless a hard flush is performed.
+//
+
+#define PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUIRED 0x00000020
+
+//
+// Set this flag to indicate that a hard flush is requested on the next attempt
+// to flush the page cache entry.
+//
+
+#define PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUESTED 0x00000040
+
+//
 // If any of the dirty mask bits are set, then the page cache entry needs to
 // be cleaned and flushed.
 //
@@ -176,11 +196,35 @@ Environment:
 // --------------------------------------------------------------------- Macros
 //
 
+//
+// This macro determines whether or not a page cache entry belogning to a file
+// object of the given type can be linked to another page cache entry.
+//
+
 #define IS_IO_OBJECT_TYPE_LINKABLE(_IoObjectType)     \
     ((_IoObjectType == IoObjectRegularFile) ||        \
      (_IoObjectType == IoObjectSymbolicLink) ||       \
      (_IoObjectType == IoObjectSharedMemoryObject) || \
      (_IoObjectType == IoObjectBlockDevice))
+
+//
+// This macro determines whether or not a hard flush is required based on the
+// given page cache entry flags.
+//
+
+#define IS_HARD_FLUSH_REQUIRED(_CacheFlags)                                \
+    ((((_CacheFlags) & PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUIRED) != 0) && \
+     (((_CacheFlags) & PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY) != 0))
+
+//
+// This macro determines whether or not a hard flush is requested in the given
+// set of page cache entry flags.
+//
+
+#define IS_HARD_FLUSH_REQUESTED(_CacheFlags)                                \
+    ((((_CacheFlags) & PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUIRED) != 0) &&  \
+     (((_CacheFlags) & PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUESTED) != 0) && \
+     (((_CacheFlags) & PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY) != 0))
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -308,7 +352,7 @@ BOOL
 IopIsIoBufferPageCacheBackedHelper (
     PFILE_OBJECT FileObject,
     PIO_BUFFER IoBuffer,
-    IO_OFFSET Offset,
+    IO_OFFSET FileOffset,
     UINTN SizeInBytes
     );
 
@@ -695,7 +739,8 @@ Return Value:
 
 PHYSICAL_ADDRESS
 IoGetPageCacheEntryPhysicalAddress (
-    PPAGE_CACHE_ENTRY Entry
+    PPAGE_CACHE_ENTRY Entry,
+    PULONG MapFlags
     )
 
 /*++
@@ -708,6 +753,9 @@ Arguments:
 
     Entry - Supplies a pointer to a page cache entry.
 
+    MapFlags - Supplies an optional pointer to the additional mapping flags
+        mandated by the underlying file object.
+
 Return Value:
 
     Returns the physical address of the given page cache entry.
@@ -715,6 +763,10 @@ Return Value:
 --*/
 
 {
+
+    if (MapFlags != NULL) {
+        *MapFlags = Entry->FileObject->MapFlags;
+    }
 
     return Entry->PhysicalAddress;
 }
@@ -901,6 +953,7 @@ Return Value:
     PPAGE_CACHE_ENTRY DirtyEntry;
     BOOL MarkDirty;
     ULONG OldFlags;
+    ULONG SetFlags;
 
     //
     // Try to get the backing entry if possible.
@@ -927,9 +980,10 @@ Return Value:
     // is held.
     //
 
-    OldFlags = RtlAtomicOr32(&(DirtyEntry->Flags),
-                             PAGE_CACHE_ENTRY_FLAG_DIRTY_PENDING);
+    SetFlags = PAGE_CACHE_ENTRY_FLAG_DIRTY_PENDING |
+               PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY;
 
+    OldFlags = RtlAtomicOr32(&(DirtyEntry->Flags), SetFlags);
     if ((OldFlags & PAGE_CACHE_ENTRY_FLAG_DIRTY_MASK) == 0) {
         RtlAtomicAdd(&IoPageCacheDirtyPendingPageCount, 1);
 
@@ -2335,6 +2389,8 @@ Return Value:
 
         if (Destroyed != FALSE) {
             IopMarkPageCacheEntryClean(CacheEntry, FALSE);
+            RtlAtomicAnd32(&(CacheEntry->Flags),
+                           ~PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY);
         }
     }
 
@@ -2397,6 +2453,7 @@ Return Value:
 {
 
     BOOL Backed;
+    UINTN CheckSize;
     ULONG PageSize;
 
     ASSERT(IoBuffer->FragmentCount != 0);
@@ -2407,10 +2464,15 @@ Return Value:
     //
 
     PageSize = MmPageSize();
+    CheckSize = SizeInBytes;
+    if (CheckSize > PageSize) {
+        CheckSize = PageSize;
+    }
+
     Backed = IopIsIoBufferPageCacheBackedHelper(FileObject,
                                                 IoBuffer,
                                                 Offset,
-                                                PageSize);
+                                                CheckSize);
 
     //
     // Assert that the assumption above is correct.
@@ -2420,8 +2482,7 @@ Return Value:
            (IopIsIoBufferPageCacheBackedHelper(FileObject,
                                                IoBuffer,
                                                Offset,
-                                               ALIGN_RANGE_UP(SizeInBytes,
-                                                              PageSize))));
+                                               SizeInBytes)));
 
     return Backed;
 }
@@ -2599,10 +2660,6 @@ Return Value:
         //
 
         if ((Entry->Flags & PAGE_CACHE_ENTRY_FLAG_DIRTY_PENDING) == 0) {
-            if (Entry->ListEntry.Next != NULL) {
-                LIST_REMOVE(&(Entry->ListEntry));
-                Entry->ListEntry.Next = NULL;
-            }
 
             //
             // If requested, move the page cache entry to the back of the LRU
@@ -2612,6 +2669,11 @@ Return Value:
             //
 
             if (MoveToCleanList != FALSE) {
+                if (Entry->ListEntry.Next != NULL) {
+                    LIST_REMOVE(&(Entry->ListEntry));
+                    Entry->ListEntry.Next = NULL;
+                }
+
                 INSERT_BEFORE(&(Entry->ListEntry), &IoPageCacheCleanList);
             }
         }
@@ -2655,6 +2717,7 @@ Return Value:
     PFILE_OBJECT FileObject;
     BOOL MarkedDirty;
     ULONG OldFlags;
+    ULONG SetFlags;
 
     FileObject = Entry->FileObject;
 
@@ -2697,7 +2760,8 @@ Return Value:
         KeAcquireSharedExclusiveLockExclusive(FileObject->Lock);
     }
 
-    OldFlags = RtlAtomicOr32(&(DirtyEntry->Flags), PAGE_CACHE_ENTRY_FLAG_DIRTY);
+    SetFlags = PAGE_CACHE_ENTRY_FLAG_DIRTY | PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY;
+    OldFlags = RtlAtomicOr32(&(DirtyEntry->Flags), SetFlags);
 
     ASSERT((OldFlags & PAGE_CACHE_ENTRY_FLAG_OWNER) != 0);
 
@@ -3405,6 +3469,9 @@ Return Value:
     }
 
     NewEntry->ReferenceCount = 1;
+    if ((FileObject->Flags & FILE_OBJECT_FLAG_HARD_FLUSH_REQUIRED) != 0) {
+        NewEntry->Flags |= PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUIRED;
+    }
 
 CreatePageCacheEntryEnd:
     return NewEntry;
@@ -3515,6 +3582,7 @@ Return Value:
     FileObject = Entry->FileObject;
 
     ASSERT((Entry->Flags & PAGE_CACHE_ENTRY_FLAG_DIRTY_MASK) == 0);
+    ASSERT((Entry->Flags & PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY) == 0);
     ASSERT(Entry->ListEntry.Next == NULL);
     ASSERT(Entry->ReferenceCount == 0);
     ASSERT(Entry->Node.Parent == NULL);
@@ -3612,7 +3680,6 @@ Return Value:
     PVOID VirtualAddress;
 
     ASSERT(KeIsSharedExclusiveLockHeldExclusive(NewEntry->FileObject->Lock));
-    ASSERT(NewEntry->Flags == 0);
 
     //
     // Insert the new entry into its file object's tree.
@@ -3663,7 +3730,7 @@ Return Value:
 
             IoPageCacheEntryAddReference(NewEntry);
             LinkEntry->BackingEntry = NewEntry;
-            NewEntry->Flags = PAGE_CACHE_ENTRY_FLAG_OWNER;
+            NewEntry->Flags |= PAGE_CACHE_ENTRY_FLAG_OWNER;
             ClearFlags = PAGE_CACHE_ENTRY_FLAG_OWNER |
                          PAGE_CACHE_ENTRY_FLAG_MAPPED;
 
@@ -3869,7 +3936,7 @@ Return Value:
             // Flush some dirty file objects.
             //
 
-            Status = IopFlushFileObjects(0, 0, NULL);
+            Status = IopFlushFileObjects(0, IO_FLAG_HARD_FLUSH_ALLOWED, NULL);
             if ((IoPageCacheDebugFlags & PAGE_CACHE_DEBUG_DIRTY_LISTS) != 0) {
                 IopCheckDirtyFileObjectsList();
             }
@@ -3937,11 +4004,13 @@ Return Value:
     UINTN BytesToWrite;
     PPAGE_CACHE_ENTRY CacheEntry;
     BOOL Clean;
+    ULONG ClearFlags;
     PFILE_OBJECT FileObject;
     IO_OFFSET FileOffset;
     ULONGLONG FileSize;
     IO_CONTEXT IoContext;
     BOOL MarkedClean;
+    ULONG OldFlags;
     ULONG PageSize;
     KSTATUS Status;
 
@@ -3949,7 +4018,7 @@ Return Value:
     FileObject = CacheEntry->FileObject;
     FileOffset = CacheEntry->Offset;
     PageSize = MmPageSize();
-    READ_INT64_SYNC(&(FileObject->Properties.FileSize), &FileSize);
+    FileSize = FileObject->Properties.Size;
 
     //
     // This routine assumes that the file object lock is held shared when it
@@ -3981,6 +4050,24 @@ Return Value:
 
         MarkedClean = IopMarkPageCacheEntryClean(CacheEntry, TRUE);
         if (MarkedClean != FALSE) {
+
+            //
+            // If hard flushes are allowed and one is requested, then update
+            // the flags.
+            //
+
+            if (((Flags & IO_FLAG_HARD_FLUSH_ALLOWED) != 0) &&
+                (IS_HARD_FLUSH_REQUESTED(CacheEntry->Flags) != FALSE)) {
+
+                ClearFlags = PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUESTED |
+                             PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY;
+
+                OldFlags = RtlAtomicAnd32(&(CacheEntry->Flags), ~ClearFlags);
+                if (IS_HARD_FLUSH_REQUESTED(OldFlags) != FALSE) {
+                    Flags |= IO_FLAG_HARD_FLUSH;
+                }
+            }
+
             Clean = FALSE;
         }
 
@@ -4214,6 +4301,7 @@ Return Value:
     LIST_ENTRY LocalList;
     PSHARED_EXCLUSIVE_LOCK Lock;
     PLIST_ENTRY MoveList;
+    ULONG OrFlags;
     BOOL PageTakenDown;
     KSTATUS Status;
 
@@ -4333,6 +4421,9 @@ Return Value:
 
             if (CacheEntry->Node.Parent == NULL) {
                 IopMarkPageCacheEntryClean(CacheEntry, FALSE);
+                RtlAtomicAnd32(&(CacheEntry->Flags),
+                               ~PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY);
+
                 PageTakenDown = TRUE;
 
             //
@@ -4346,10 +4437,28 @@ Return Value:
             } else {
                 Status = IopUnmapPageCacheEntrySections(CacheEntry);
                 if (KSUCCESS(Status)) {
-                    if ((CacheEntry->Flags &
-                         PAGE_CACHE_ENTRY_FLAG_DIRTY_MASK) == 0) {
+
+                    //
+                    // If a hard flush is required for this cache entry and it
+                    // was dirty at some point, request a hard flush and mark
+                    // the page cache entry dirty again.
+                    //
+
+                    if (IS_HARD_FLUSH_REQUIRED(CacheEntry->Flags) != FALSE) {
+
+                        ASSERT(CacheEntry->BackingEntry == NULL);
+
+                        OrFlags = PAGE_CACHE_ENTRY_FLAG_HARD_FLUSH_REQUESTED;
+                        RtlAtomicOr32(&(CacheEntry->Flags), OrFlags);
+                        IopMarkPageCacheEntryDirty(CacheEntry);
+
+                    } else if ((CacheEntry->Flags &
+                                PAGE_CACHE_ENTRY_FLAG_DIRTY_MASK) == 0) {
 
                         IopRemovePageCacheEntryFromTree(CacheEntry);
+                        RtlAtomicAnd32(&(CacheEntry->Flags),
+                                       ~PAGE_CACHE_ENTRY_FLAG_WAS_DIRTY);
+
                         PageTakenDown = TRUE;
                     }
                 }
@@ -4744,7 +4853,7 @@ BOOL
 IopIsIoBufferPageCacheBackedHelper (
     PFILE_OBJECT FileObject,
     PIO_BUFFER IoBuffer,
-    IO_OFFSET Offset,
+    IO_OFFSET FileOffset,
     UINTN SizeInBytes
     )
 
@@ -4763,7 +4872,7 @@ Arguments:
 
     IoBuffer - Supplies a pointer to an I/O buffer.
 
-    Offset - Supplies an offset into the file or device object.
+    FileOffset - Supplies an offset into the file or device object.
 
     SizeInBytes - Supplies the number of bytes in the I/O buffer that should be
         cache backed.
@@ -4779,14 +4888,46 @@ Return Value:
 
     UINTN BufferOffset;
     PPAGE_CACHE_ENTRY CacheEntry;
+    IO_OFFSET EndOffset;
+    UINTN OffsetShift;
     ULONG PageSize;
 
     PageSize = MmPageSize();
 
-    ASSERT(IS_ALIGNED(SizeInBytes, PageSize) != FALSE);
+    //
+    // I/O may still be page cache backed even if the given file offset is not
+    // page aligned. The contrapositive is also true - I/O may not be page
+    // cache backed even if the given file offset is page aligned. These
+    // scenarios can occur if the I/O buffer's current offset is not page
+    // aligned. For example, writing 512 bytes to a file at offset 512 can be
+    // considered page cache backed as long as the I/O buffer's offset is 512
+    // and the I/O buffer's first page cache entry has a file offset of 0. And
+    // writing 512 bytes to offset 4096 isn't page cache backed if the I/O
+    // buffer's offset is 512; no page cache entry is going to have a file
+    // offset of 3584.
+    //
+    // To account for this, align the I/O buffer and file offsets back to the
+    // nearest page boundary. This makes the local buffer offset negative, but
+    // the routine that gets the page cache entry adds the current offset back.
+    //
 
-    BufferOffset = 0;
-    while (SizeInBytes != 0) {
+    OffsetShift = MmGetIoBufferCurrentOffset(IoBuffer);
+    OffsetShift = REMAINDER(OffsetShift, PageSize);
+    BufferOffset = -OffsetShift;
+    FileOffset -= OffsetShift;
+    SizeInBytes += OffsetShift;
+
+    //
+    // All page cache entries have page aligned offsets. They will never match
+    // a file offset that isn't aligned.
+    //
+
+    if (IS_ALIGNED(FileOffset, PageSize) == FALSE) {
+        return FALSE;
+    }
+
+    EndOffset = FileOffset + SizeInBytes;
+    while (FileOffset < EndOffset) {
 
         //
         // If this page in the buffer is not backed by a page cache entry or
@@ -4798,14 +4939,13 @@ Return Value:
         if ((CacheEntry == NULL) ||
             (CacheEntry->FileObject != FileObject) ||
             (CacheEntry->Node.Parent == NULL) ||
-            (CacheEntry->Offset != Offset)) {
+            (CacheEntry->Offset != FileOffset)) {
 
             return FALSE;
         }
 
-        SizeInBytes -= PageSize;
         BufferOffset += PageSize;
-        Offset += PageSize;
+        FileOffset += PageSize;
     }
 
     return TRUE;

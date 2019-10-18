@@ -52,6 +52,7 @@ Author:
 #define CRASH_PAGING_DEVICE_REMOVAL         0x14
 #define CRASH_MATH_FAULT                    0x15
 #define CRASH_ILLEGAL_INSTRUCTION           0x16
+#define CRASH_MM_ERROR                      0x17
 
 //
 // Call this macro to take the system down.
@@ -78,7 +79,7 @@ KERNEL_API
 VOID
 KeCrashSystemEx (
     ULONG CrashCode,
-    PSTR CrashCodeString,
+    PCSTR CrashCodeString,
     ULONGLONG Parameter1,
     ULONGLONG Parameter2,
     ULONGLONG Parameter3,

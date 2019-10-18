@@ -1700,42 +1700,6 @@ Return Value:
 --*/
 
 CK_VALUE
-CkpStringCreateFromRange (
-    PCK_VM Vm,
-    PCK_STRING Source,
-    UINTN Start,
-    UINTN Count,
-    LONG Step
-    );
-
-/*++
-
-Routine Description:
-
-    This routine creates a new string object based on a portion of another
-    string.
-
-Arguments:
-
-    Vm - Supplies a pointer to the virtual machine.
-
-    Source - Supplies a pointer to the source string.
-
-    Start - Supplies the starting index to slice from.
-
-    Count - Supplies the number of characters to slice.
-
-    Step - Supplies the whether to increment (1) or decrement (-1).
-
-Return Value:
-
-    Returns the new string value on success.
-
-    CK_NULL_VALUE on allocation failure.
-
---*/
-
-CK_VALUE
 CkpStringCreateFromInteger (
     PCK_VM Vm,
     CK_INTEGER Integer
@@ -1851,8 +1815,37 @@ Return Value:
 --*/
 
 UINTN
+CkpStringFindLast (
+    PCK_STRING Haystack,
+    PCK_STRING Needle
+    );
+
+/*++
+
+Routine Description:
+
+    This routine searches for the last instance of a given substring within a
+    string.
+
+Arguments:
+
+    Haystack - Supplies a pointer to the string to search.
+
+    Needle - Supplies a pointer to the string to search for.
+
+Return Value:
+
+    Returns the index of the last instance of the needle within the haystack on
+    success.
+
+    (UINTN)-1 if the needle could not be found in the haystack.
+
+--*/
+
+UINTN
 CkpStringFind (
     PCK_STRING Haystack,
+    UINTN Offset,
     PCK_STRING Needle
     );
 
@@ -1865,6 +1858,8 @@ Routine Description:
 Arguments:
 
     Haystack - Supplies a pointer to the string to search.
+
+    Offset - Supplies the offset from within the haystack to begin searching.
 
     Needle - Supplies a pointer to the string to search for.
 

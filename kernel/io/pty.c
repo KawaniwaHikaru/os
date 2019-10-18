@@ -425,9 +425,9 @@ IoCreateTerminal (
     BOOL FromKernelMode,
     PIO_HANDLE MasterDirectory,
     PIO_HANDLE SlaveDirectory,
-    PSTR MasterPath,
+    PCSTR MasterPath,
     UINTN MasterPathLength,
-    PSTR SlavePath,
+    PCSTR SlavePath,
     UINTN SlavePathLength,
     ULONG MasterAccess,
     ULONG MasterOpenFlags,
@@ -490,12 +490,17 @@ Return Value:
 
 {
 
+    CREATE_PARAMETERS Create;
     TERMINAL_CREATION_PARAMETERS CreationParameters;
     PIO_HANDLE SlaveHandle;
     KSTATUS Status;
 
     RtlZeroMemory(&CreationParameters, sizeof(TERMINAL_CREATION_PARAMETERS));
     CreationParameters.SlaveCreatePermissions = SlaveCreatePermissions;
+    Create.Type = IoObjectTerminalMaster;
+    Create.Context = &CreationParameters;
+    Create.Permissions = MasterCreatePermissions;
+    Create.Created = FALSE;
 
     //
     // First try to open the master.
@@ -508,9 +513,7 @@ Return Value:
                      MasterPathLength,
                      MasterAccess,
                      MasterOpenFlags,
-                     IoObjectTerminalMaster,
-                     &CreationParameters,
-                     MasterCreatePermissions,
+                     &Create,
                      MasterHandle);
 
     if (!KSUCCESS(Status)) {
@@ -523,6 +526,9 @@ Return Value:
     // creating the path entry now).
     //
 
+    Create.Type = IoObjectTerminalSlave;
+    Create.Permissions = SlaveCreatePermissions;
+    Create.Created = FALSE;
     MasterOpenFlags |= OPEN_FLAG_NO_CONTROLLING_TERMINAL;
     Status = IopOpen(FromKernelMode,
                      SlaveDirectory,
@@ -530,9 +536,7 @@ Return Value:
                      SlavePathLength,
                      0,
                      MasterOpenFlags,
-                     IoObjectTerminalSlave,
-                     &CreationParameters,
-                     SlaveCreatePermissions,
+                     &Create,
                      &SlaveHandle);
 
     if (!KSUCCESS(Status)) {
@@ -723,9 +727,7 @@ Return Value:
         // support for said feature.
         //
 
-        if (((NewSettings->InputFlags &
-              TERMINAL_UNIMPLEMENTED_INPUT_FLAGS) != 0) ||
-            ((NewSettings->OutputFlags &
+        if (((NewSettings->OutputFlags &
               TERMINAL_UNIMPLEMENTED_OUTPUT_FLAGS) != 0) ||
             ((NewSettings->ControlFlags &
               TERMINAL_UNIMPLEMENTED_CONTROL_FLAGS) != 0)) {
@@ -1480,9 +1482,7 @@ Return Value:
 
 KSTATUS
 IopCreateTerminal (
-    IO_OBJECT_TYPE Type,
-    PVOID OverrideParameter,
-    FILE_PERMISSIONS CreatePermissions,
+    PCREATE_PARAMETERS Create,
     PFILE_OBJECT *FileObject
     )
 
@@ -1494,12 +1494,7 @@ Routine Description:
 
 Arguments:
 
-    Type - Supplies the type of special object to create.
-
-    OverrideParameter - Supplies an optional parameter to send along with the
-        override type.
-
-    CreatePermissions - Supplies the permissions to assign to the new file.
+    Create - Supplies a pointer to the creation parameters.
 
     FileObject - Supplies a pointer where a pointer to the new file object
         will be returned on success.
@@ -1526,7 +1521,7 @@ Return Value:
     PTERMINAL TerminalAfter;
     PLIST_ENTRY TerminalAfterEntry;
 
-    CreationParameters = OverrideParameter;
+    CreationParameters = Create->Context;
     ListLockHeld = FALSE;
 
     //
@@ -1548,7 +1543,7 @@ Return Value:
     // Create the slave file object.
     //
 
-    if (Type == IoObjectTerminalSlave) {
+    if (Create->Type == IoObjectTerminalSlave) {
 
         ASSERT(CreationParameters->Master != NULL);
 
@@ -1565,9 +1560,10 @@ Return Value:
                                               &(Terminal->Slave->Header));
 
             Properties.Type = IoObjectTerminalSlave;
-            Properties.Permissions = CreatePermissions;
+            Properties.Permissions = Create->Permissions;
             Status = IopCreateOrLookupFileObject(&Properties,
                                                  ObGetRootObject(),
+                                                 0,
                                                  0,
                                                  &NewFileObject,
                                                  &Created);
@@ -1646,7 +1642,7 @@ Return Value:
 
     } else {
 
-        ASSERT(Type == IoObjectTerminalMaster);
+        ASSERT(Create->Type == IoObjectTerminalMaster);
         ASSERT(CreationParameters->Master == NULL);
 
         Terminal = NULL;
@@ -1672,9 +1668,10 @@ Return Value:
         if (*FileObject == NULL) {
             IopFillOutFilePropertiesForObject(&Properties, &(Terminal->Header));
             Properties.Type = IoObjectTerminalMaster;
-            Properties.Permissions = CreatePermissions;
+            Properties.Permissions = Create->Permissions;
             Status = IopCreateOrLookupFileObject(&Properties,
                                                  ObGetRootObject(),
+                                                 0,
                                                  0,
                                                  &NewFileObject,
                                                  &Created);
@@ -1770,6 +1767,7 @@ Return Value:
         (*FileObject)->SpecialIo = Terminal;
     }
 
+    Create->Created = TRUE;
     Status = STATUS_SUCCESS;
 
 CreateTerminalEnd:
@@ -2356,6 +2354,7 @@ Return Value:
             (Process->ControllingTerminal != NULL)) {
 
             Status = STATUS_PERMISSION_DENIED;
+            break;
         }
 
         //
@@ -2424,6 +2423,7 @@ Return Value:
             Process->ControllingTerminal = Terminal->SlaveFileObject;
             Terminal->SessionId = CurrentSessionId;
             Terminal->ProcessGroupId = Process->Identifiers.ProcessGroupId;
+            Status = STATUS_SUCCESS;
         }
 
         KeReleaseQueuedLock(Terminal->Lock);
@@ -2431,7 +2431,10 @@ Return Value:
         break;
 
     case TerminalControlGetCurrentSessionId:
-        if (FileObject->Properties.Type != IoObjectTerminalMaster) {
+        Process = PsGetCurrentProcess();
+        if ((FileObject->Properties.Type != IoObjectTerminalMaster) &&
+            (Process->ControllingTerminal != FileObject)) {
+
             Status = STATUS_NOT_A_TERMINAL;
             break;
         }
@@ -2721,7 +2724,7 @@ Return Value:
 
 {
 
-    PCHAR ControlCharacters;
+    PUCHAR ControlCharacters;
     PTERMINAL_SLAVE Slave;
     KSTATUS Status;
     PTERMINAL Terminal;
@@ -3001,7 +3004,7 @@ Return Value:
     UCHAR Bytes[2];
     UINTN BytesSize;
     BOOL CharacterHandled;
-    PCHAR ControlCharacters;
+    PUCHAR ControlCharacters;
     ULONG DirtyRegionBegin;
     ULONG DirtyRegionEnd;
     ULONG EchoFlags;
@@ -3918,7 +3921,7 @@ Return Value:
     BOOL BreakForNewline;
     UINTN BytesRead;
     CHAR Character;
-    PCHAR ControlCharacters;
+    PUCHAR ControlCharacters;
     UINTN CopyIndex;
     UINTN CopySize;
     UCHAR FlushCount;
@@ -4461,7 +4464,7 @@ Return Value:
 {
 
     CHAR Character;
-    PCHAR ControlCharacters;
+    PUCHAR ControlCharacters;
     KSTATUS Status;
     ULONG ValidLineEnd;
     ULONG WorkingInputLength;
@@ -4625,7 +4628,7 @@ Return Value:
 {
 
     TERMINAL_COMMAND_DATA CommandData;
-    PCHAR ControlCharacters;
+    PUCHAR ControlCharacters;
     UINTN LastIndex;
     ULONG LocalFlags;
     UINTN MoveIndex;

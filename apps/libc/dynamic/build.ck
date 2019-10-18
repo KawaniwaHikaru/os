@@ -29,28 +29,73 @@ Environment:
 
 --*/
 
+from menv import mconfig, sharedLibrary, staticLibrary;
+
 function build() {
-    math_sources = [
+    var arch = mconfig.arch;
+    var arch_sources;
+    var buildLib;
+    var buildSources;
+    var buildSourcesConfig;
+    var dynlibs;
+    var entries;
+    var libs;
+    var linkConfig;
+    var linkLdflags;
+    var mathSources;
+    var so;
+    var sources;
+    var sourcesConfig;
+    var sourcesIncludes;
+    var wincsup;
+    var wincsupIncludes;
+    var wincsupSources;
+
+    mathSources = [
         "math/abs.c",
         "math/ceil.c",
+        "math/ceilf.c",
         "math/div.c",
         "math/exp.c",
+        "math/expf.c",
+        "math/exp2.c",
+        "math/exp2f.c",
         "math/expm1.c",
+        "math/expm1f.c",
         "math/floor.c",
+        "math/floorf.c",
         "math/fmod.c",
+        "math/fmodf.c",
         "math/hypot.c",
+        "math/hypotf.c",
         "math/log.c",
+        "math/logf.c",
         "math/log2.c",
+        "math/log2f.c",
         "math/log10.c",
+        "math/log10f.c",
         "math/lround.c",
+        "math/lroundf.c",
+        "math/minmax.c",
+        "math/minmaxf.c",
         "math/modf.c",
+        "math/modff.c",
         "math/pow.c",
+        "math/powf.c",
         "math/rint.c",
+        "math/rintf.c",
         "math/scalbn.c",
+        "math/scalbnf.c",
         "math/sqrt.c",
+        "math/sqrtf.c",
         "math/trig.c",
+        "math/trigf.c",
         "math/trigarc.c",
+        "math/trigarcf.c",
         "math/trighyp.c",
+        "math/trighypf.c",
+        "math/trunc.c",
+        "math/truncf.c",
         "math/util.c",
     ];
 
@@ -79,6 +124,7 @@ function build() {
         "kerror.c",
         "langinfo.c",
         "line.c",
+        "link.c",
         "locale.c",
         "memory.c",
         "netaddr.c",
@@ -138,7 +184,7 @@ function build() {
         "wstring.c",
     ];
 
-    build_sources = [
+    buildSources = [
         "bsearch.c",
         "getopt.c",
         "qsort.c",
@@ -146,7 +192,7 @@ function build() {
         "regexexe.c"
     ];
 
-    wincsup_sources = [
+    wincsupSources = [
         "regexcmp.c",
         "regexexe.c",
         "wincsup/strftime.c"
@@ -177,73 +223,80 @@ function build() {
             "x64/contexta.S",
             "x64/contextc.c",
             "x64/fenv.S",
-            "x64/fenvc.c",
             "x64/setjmpa.S",
+            "x64/tlsaddr.S",
+            "x86/fenvc.c",
         ];
     }
 
-    sources_includes = [
-        "$//apps/libc/include"
+    sourcesIncludes = [
+        "$S/apps/libc/include"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-ftls-model=initial-exec"]
     };
 
-    link_ldflags = [
+    buildSourcesConfig = {
+        "CFLAGS": ["-ftls-model=initial-exec", "-ffreestanding"]
+    };
+
+    linkLdflags = [
         "-nostdlib",
         "-Wl,--whole-archive"
     ];
 
-    link_config = {
-        "LDFLAGS": link_ldflags
+    linkConfig = {
+        "LDFLAGS": linkLdflags
     };
 
-    libs = [
-        "//lib/rtl/base:intrins",
-    ];
+    if (arch == "x64") {
+        libs = [];
+
+    } else {
+        libs = [
+            "lib/rtl/base:intrins",
+        ];
+    }
 
     dynlibs = [
-        "//apps/osbase:libminocaos"
+        "apps/osbase:libminocaos"
     ];
 
-    wincsup_includes = [
-        "$//apps/libc/dynamic/wincsup/include"
+    wincsupIncludes = [
+        "$S/apps/libc/dynamic/wincsup/include"
     ];
 
     so = {
         "label": "libc",
-        "inputs": sources + math_sources + arch_sources + libs + dynlibs,
-        "sources_config": sources_config,
-        "includes": sources_includes,
-        "entry": "ClInitialize",
-        "config": link_config,
+        "inputs": sources + mathSources + arch_sources + libs + dynlibs,
+        "sources_config": sourcesConfig,
+        "includes": sourcesIncludes,
+        "config": linkConfig,
         "major_version": "1"
     };
 
-    build_lib = {
+    buildLib = {
         "label": "build_libc",
         "output": "build_libc",
-        "inputs": build_sources + math_sources,
-        "sources_config": sources_config,
-        "includes": sources_includes,
-        "build": TRUE,
+        "inputs": buildSources + mathSources,
+        "sources_config": buildSourcesConfig,
+        "includes": sourcesIncludes,
+        "build": true,
         "prefix": "build"
     };
 
     wincsup = {
         "label": "wincsup",
-        "inputs": wincsup_sources,
-        "includes": wincsup_includes,
-        "build": TRUE,
+        "inputs": wincsupSources,
+        "includes": wincsupIncludes,
+        "build": true,
         "prefix": "wincsup"
     };
 
-    entries = shared_library(so);
-    entries += static_library(build_lib);
-    entries += static_library(wincsup);
+    entries = sharedLibrary(so);
+    entries += staticLibrary(buildLib);
+    entries += staticLibrary(wincsup);
     return entries;
 }
-
-return build();
 

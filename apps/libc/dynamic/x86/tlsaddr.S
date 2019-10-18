@@ -26,42 +26,42 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------- Includes
-##
+//
+// ------------------------------------------------------------------- Includes
+//
 
 #include <minoca/kernel/x86.inc>
 
-##
-## ---------------------------------------------------------------- Definitions
-##
+//
+// ---------------------------------------------------------------- Definitions
+//
 
-##
-## Define the offset of the TLS vector within the TCB.
-##
+//
+// Define the offset of the TLS vector within the TCB.
+//
 
 .equ TCB_TLS_VECTOR_OFFSET, 0x4
 
-##
-## ----------------------------------------------------------------------- Code
-##
+//
+// ----------------------------------------------------------------------- Code
+//
 
-##
-## .text specifies that this code belongs in the executable section.
-##
-## .code32 specifies that this is 32-bit protected mode code.
-##
+//
+// .text specifies that this code belongs in the executable section.
+//
+// .code32 specifies that this is 32-bit protected mode code.
+//
 
 .text
 .code32
 
-##
-## LIBC_API
-## void *
-## ___tls_get_addr (
-##     PTLS_INDEX Entry
-##     )
-##
+//
+// LIBC_API
+// void *
+// ___tls_get_addr (
+//     PTLS_INDEX Entry
+//     )
+//
 
 /*++
 
@@ -93,14 +93,18 @@ EXPORTED_FUNCTION(___tls_get_addr)
     addl     %ecx, %eax         # Add in the TLS base.
     ret                         # Return the value.
 
-    ##
-    ## Call the slow C routine.
-    ##
+    //
+    // Call the slow C routine.
+    //
 
 ___tls_get_addrSlowPath:
+    pushl   %ebx                # Save ebx.
+    call    __x86.get_pc_thunk.bx # ebx must be set up correctly for the PLT.
+    addl    $_GLOBAL_OFFSET_TABLE_,%ebx # Get GOT address.
     pushl   %eax                # Push the structure parameter.
     call    OsGetTlsAddress@PLT # Call the OS API routine.
     addl    $4, %esp            # Pop the parameter.
+    popl    %ebx                # Restore ebx.
     ret                         # Return.
 
 END_FUNCTION(___tls_get_addr)

@@ -25,14 +25,24 @@ Environment:
 
 --*/
 
+from menv import mconfig, kernelLibrary;
+
 function build() {
+    var arch = mconfig.arch;
+    var entries;
+    var includes;
+    var lib;
+    var lib32;
+    var sources;
+
     sources = [
         "assert.c",
-        "kprint.c"
+        "kprint.c",
+        "pdouble.c"
     ];
 
     includes = [
-        "$//lib/rtl"
+        "$S/lib/rtl"
     ];
 
     lib = {
@@ -41,8 +51,19 @@ function build() {
         "includes": includes
     };
 
-    entries = static_library(lib);
+    entries = kernelLibrary(lib);
+    if (arch == "x64") {
+        lib32 = {
+            "label": "krtl32",
+            "inputs": sources,
+            "includes": includes,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(lib32);
+    }
+
     return entries;
 }
 
-return build();

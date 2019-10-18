@@ -82,7 +82,7 @@ Author:
 #define DMA_BCM2709_CHANNEL_STATUS_RESET                (1 << 31)
 #define DMA_BCM2709_CHANNEL_STATUS_ABORT                (1 << 30)
 #define DMA_BCM2709_CHANNEL_STATUS_DISABLE_DEBUG        (1 << 29)
-#define DMA_BCM2709_CHANNEL_STATUS_WAIT_FOR_WRITES      (1 << 28
+#define DMA_BCM2709_CHANNEL_STATUS_WAIT_FOR_WRITES      (1 << 28)
 #define DMA_BCM2709_CHANNEL_STATUS_PANIC_PRIORITY_MASK  (0xF << 20)
 #define DMA_BCM2709_CHANNEL_STATUS_PANIC_PRIORITY_SHIFT 20
 #define DMA_BCM2709_CHANNEL_STATUS_PRIORITY_MASK        (0xF << 16)
@@ -270,6 +270,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _DMA_BCM2709_CONTROL_BLOCK {
     ULONG TransferInformation;
     ULONG SourceAddress;
@@ -279,6 +281,9 @@ typedef struct _DMA_BCM2709_CONTROL_BLOCK {
     ULONG NextAddress;
     ULONG Reserved[2];
 } PACKED DMA_BCM2709_CONTROL_BLOCK, *PDMA_BCM2709_CONTROL_BLOCK;
+
+#pragma pack(pop)
+
 //
 // -------------------------------------------------------------------- Globals
 //

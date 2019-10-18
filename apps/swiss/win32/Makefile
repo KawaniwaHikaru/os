@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -21,13 +26,13 @@
 #
 ################################################################################
 
-BINARY = swiss.exe
+BINARY = swiss
 
 BINPLACE = tools/bin
 
 BUILD = yes
 
-BINARYTYPE = ntconsole
+BINARYTYPE = build
 
 INCLUDES += $(SRCROOT)/os/apps/libc/dynamic/wincsup/include;$(SRCDIR)/..;.;
 
@@ -35,16 +40,16 @@ VPATH += $(SRCDIR)/..:
 
 include $(SRCDIR)/../sources
 
-X86_OBJS = $(COMMON_OBJS)   \
-           dw.o             \
-           swiss.rsc        \
-           w32cmds.o        \
-           sh/shntos.o      \
-           swlib/ntos.o     \
+OBJS = $(COMMON_OBJS)   \
+       dw.o             \
+       swiss.rsc        \
+       w32cmds.o        \
+       sh/shntos.o      \
+       swlib/ntos.o     \
 
 TARGETLIBS = $(OBJROOT)/os/apps/libc/dynamic/wincsup/wincsup.a               \
              $(OBJROOT)/os/lib/termlib/build/termlib.a                       \
-             $(OBJROOT)/os/lib/rtl/rtlc/build/rtlc.a                         \
+             $(OBJROOT)/os/lib/rtl/urtl/rtlc/build/rtlc.a                    \
              $(OBJROOT)/os/lib/rtl/base/build/basertl.a                      \
 
 DYNLIBS = -lpsapi -lws2_32

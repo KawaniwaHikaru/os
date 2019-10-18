@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2014 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2014 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -29,6 +34,9 @@ OBJS = ../bootfat.o    \
 X86_OBJS = ../x86/archsup.o  \
            ../x86/prochw.o   \
 
+X64_OBJS = ../x64/archsup.o  \
+           ../x64/prochw.o   \
+
 ARMV7_OBJS = ../armv7/archsup.o     \
              ../armv7/commsup.o     \
              ../armv7/inttable.o    \
@@ -38,4 +46,17 @@ ARMV6_OBJS = ../armv6/archsup.o  \
              ../armv7/commsup.o  \
              ../armv7/inttable.o \
              ../armv7/prochw.o   \
+
+PCAT_OBJS = fwapi.o      \
+            int10.o      \
+            int13.o      \
+            memory.o     \
+            realmode.o   \
+            reset.o      \
+            rsdp.o       \
+            time.o       \
+
+PCAT_X86_OBJS = x86/realmexe.o \
+
+PCAT_X64_OBJS = x64/realmexe.o \
 

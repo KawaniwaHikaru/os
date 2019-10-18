@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -48,7 +53,7 @@ OBJS += acpi.o      \
 X86_OBJS = x86/entry.o      \
            x86/realmexe.o   \
 
-TEXT_ADDRESS = 0x100000
+TEXT_ADDRESS := 0x100000
 
 TARGETLIBS += $(OBJROOT)/os/uefi/dev/ns16550/ns16550.a       \
 

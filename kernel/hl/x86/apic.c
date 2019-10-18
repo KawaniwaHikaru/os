@@ -291,6 +291,17 @@ INTERRUPT_FUNCTION_TABLE HlApicInterruptFunctionTable = {
 };
 
 //
+// Define the local APIC interrupts to mask off initially.
+//
+
+const UCHAR HlApicLvts[] = {
+    ApicTimerVector,
+    ApicLInt0Vector,
+    ApicLInt1Vector,
+    0
+};
+
+//
 // ------------------------------------------------------------------ Functions
 //
 
@@ -743,8 +754,16 @@ Return Value:
 {
 
     ULONG LogicalDestination;
+    ULONG OriginalVector;
     KSTATUS Status;
 
+    //
+    // Intel says the destination format register must be set before the
+    // APIC is software enabled.
+    //
+
+    OriginalVector = READ_LOCAL_APIC(ApicSpuriousVector);
+    WRITE_LOCAL_APIC(ApicSpuriousVector, VECTOR_SPURIOUS_INTERRUPT);
     switch (Target->Addressing) {
 
     //
@@ -772,6 +791,7 @@ Return Value:
         WRITE_LOCAL_APIC(ApicDestinationFormat, APIC_LOGICAL_CLUSTERED);
         LogicalDestination = Target->U.Cluster.Id << APIC_MAX_CLUSTER_SIZE;
         LogicalDestination |= Target->U.Cluster.Mask;
+        LogicalDestination <<= APIC_DESTINATION_SHIFT;
         WRITE_LOCAL_APIC(ApicLogicalDestination, LogicalDestination);
         if (READ_LOCAL_APIC(ApicLogicalDestination) != LogicalDestination) {
             Status = STATUS_NOT_SUPPORTED;
@@ -788,6 +808,7 @@ Return Value:
     Status = STATUS_SUCCESS;
 
 SetProcessorTargetingEnd:
+    WRITE_LOCAL_APIC(ApicSpuriousVector, OriginalVector);
     return Status;
 }
 
@@ -1444,7 +1465,8 @@ Return Value:
 
 {
 
-    ULONG Mask;
+    ULONG Index;
+    ULONG Lvt;
     ULONG SpuriousRegister;
     KSTATUS Status;
     ULONG Version;
@@ -1471,13 +1493,18 @@ Return Value:
     WRITE_LOCAL_APIC(ApicSpuriousVector, SpuriousRegister);
 
     //
-    // Disable LVT entries such as the timer, LINT0, and LINT1.
+    // Disable LVT entries such as the timer, LINT0, and LINT1. Leave the
+    // delivery routing alone.
     //
 
-    Mask = APIC_LVT_DISABLED | 0x80;
-    WRITE_LOCAL_APIC(ApicTimerVector, Mask);
-    WRITE_LOCAL_APIC(ApicLInt0Vector, Mask);
-    WRITE_LOCAL_APIC(ApicLInt1Vector, Mask);
+    Index = 0;
+    while (HlApicLvts[Index] != 0) {
+        Lvt = READ_LOCAL_APIC(HlApicLvts[Index]) & APIC_DELIVERY_MASK;
+        Lvt |= APIC_LVT_DISABLED | (0x80 + Index);
+        WRITE_LOCAL_APIC(HlApicLvts[Index], Lvt);
+        Index += 1;
+    }
+
     WRITE_LOCAL_APIC(ApicTimerInitialCount, 0);
     Status = STATUS_SUCCESS;
 

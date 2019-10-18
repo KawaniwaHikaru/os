@@ -142,6 +142,7 @@ volatile ULONG RamDiskNextIdentifier = 0;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -650,14 +651,14 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectBlockDevice;
             Properties->HardLinkCount = 1;
             Properties->BlockSize = RAM_DISK_SECTOR_SIZE;
             Properties->BlockCount = Disk->Size / RAM_DISK_SECTOR_SIZE;
-            WRITE_INT64_SYNC(&(Properties->FileSize), Disk->Size);
-            Lookup->Flags = LOOKUP_FLAG_NON_CACHED;
+            Properties->Size = Disk->Size;
+            Lookup->Flags = LOOKUP_FLAG_NO_PAGE_CACHE;
             Status = STATUS_SUCCESS;
         }
 
@@ -672,7 +673,7 @@ Return Value:
     case IrpMinorSystemControlWriteFileProperties:
         FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
         Properties = FileOperation->FileProperties;
-        READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+        PropertiesFileSize = Properties->Size;
         if ((Properties->FileId != 0) ||
             (Properties->Type != IoObjectBlockDevice) ||
             (Properties->HardLinkCount != 1) ||

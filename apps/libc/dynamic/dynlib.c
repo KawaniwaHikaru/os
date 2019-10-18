@@ -95,7 +95,10 @@ Return Value:
     HANDLE Handle;
     KSTATUS Status;
 
-    Status = OsLoadLibrary((PSTR)Library, 0, &Handle);
+    ASSERT((RTLD_GLOBAL == IMAGE_LOAD_FLAG_GLOBAL) &&
+           (RTLD_NOW == IMAGE_LOAD_FLAG_BIND_NOW));
+
+    Status = OsLoadLibrary((PSTR)Library, Flags, &Handle);
     if (!KSUCCESS(Status)) {
         ClDynamicLibraryStatus = Status;
         return NULL;
@@ -191,9 +194,10 @@ Return Value:
 
 LIBC_API
 void *
-dlsym (
+__dlsym (
     void *Handle,
-    const char *SymbolName
+    const char *SymbolName,
+    void *CallerAddress
     )
 
 /*++
@@ -201,8 +205,8 @@ dlsym (
 Routine Description:
 
     This routine returns the address of a symbol defined within an object made
-    accessible through a call to dlopen. This routine searches both this object
-    and any objects loaded as a result of this one.
+    accessible through a call to dlopen. This is an internal routine that
+    should not be called directly by users.
 
 Arguments:
 
@@ -211,6 +215,11 @@ Arguments:
 
     SymbolName - Supplies a pointer to a null-terminated string containing the
         name of the symbol whose address should be retrieved.
+
+    CallerAddress - Supplies an address within the dynamic object of the
+        calling executable. This routine will use this address to determine
+        which object to start from and skip if RTLD_NEXT is provided as the
+        handle.
 
 Return Value:
 
@@ -224,16 +233,28 @@ Return Value:
 {
 
     PVOID Address;
+    HANDLE Skip;
     KSTATUS Status;
+
+    Skip = NULL;
 
     //
     // The C Library handle definitions better line up with the OS base's.
     //
 
-    ASSERT((RTLD_DEFAULT == OS_LIBRARY_DEFAULT) &&
-           (RTLD_NEXT == OS_LIBRARY_NEXT));
+    ASSERT(RTLD_DEFAULT == NULL);
 
-    Status = OsGetLibrarySymbolAddress(Handle, (PSTR)SymbolName, &Address);
+    if (Handle == RTLD_NEXT) {
+        Handle = OsGetImageForAddress(CallerAddress);
+        if (Handle == INVALID_HANDLE) {
+            ClDynamicLibraryStatus = STATUS_NOT_FOUND;
+            return NULL;
+        }
+
+        Skip = Handle;
+    }
+
+    Status = OsGetSymbolAddress(Handle, (PSTR)SymbolName, Skip, &Address);
     if (!KSUCCESS(Status)) {
         ClDynamicLibraryStatus = Status;
         return NULL;
@@ -274,17 +295,27 @@ Return Value:
 {
 
     KSTATUS Status;
-    OS_LIBRARY_SYMBOL Symbol;
 
-    Status = OsGetLibrarySymbolForAddress(OS_LIBRARY_DEFAULT, Address, &Symbol);
+    //
+    // The OS_IMAGE_SYMBOL structure should line up with the Dl_info structure.
+    //
+
+    ASSERT((FIELD_OFFSET(OS_IMAGE_SYMBOL, ImagePath) ==
+            FIELD_OFFSET(Dl_info, dli_fname)) &&
+           (FIELD_OFFSET(OS_IMAGE_SYMBOL, ImageBase) ==
+            FIELD_OFFSET(Dl_info, dli_fbase)) &&
+           (FIELD_OFFSET(OS_IMAGE_SYMBOL, SymbolName) ==
+            FIELD_OFFSET(Dl_info, dli_sname)) &&
+           (FIELD_OFFSET(OS_IMAGE_SYMBOL, SymbolAddress) ==
+            FIELD_OFFSET(Dl_info, dli_saddr)));
+
+    Status = OsGetImageSymbolForAddress(Address,
+                                        (POS_IMAGE_SYMBOL)Information);
+
     if (!KSUCCESS(Status)) {
         return 0;
     }
 
-    Information->dli_fname = Symbol.LibraryName;
-    Information->dli_fbase = Symbol.LibraryBaseAddress;
-    Information->dli_sname = Symbol.SymbolName;
-    Information->dli_saddr = Symbol.SymbolAddress;
     return 1;
 }
 

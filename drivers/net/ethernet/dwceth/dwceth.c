@@ -115,6 +115,7 @@ PDRIVER DweDriver = NULL;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -124,8 +125,9 @@ DriverEntry (
 
 Routine Description:
 
-    This routine is the entry point for the e100 driver. It registers its other
-    dispatch functions, and performs driver-wide initialization.
+    This routine is the entry point for the DesignWare ethernet driver. It
+    registers its other dispatch functions, and performs driver-wide
+    initialization.
 
 Arguments:
 
@@ -510,14 +512,7 @@ Return Value:
     Properties.Interface.Send = DweSend;
     Properties.Interface.GetSetInformation = DweGetSetInformation;
     Properties.Interface.DestroyLink = DweDestroyLink;
-    Properties.ChecksumFlags = NET_LINK_CHECKSUM_FLAG_TRANSMIT_IP_OFFLOAD |
-                               NET_LINK_CHECKSUM_FLAG_TRANSMIT_UDP_OFFLOAD |
-                               NET_LINK_CHECKSUM_FLAG_TRANSMIT_TCP_OFFLOAD |
-                               NET_LINK_CHECKSUM_FLAG_RECEIVE_IP_OFFLOAD |
-                               NET_LINK_CHECKSUM_FLAG_RECEIVE_TCP_OFFLOAD |
-                               NET_LINK_CHECKSUM_FLAG_RECEIVE_UDP_OFFLOAD;
-
-    Device->ChecksumFlags = Properties.ChecksumFlags;
+    Properties.Capabilities = Device->SupportedCapabilities;
     Status = NetAddLink(&Properties, &(Device->NetworkLink));
     if (!KSUCCESS(Status)) {
         goto AddNetworkDeviceEnd;

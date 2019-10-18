@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -22,12 +27,13 @@
 ################################################################################
 
 DIRS = acpi      \
+       ahci      \
        ata       \
        devrem    \
        dma       \
        fat       \
        gpio      \
-       i8042     \
+       input     \
        net       \
        null      \
        part      \
@@ -36,16 +42,16 @@ DIRS = acpi      \
        ramdisk   \
        sd        \
        spb       \
+       sound     \
        special   \
        term      \
        usb       \
-       usrinput  \
        videocon  \
 
 include $(SRCROOT)/os/minoca.mk
 
-i8042 usb: usrinput
+usb: input
 ata usb: part
 net: usb
-plat: usrinput spb
+plat: input spb
 

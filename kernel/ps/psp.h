@@ -87,7 +87,7 @@ extern PKPROCESS PsKernelProcess;
 // for a newly created thread.
 //
 
-extern ULONGLONG PsInitialThreadPointer;
+extern const ULONGLONG PsInitialThreadPointer;
 
 //
 // Stores the ID for the next thread to be created.
@@ -178,6 +178,8 @@ PKTHREAD
 PspCloneThread (
     PKPROCESS DestinationProcess,
     PKTHREAD Thread,
+    PVOID KernelStack,
+    UINTN KernelStackSize,
     PTRAP_FRAME TrapFrame
     );
 
@@ -195,6 +197,10 @@ Arguments:
         should be created under.
 
     Thread - Supplies a pointer to the thread to clone.
+
+    KernelStack - Supplies a pointer to the kernel stack to use.
+
+    KernelStackSize - Supplies the size of the supplied kernel stack in bytes.
 
     TrapFrame - Supplies a pointer to the trap frame to set initial thread
         state to. A copy of this trap frame will be made.
@@ -407,6 +413,7 @@ PspCopyProcess (
     PKPROCESS Process,
     PKTHREAD MainThread,
     PTRAP_FRAME TrapFrame,
+    ULONG Flags,
     PKPROCESS *CreatedProcess
     );
 
@@ -428,6 +435,9 @@ Arguments:
     TrapFrame - Supplies a pointer to the trap frame of the interrupted main
         thread.
 
+    Flags - Supplies a bitfield of flags governing the creation of the new
+        process. See FORK_FLAG_* definitions.
+
     CreatedProcess - Supplies an optional pointer that will receive a pointer to
         the created process on success.
 
@@ -439,7 +449,7 @@ Return Value:
 
 PKPROCESS
 PspCreateProcess (
-    PSTR CommandLine,
+    PCSTR CommandLine,
     ULONG CommandLineSize,
     PPROCESS_ENVIRONMENT SourceEnvironment,
     PPROCESS_IDENTIFIERS Identifiers,
@@ -867,9 +877,7 @@ Return Value:
 
 VOID
 PspArchRestartSystemCall (
-    PTRAP_FRAME TrapFrame,
-    ULONG SystemCallNumber,
-    PVOID SystemCallParameter
+    PTRAP_FRAME TrapFrame
     );
 
 /*++
@@ -884,14 +892,6 @@ Arguments:
 
     TrapFrame - Supplies a pointer to the full trap frame saved by a system
         call in order to attempt dispatching a signal.
-
-    SystemCallNumber - Supplies the number of the system call that is
-        attempting to dispatch a pending signal. Supplied SystemCallInvalid if
-        the caller is not a system call.
-
-    SystemCallParameter - Supplies a pointer to the parameters supplied with
-        the system call that is attempting to dispatch a signal. Supply NULL if
-        the caller is not a system call.
 
 Return Value:
 
@@ -1427,3 +1427,132 @@ Return Value:
 
 --*/
 
+//
+// UTS realm functions
+//
+
+KSTATUS
+PspInitializeUtsRealm (
+    PKPROCESS KernelProcess
+    );
+
+/*++
+
+Routine Description:
+
+    This routine initializes the UTS realm space as the kernel process is
+    coming online.
+
+Arguments:
+
+    KernelProcess - Supplies a pointer to the kernel process.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+PUTS_REALM
+PspCreateUtsRealm (
+    PUTS_REALM Source
+    );
+
+/*++
+
+Routine Description:
+
+    This routine creates a new UTS realm.
+
+Arguments:
+
+    Source - Supplies a pointer to the realm to copy from.
+
+Return Value:
+
+    Returns a pointer to a new realm with a single reference on success.
+
+    NULL on allocation failure.
+
+--*/
+
+KSTATUS
+PspGetSetUtsInformation (
+    BOOL FromKernelMode,
+    PS_INFORMATION_TYPE InformationType,
+    PVOID Data,
+    PUINTN DataSize,
+    BOOL Set
+    );
+
+/*++
+
+Routine Description:
+
+    This routine gets or sets process informaiton.
+
+Arguments:
+
+    FromKernelMode - Supplies a boolean indicating whether or not this request
+        (and the buffer associated with it) originates from user mode (FALSE)
+        or kernel mode (TRUE).
+
+    InformationType - Supplies the information type.
+
+    Data - Supplies a pointer to the data buffer where the data is either
+        returned for a get operation or given for a set operation.
+
+    DataSize - Supplies a pointer that on input contains the size of the
+        data buffer. On output, contains the required size of the data buffer.
+
+    Set - Supplies a boolean indicating if this is a get operation (FALSE) or
+        a set operation (TRUE).
+
+Return Value:
+
+    Status code.
+
+--*/
+
+VOID
+PspUtsRealmAddReference (
+    PUTS_REALM Realm
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds a reference to the given UTS realm.
+
+Arguments:
+
+    Realm - Supplies a pointer to the realm.
+
+Return Value:
+
+    None.
+
+--*/
+
+VOID
+PspUtsRealmReleaseReference (
+    PUTS_REALM Realm
+    );
+
+/*++
+
+Routine Description:
+
+    This routine releases a reference to the given UTS realm. If the reference
+    count drops to zero, the realm will be destroyed.
+
+Arguments:
+
+    Realm - Supplies a pointer to the realm.
+
+Return Value:
+
+    None.
+
+--*/

@@ -35,7 +35,7 @@ Author:
 //
 
 #define DEBUG_PROTOCOL_MAJOR_VERSION    1
-#define DEBUG_PROTOCOL_REVISION         3
+#define DEBUG_PROTOCOL_REVISION         4
 
 //
 // Define some size limits.
@@ -49,6 +49,7 @@ Author:
 
 #define MACHINE_TYPE_X86 0x1
 #define MACHINE_TYPE_ARM 0x2
+#define MACHINE_TYPE_X64 0x3
 
 //
 // Define the maximum size of a debug packet, including the header.
@@ -136,6 +137,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _DEBUG_PACKET_HEADER {
     USHORT Magic;
     USHORT Command;
@@ -167,6 +170,8 @@ typedef struct _DEBUG_PACKET {
     DEBUG_PACKET_HEADER Header;
     UCHAR Payload[DEBUG_PAYLOAD_SIZE];
 } PACKED DEBUG_PACKET, *PDEBUG_PACKET;
+
+#pragma pack(pop)
 
 typedef enum _DEBUGGER_COMMAND {
     DbgInvalidCommand,
@@ -238,6 +243,8 @@ Members:
         immediate breakpoint (TRUE) or just wants to connect (FALSE).
 
 --*/
+
+#pragma pack(push, 1)
 
 typedef struct _CONNECTION_REQUEST {
     ULONG ProtocolMajorVersion;
@@ -368,6 +375,33 @@ typedef struct _X86_GENERAL_REGISTERS {
     USHORT Ss;
 } PACKED X86_GENERAL_REGISTERS, *PX86_GENERAL_REGISTERS;
 
+typedef struct _X64_GENERAL_REGISTERS {
+    ULONGLONG Rax;
+    ULONGLONG Rbx;
+    ULONGLONG Rcx;
+    ULONGLONG Rdx;
+    ULONGLONG Rbp;
+    ULONGLONG Rsp;
+    ULONGLONG Rsi;
+    ULONGLONG Rdi;
+    ULONGLONG R8;
+    ULONGLONG R9;
+    ULONGLONG R10;
+    ULONGLONG R11;
+    ULONGLONG R12;
+    ULONGLONG R13;
+    ULONGLONG R14;
+    ULONGLONG R15;
+    ULONGLONG Rip;
+    ULONGLONG Rflags;
+    USHORT Cs;
+    USHORT Ds;
+    USHORT Es;
+    USHORT Fs;
+    USHORT Gs;
+    USHORT Ss;
+} PACKED X64_GENERAL_REGISTERS, *PX64_GENERAL_REGISTERS;
+
 /*++
 
 Structure Description:
@@ -417,15 +451,20 @@ Members:
 
 typedef union _REGISTERS_UNION {
     X86_GENERAL_REGISTERS X86;
+    X64_GENERAL_REGISTERS X64;
     ARM_GENERAL_REGISTERS Arm;
 } PACKED REGISTERS_UNION, *PREGISTERS_UNION;
 
-typedef struct _IA_TABLE_REGISTER {
+#pragma pack(pop)
+
+typedef struct _X86_TABLE_REGISTER {
     ULONG Limit;
     ULONG Base;
-} IA_TABLE_REGISTER, *PIA_TABLE_REGISTER;
+} X86_TABLE_REGISTER, *PX86_TABLE_REGISTER;
 
-typedef struct _IA_SPECIAL_REGISTERS {
+#pragma pack(push, 1)
+
+typedef struct _X86_SPECIAL_REGISTERS {
     ULONGLONG Cr0;
     ULONGLONG Cr2;
     ULONGLONG Cr3;
@@ -436,10 +475,10 @@ typedef struct _IA_SPECIAL_REGISTERS {
     ULONGLONG Dr3;
     ULONGLONG Dr6;
     ULONGLONG Dr7;
-    IA_TABLE_REGISTER Idtr;
-    IA_TABLE_REGISTER Gdtr;
+    X86_TABLE_REGISTER Idtr;
+    X86_TABLE_REGISTER Gdtr;
     USHORT Tr;
-} PACKED IA_SPECIAL_REGISTERS, *PIA_SPECIAL_REGISTERS;
+} PACKED X86_SPECIAL_REGISTERS, *PX86_SPECIAL_REGISTERS;
 
 /*++
 
@@ -520,7 +559,7 @@ Members:
 --*/
 
 typedef union _SPECIAL_REGISTERS_UNION {
-    IA_SPECIAL_REGISTERS Ia;
+    X86_SPECIAL_REGISTERS Ia;
     ARM_SPECIAL_REGISTERS Arm;
 } PACKED SPECIAL_REGISTERS_UNION, *PSPECIAL_REGISTERS_UNION;
 
@@ -826,6 +865,8 @@ Members:
 typedef struct _DEBUG_REBOOT_REQUEST {
     ULONG ResetType;
 } PACKED DEBUG_REBOOT_REQUEST, *PDEBUG_REBOOT_REQUEST;
+
+#pragma pack(pop)
 
 //
 // ----------------------------------------------- Internal Function Prototypes

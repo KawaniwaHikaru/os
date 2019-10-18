@@ -52,6 +52,12 @@ CkpStringFromCharacter (
     );
 
 BOOL
+CkpStringFromByte (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpStringByteAt (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -77,6 +83,12 @@ CkpStringStartsWith (
 
 BOOL
 CkpStringEndsWith (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpStringRightIndexOf (
     PCK_VM Vm,
     PCK_VALUE Arguments
     );
@@ -118,6 +130,36 @@ CkpStringLength (
     );
 
 BOOL
+CkpStringJoinList (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpStringSplit (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpStringRightSplit (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpStringReplace (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpStringCompare (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpStringAdd (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -136,6 +178,12 @@ CkpStringSlice (
     );
 
 BOOL
+CkpStringSliceCharacters (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpStringToString (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -145,6 +193,22 @@ BOOL
 CkpStringRepresentation (
     PCK_VM Vm,
     PCK_VALUE Arguments
+    );
+
+CK_VALUE
+CkpStringCreateFromCharacterRange (
+    PCK_VM Vm,
+    PCK_STRING Source,
+    UINTN Start,
+    UINTN Count
+    );
+
+CK_VALUE
+CkpStringSliceBytes (
+    PCK_VM Vm,
+    PCK_STRING Source,
+    UINTN Start,
+    UINTN Count
     );
 
 //
@@ -157,12 +221,19 @@ CK_PRIMITIVE_DESCRIPTION CkStringPrimitives[] = {
     {"contains@1", 1, CkpStringContains},
     {"startsWith@1", 1, CkpStringStartsWith},
     {"endsWith@1", 1, CkpStringEndsWith},
+    {"rindexOf@1", 1, CkpStringRightIndexOf},
     {"indexOf@1", 1, CkpStringIndexOf},
     {"iterate@1", 1, CkpStringIterate},
     {"iteratorValue@1", 1, CkpStringIteratorValue},
     {"lower@0", 0, CkpStringLower},
     {"upper@0", 0, CkpStringUpper},
     {"length@0", 0, CkpStringLength},
+    {"joinList@1", 1, CkpStringJoinList},
+    {"split@2", 2, CkpStringSplit},
+    {"rsplit@2", 2, CkpStringRightSplit},
+    {"replace@3", 3, CkpStringReplace},
+    {"compare@1", 1, CkpStringCompare},
+    {"sliceChars@1", 1, CkpStringSliceCharacters},
     {"__add@1", 1, CkpStringAdd},
     {"__mul@1", 1, CkpStringMultiply},
     {"__slice@1", 1, CkpStringSlice},
@@ -173,6 +244,7 @@ CK_PRIMITIVE_DESCRIPTION CkStringPrimitives[] = {
 
 CK_PRIMITIVE_DESCRIPTION CkStringStaticPrimitives[] = {
     {"fromCharacter@1", 1, CkpStringFromCharacter},
+    {"fromByte@1", 1, CkpStringFromByte},
     {NULL, 0, NULL}
 };
 
@@ -229,88 +301,6 @@ Return Value:
 
     CkpStringHash(String);
     CK_OBJECT_VALUE(Value, String);
-    return Value;
-}
-
-CK_VALUE
-CkpStringCreateFromRange (
-    PCK_VM Vm,
-    PCK_STRING Source,
-    UINTN Start,
-    UINTN Count,
-    LONG Step
-    )
-
-/*++
-
-Routine Description:
-
-    This routine creates a new string object based on a portion of another
-    string.
-
-Arguments:
-
-    Vm - Supplies a pointer to the virtual machine.
-
-    Source - Supplies a pointer to the source string.
-
-    Start - Supplies the starting index to slice from.
-
-    Count - Supplies the number of characters to slice.
-
-    Step - Supplies the whether to increment (1) or decrement (-1).
-
-Return Value:
-
-    Returns the new string value on success.
-
-    CK_NULL_VALUE on allocation failure.
-
---*/
-
-{
-
-    INT Character;
-    UINTN CurrentIndex;
-    PUCHAR From;
-    UINTN Index;
-    UINTN Length;
-    PCK_STRING NewString;
-    UINTN SourceLength;
-    PUCHAR To;
-    CK_VALUE Value;
-
-    CK_ASSERT(Source->Header.Type == CkObjectString);
-
-    From = (PUCHAR)(Source->Value);
-    SourceLength = Source->Length;
-    Length = 0;
-    for (Index = 0; Index < Count; Index += 1) {
-        CurrentIndex = Start + (Index * Step);
-
-        CK_ASSERT(CurrentIndex < SourceLength);
-
-        Length += CkpUtf8DecodeSize(From[CurrentIndex]);
-    }
-
-    NewString = CkpStringAllocate(Vm, Length);
-    if (NewString == NULL) {
-        return CK_NULL_VALUE;
-    }
-
-    To = (PUCHAR)(NewString->Value);
-    for (Index = 0; Index < Count; Index += 1) {
-        CurrentIndex = Start + (Index * Step);
-        Character = CkpUtf8Decode(From + CurrentIndex,
-                                  SourceLength - CurrentIndex);
-
-        if (Character != -1) {
-            To += CkpUtf8Encode(Character, To);
-        }
-    }
-
-    CkpStringHash(NewString);
-    CK_OBJECT_VALUE(Value, NewString);
     return Value;
 }
 
@@ -562,8 +552,58 @@ Return Value:
 }
 
 UINTN
+CkpStringFindLast (
+    PCK_STRING Haystack,
+    PCK_STRING Needle
+    )
+
+/*++
+
+Routine Description:
+
+    This routine searches for the last instance of a given substring within a
+    string.
+
+Arguments:
+
+    Haystack - Supplies a pointer to the string to search.
+
+    Needle - Supplies a pointer to the string to search for.
+
+Return Value:
+
+    Returns the index of the last instance of the needle within the haystack on
+    success.
+
+    (UINTN)-1 if the needle could not be found in the haystack.
+
+--*/
+
+{
+
+    UINTN Index;
+    UINTN LastIndex;
+
+    Index = 0;
+    LastIndex = (UINTN)-1;
+    while (TRUE) {
+        Index = CkpStringFind(Haystack, Index, Needle);
+        if (Index == (UINTN)-1) {
+            Index = LastIndex;
+            break;
+        }
+
+        LastIndex = Index;
+        Index += Needle->Length;
+    }
+
+    return LastIndex;
+}
+
+UINTN
 CkpStringFind (
     PCK_STRING Haystack,
+    UINTN Offset,
     PCK_STRING Needle
     )
 
@@ -576,6 +616,8 @@ Routine Description:
 Arguments:
 
     Haystack - Supplies a pointer to the string to search.
+
+    Offset - Supplies the offset from within the haystack to begin searching.
 
     Needle - Supplies a pointer to the string to search for.
 
@@ -610,7 +652,7 @@ Return Value:
 
     } else if (Needle->Length == 1) {
         Character = *(Needle->Value);
-        for (Index = 0; Index < Haystack->Length; Index += 1) {
+        for (Index = Offset; Index < Haystack->Length; Index += 1) {
             if (Haystack->Value[Index] == Character) {
                 return Index;
             }
@@ -647,8 +689,8 @@ Return Value:
     }
 
     LastCharacter = Needle->Value[NeedleEnd];
-    Index = 0;
-    while (Index < Haystack->Length - Needle->Length) {
+    Index = Offset;
+    while (Index <= Haystack->Length - Needle->Length) {
 
         //
         // Check the last character in the needle. If it matches, see if the
@@ -758,23 +800,24 @@ Return Value:
     }
 
     if (Character <= 0x7FF) {
-        Bytes[0] = 0xC0 | ((Character & 0x7C0) >> 6);
+        Bytes[0] = 0xC0 | (Character >> 6);
         Bytes[1] = 0x80 | (Character & 0x3F);
         return 2;
     }
 
     if (Character <= 0xFFFF) {
-        Bytes[0] = 0xE0 | ((Character & 0xF000) >> 12);
-        Bytes[1] = 0x80 | ((Character & 0xFC0) >> 6);
+        Bytes[0] = 0xE0 | (Character >> 12);
+        Bytes[1] = 0x80 | ((Character >> 6) & 0x3F);
         Bytes[2] = 0x80 | (Character & 0x3F);
         return 3;
     }
 
     if (Character <= CK_MAX_UTF8) {
-        Bytes[0] = 0xF0 | ((Character & 0x1C0000) >> 18);
-        Bytes[1] = 0x80 | ((Character & 0x3F00) >> 12);
-        Bytes[2] = 0x80 | ((Character & 0xFC0) >> 6);
+        Bytes[0] = 0xF0 | (Character >> 18);
+        Bytes[1] = 0x80 | ((Character >> 12) & 0x3F);
+        Bytes[2] = 0x80 | ((Character >> 6) & 0x3F);
         Bytes[3] = 0x80 | (Character & 0x3F);
+        return 4;
     }
 
     return 0;
@@ -1085,6 +1128,46 @@ Return Value:
 }
 
 BOOL
+CkpStringFromByte (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine converts a single byte into a string.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    CK_INTEGER Value;
+
+    if (!CK_IS_INTEGER(Arguments[1])) {
+        CkpRuntimeError(Vm, "TypeError", "Expected an integer");
+        return FALSE;
+    }
+
+    Value = CK_AS_INTEGER(Arguments[1]);
+    Arguments[0] = CkpStringCreate(Vm, (PCSTR)&Value, 1);
+    return TRUE;
+}
+
+BOOL
 CkpStringByteAt (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -1121,7 +1204,7 @@ Return Value:
         return FALSE;
     }
 
-    CK_INT_VALUE(Arguments[0], String->Value[Index]);
+    CK_INT_VALUE(Arguments[0], (UCHAR)(String->Value[Index]));
     return TRUE;
 }
 
@@ -1214,7 +1297,7 @@ Return Value:
 
     Haystack = CK_AS_STRING(Arguments[0]);
     Needle = CK_AS_STRING(Arguments[1]);
-    Index = CkpStringFind(Haystack, Needle);
+    Index = CkpStringFind(Haystack, 0, Needle);
     if (Index == (UINTN)-1) {
         Arguments[0] = CkZeroValue;
 
@@ -1261,8 +1344,8 @@ Return Value:
         return FALSE;
     }
 
-    Needle = CK_AS_STRING(Arguments[0]);
-    Haystack = CK_AS_STRING(Arguments[1]);
+    Haystack = CK_AS_STRING(Arguments[0]);
+    Needle = CK_AS_STRING(Arguments[1]);
     if ((Needle->Length > Haystack->Length) ||
         (CkCompareMemory(Needle->Value, Haystack->Value, Needle->Length) !=
          0)) {
@@ -1314,8 +1397,8 @@ Return Value:
         return FALSE;
     }
 
-    Needle = CK_AS_STRING(Arguments[0]);
-    Haystack = CK_AS_STRING(Arguments[1]);
+    Haystack = CK_AS_STRING(Arguments[0]);
+    Needle = CK_AS_STRING(Arguments[1]);
     if (Needle->Length > Haystack->Length) {
         Arguments[0] = CkZeroValue;
 
@@ -1372,7 +1455,57 @@ Return Value:
 
     Haystack = CK_AS_STRING(Arguments[0]);
     Needle = CK_AS_STRING(Arguments[1]);
-    Index = CkpStringFind(Haystack, Needle);
+    Index = CkpStringFind(Haystack, 0, Needle);
+    if (Index == (UINTN)-1) {
+        CK_INT_VALUE(Arguments[0], -1);
+
+    } else {
+        CK_INT_VALUE(Arguments[0], Index);
+    }
+
+    return TRUE;
+}
+
+BOOL
+CkpStringRightIndexOf (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine finds the last index of the given string within the receiver.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PCK_STRING Haystack;
+    UINTN Index;
+    PCK_STRING Needle;
+
+    if (!CK_IS_STRING(Arguments[1])) {
+        CkpRuntimeError(Vm, "TypeError", "Expected a string");
+        return FALSE;
+    }
+
+    Haystack = CK_AS_STRING(Arguments[0]);
+    Needle = CK_AS_STRING(Arguments[1]);
+    Index = CkpStringFindLast(Haystack, Needle);
     if (Index == (UINTN)-1) {
         CK_INT_VALUE(Arguments[0], -1);
 
@@ -1426,6 +1559,9 @@ Return Value:
             Arguments[0] = CkNullValue;
             return TRUE;
         }
+
+        CK_INT_VALUE(Arguments[0], 0);
+        return TRUE;
     }
 
     //
@@ -1623,6 +1759,646 @@ Return Value:
 }
 
 BOOL
+CkpStringJoinList (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns a new string containing all the strings in the given
+    list, separated by this string.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PSTR Buffer;
+    PCK_STRING Element;
+    UINTN Index;
+    PCK_LIST List;
+    PCK_STRING Result;
+    UINTN Size;
+    PCK_STRING String;
+
+    String = CK_AS_STRING(Arguments[0]);
+    if (!CK_IS_LIST(Arguments[1])) {
+        CkpRuntimeError(Vm, "TypeError", "Expected a list");
+        return FALSE;
+    }
+
+    List = CK_AS_LIST(Arguments[1]);
+
+    //
+    // Figure out how big the final string will be.
+    //
+
+    Size = 0;
+    for (Index = 0; Index < List->Elements.Count; Index += 1) {
+        if (!CK_IS_STRING(List->Elements.Data[Index])) {
+            CkpRuntimeError(Vm,
+                            "TypeError",
+                            "Element %u is not a string",
+                            Index);
+
+            return FALSE;
+        }
+
+        Element = CK_AS_STRING(List->Elements.Data[Index]);
+        Size += Element->Length;
+        if (Index < List->Elements.Count - 1) {
+            Size += String->Length;
+        }
+    }
+
+    //
+    // Optimization: if there's only one element in the list, just return that
+    // element. This has to happen after the check to make sure it's a string.
+    //
+
+    if (List->Elements.Count == 1) {
+        Arguments[0] = List->Elements.Data[0];
+        return TRUE;
+    }
+
+    //
+    // Allocate the string, then copy the members over.
+    //
+
+    Result = CkpStringAllocate(Vm, Size);
+    if (Result == NULL) {
+        return FALSE;
+    }
+
+    Buffer = (PSTR)(Result->Value);
+    for (Index = 0; Index < List->Elements.Count; Index += 1) {
+        Element = CK_AS_STRING(List->Elements.Data[Index]);
+        CkCopy(Buffer, Element->Value, Element->Length);
+        Buffer += Element->Length;
+        if (Index < List->Elements.Count - 1) {
+            CkCopy(Buffer, String->Value, String->Length);
+            Buffer += String->Length;
+        }
+    }
+
+    CK_ASSERT(Buffer == Result->Value + Result->Length);
+
+    CkpStringHash(Result);
+    CK_OBJECT_VALUE(Arguments[0], Result);
+    return TRUE;
+}
+
+BOOL
+CkpStringSplit (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine splits the given string based on the separator.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    CK_VALUE Element;
+    UINTN EndIndex;
+    UINTN Index;
+    PCK_LIST List;
+    UINTN ListIndex;
+    CK_INTEGER MaxSplit;
+    UINTN NextIndex;
+    PCK_STRING Separator;
+    PCK_STRING String;
+
+    String = CK_AS_STRING(Arguments[0]);
+
+    //
+    // This routine takes a separator string, and a max count.
+    //
+
+    if (((!CK_IS_STRING(Arguments[1])) && (!CK_IS_NULL(Arguments[1]))) ||
+        (!CK_IS_INTEGER(Arguments[2]))) {
+
+        CkpRuntimeError(Vm, "TypeError", "Expected a string and an integer");
+        return FALSE;
+    }
+
+    Separator = NULL;
+    if (CK_IS_STRING(Arguments[1])) {
+        Separator = CK_AS_STRING(Arguments[1]);
+    }
+
+    MaxSplit = CK_AS_INTEGER(Arguments[2]);
+    if (MaxSplit == -1LL) {
+        MaxSplit = String->Length;
+    }
+
+    List = CkpListCreate(Vm, 0);
+    if (List == NULL) {
+        return FALSE;
+    }
+
+    CkpPushRoot(Vm, &(List->Header));
+    ListIndex = 0;
+    Index = 0;
+
+    //
+    // If there's no separator, then it's a slightly different loop because
+    // an empty string results in an empty list.
+    //
+
+    if (Separator == NULL) {
+        while (Index < String->Length) {
+            while ((Index < String->Length) &&
+                   (isspace(String->Value[Index]))) {
+
+                Index += 1;
+            }
+
+            if (Index == String->Length) {
+                break;
+            }
+
+            if (ListIndex >= MaxSplit) {
+                NextIndex = String->Length;
+
+            } else {
+                NextIndex = Index;
+                while ((NextIndex < String->Length) &&
+                       (!isspace(String->Value[NextIndex]))) {
+
+                    NextIndex += 1;
+                }
+            }
+
+            Element = CkpStringCreate(Vm,
+                                      String->Value + Index,
+                                      NextIndex - Index);
+
+            CkpListInsert(Vm, List, Element, ListIndex);
+            ListIndex += 1;
+            Index = NextIndex;
+        }
+
+    } else {
+        while (TRUE) {
+            if (ListIndex >= MaxSplit) {
+                NextIndex = (UINTN)-1;
+
+            } else {
+                NextIndex = CkpStringFind(String, Index, Separator);
+            }
+
+            EndIndex = NextIndex;
+            if (NextIndex == (UINTN)-1) {
+                EndIndex = String->Length;
+            }
+
+            Element = CkpStringCreate(Vm,
+                                      String->Value + Index,
+                                      EndIndex - Index);
+
+            CkpListInsert(Vm, List, Element, ListIndex);
+            ListIndex += 1;
+            Index = NextIndex;
+            if (Index == (UINTN)-1) {
+                break;
+            }
+
+            Index += Separator->Length;
+        }
+    }
+
+    CK_OBJECT_VALUE(Arguments[0], List);
+    CkpPopRoot(Vm);
+    return TRUE;
+}
+
+BOOL
+CkpStringRightSplit (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine splits the given string based on the separator, from the right.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    CK_VALUE Element;
+    UINTN EndIndex;
+    UINTN Index;
+    PCK_LIST List;
+    UINTN ListIndex;
+    CK_INTEGER MaxSplit;
+    UINTN NextIndex;
+    UINTN OriginalLength;
+    PCK_STRING Separator;
+    UINTN StartIndex;
+    PCK_STRING String;
+
+    String = CK_AS_STRING(Arguments[0]);
+
+    //
+    // This routine takes a separator string, and a max count.
+    //
+
+    if (((!CK_IS_STRING(Arguments[1])) && (!CK_IS_NULL(Arguments[1]))) ||
+        (!CK_IS_INTEGER(Arguments[2]))) {
+
+        CkpRuntimeError(Vm, "TypeError", "Expected a string and an integer");
+        return FALSE;
+    }
+
+    Separator = NULL;
+    if (CK_IS_STRING(Arguments[1])) {
+        Separator = CK_AS_STRING(Arguments[1]);
+    }
+
+    MaxSplit = CK_AS_INTEGER(Arguments[2]);
+    if (MaxSplit == -1LL) {
+        MaxSplit = String->Length;
+    }
+
+    List = CkpListCreate(Vm, 0);
+    if (List == NULL) {
+        return FALSE;
+    }
+
+    CkpPushRoot(Vm, &(List->Header));
+    ListIndex = 0;
+    Index = String->Length - 1;
+    EndIndex = (UINTN)-1;
+    OriginalLength = String->Length;
+
+    //
+    // If there's no separator, then it's a slightly different loop because
+    // an empty string results in an empty list.
+    //
+
+    if (Separator == NULL) {
+        while (Index != EndIndex) {
+            while ((Index != EndIndex) &&
+                   (isspace(String->Value[Index]))) {
+
+                Index -= 1;
+            }
+
+            if (Index == EndIndex) {
+                break;
+            }
+
+            if (ListIndex >= MaxSplit) {
+                NextIndex = EndIndex;
+
+            } else {
+                NextIndex = Index;
+                while ((NextIndex != EndIndex) &&
+                       (!isspace(String->Value[NextIndex]))) {
+
+                    NextIndex -= 1;
+                }
+            }
+
+            Element = CkpStringCreate(Vm,
+                                      String->Value + NextIndex + 1,
+                                      Index - NextIndex);
+
+            CkpListInsert(Vm, List, Element, 0);
+            ListIndex += 1;
+            Index = NextIndex;
+        }
+
+    } else {
+
+        //
+        // This one's tricky because the primary index, which is on the right,
+        // is inclusive. The lower index (next) is exclusive.
+        //
+
+        while (TRUE) {
+            if (ListIndex >= MaxSplit) {
+                NextIndex = (UINTN)-1;
+
+            } else {
+                String->Length = Index + 1;
+                NextIndex = CkpStringFindLast(String, Separator);
+                String->Length = OriginalLength;
+            }
+
+            if (NextIndex == (UINTN)-1) {
+                StartIndex = -1;
+
+            } else {
+                StartIndex = NextIndex + Separator->Length - 1;
+            }
+
+            Element = CkpStringCreate(Vm,
+                                      String->Value + StartIndex + 1,
+                                      Index - StartIndex);
+
+            CkpListInsert(Vm, List, Element, 0);
+            ListIndex += 1;
+            Index = NextIndex;
+            if (Index == EndIndex) {
+                break;
+            }
+
+            Index -= 1;
+        }
+    }
+
+    CK_OBJECT_VALUE(Arguments[0], List);
+    CkpPopRoot(Vm);
+    return TRUE;
+}
+
+BOOL
+CkpStringReplace (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine replaces all occurrences of one string within another.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    UINTN Index;
+    CK_INTEGER MaxReplace;
+    PCK_STRING New;
+    UINTN NextIndex;
+    PCK_STRING Old;
+    PSTR Out;
+    UINTN ReplaceIndex;
+    PCK_STRING Result;
+    UINTN Size;
+    PCK_STRING String;
+
+    String = CK_AS_STRING(Arguments[0]);
+
+    //
+    // The arguments are the old string, the new string, and the max
+    // replacement count.
+    //
+
+    if ((!CK_IS_STRING(Arguments[1])) ||
+        (!CK_IS_STRING(Arguments[2])) ||
+        (!CK_IS_INTEGER(Arguments[3]))) {
+
+        CkpRuntimeError(Vm, "TypeError", "Expected two strings and an integer");
+        return FALSE;
+    }
+
+    Old = CK_AS_STRING(Arguments[1]);
+    New = CK_AS_STRING(Arguments[2]);
+    MaxReplace = CK_AS_INTEGER(Arguments[3]);
+
+    //
+    // Determine the size of the new string by counting occurrences of the old
+    // string.
+    //
+
+    Size = String->Length;
+    Index = 0;
+    ReplaceIndex = 0;
+    while (ReplaceIndex < (UINTN)MaxReplace) {
+        Index = CkpStringFind(String, Index, Old);
+        if (Index == (UINTN)-1) {
+            break;
+        }
+
+        Index += Old->Length;
+        Size += New->Length - Old->Length;
+        ReplaceIndex += 1;
+    }
+
+    Result = CkpStringAllocate(Vm, Size);
+    if (Result == NULL) {
+        return FALSE;
+    }
+
+    Out = (PSTR)(Result->Value);
+
+    //
+    // Now create the resulting string.
+    //
+
+    Index = 0;
+    ReplaceIndex = 0;
+    while (TRUE) {
+
+        //
+        // If the replacement count is hit, pretend like no more instances were
+        // found.
+        //
+
+        if (ReplaceIndex >= (UINTN)MaxReplace) {
+            NextIndex = -1;
+
+        } else {
+            NextIndex = CkpStringFind(String, Index, Old);
+        }
+
+        //
+        // If there are no more instances, copy the remainder of the string and
+        // break.
+        //
+
+        if (NextIndex == (UINTN)-1) {
+            CkCopy(Out, String->Value + Index, String->Length - Index);
+
+            CK_ASSERT(Out + (String->Length - Index) ==
+                      Result->Value + Result->Length);
+
+            break;
+        }
+
+        //
+        // Copy up to the next instance.
+        //
+
+        CkCopy(Out, String->Value + Index, NextIndex - Index);
+        Out += NextIndex - Index;
+
+        //
+        // Copy the new string.
+        //
+
+        CkCopy(Out, New->Value, New->Length);
+        Out += New->Length;
+
+        //
+        // Advance beyond the old string.
+        //
+
+        Index = NextIndex + Old->Length;
+        ReplaceIndex += 1;
+    }
+
+    CkpStringHash(Result);
+    CK_OBJECT_VALUE(Arguments[0], Result);
+    return TRUE;
+}
+
+BOOL
+CkpStringCompare (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine compares two strings.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    UINTN CommonLength;
+    PCSTR Left;
+    PCK_STRING LeftString;
+    PCSTR Right;
+    PCK_STRING RightString;
+
+    LeftString = CK_AS_STRING(Arguments[0]);
+    if (!CK_IS_STRING(Arguments[1])) {
+        CkpRuntimeError(Vm, "TypeError", "Expected a string");
+        return FALSE;
+    }
+
+    RightString = CK_AS_STRING(Arguments[1]);
+    Left = LeftString->Value;
+    Right = RightString->Value;
+
+    //
+    // Compare the minimum of their two lengths. Byte-wise compare works on
+    // UTF-8 strings.
+    //
+
+    CommonLength = LeftString->Length;
+    if (CommonLength > RightString->Length) {
+        CommonLength = RightString->Length;
+    }
+
+    while (CommonLength != 0) {
+        if (*Left != *Right) {
+            CK_INT_VALUE(Arguments[0],
+                         (unsigned char)*Left - (unsigned char )*Right);
+
+            return TRUE;
+        }
+
+        Left += 1;
+        Right += 1;
+        CommonLength -= 1;
+    }
+
+    //
+    // If they're the same length and they got this far, they completely match.
+    //
+
+    if (LeftString->Length == RightString->Length) {
+        CK_INT_VALUE(Arguments[0], 0);
+        return TRUE;
+    }
+
+    //
+    // If the left is at the end, then 0 - Right.
+    //
+
+    if (Left == LeftString->Value + LeftString->Length) {
+        CK_INT_VALUE(Arguments[0], 0 - (unsigned char)*Right);
+        return TRUE;
+    }
+
+    //
+    // The right must be at the end. Return Left - 0.
+    //
+
+    CK_INT_VALUE(Arguments[0], (unsigned char)*Left);
+    return TRUE;
+}
+
+BOOL
 CkpStringAdd (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -1650,12 +2426,34 @@ Return Value:
 
 {
 
+    PCK_STRING Left;
+    PCK_STRING Result;
+    PCK_STRING Right;
+
     if (!CK_IS_STRING(Arguments[1])) {
         CkpRuntimeError(Vm, "TypeError", "Expected a string");
         return FALSE;
     }
 
-    Arguments[0] = CkpStringFormat(Vm, "@@", Arguments[0], Arguments[1]);
+    Left = CK_AS_STRING(Arguments[0]);
+    Right = CK_AS_STRING(Arguments[1]);
+    if (Left->Length == 0) {
+        Arguments[0] = Arguments[1];
+        return TRUE;
+
+    } else if (Right->Length == 0) {
+        return TRUE;
+    }
+
+    Result = CkpStringAllocate(Vm, Left->Length + Right->Length);
+    if (Result == NULL) {
+        return FALSE;
+    }
+
+    CkCopy((PSTR)(Result->Value), Left->Value, Left->Length);
+    CkCopy((PSTR)(Result->Value + Left->Length), Right->Value, Right->Length);
+    CkpStringHash(Result);
+    CK_OBJECT_VALUE(Arguments[0], Result);
     return TRUE;
 }
 
@@ -1762,7 +2560,6 @@ Return Value:
 
     UINTN Count;
     INTN Start;
-    LONG Step;
     PCK_STRING String;
 
     String = CK_AS_STRING(Arguments[0]);
@@ -1778,7 +2575,6 @@ Return Value:
         }
 
         Count = 1;
-        Step = 1;
 
     } else {
         if (!CK_IS_RANGE(Arguments[1])) {
@@ -1787,13 +2583,76 @@ Return Value:
         }
 
         Count = String->Length;
-        Start = CkpGetRange(Vm, CK_AS_RANGE(Arguments[1]), &Count, &Step);
+        Start = CkpGetRange(Vm, CK_AS_RANGE(Arguments[1]), &Count);
         if (Start == MAX_UINTN) {
             return FALSE;
         }
     }
 
-    Arguments[0] = CkpStringCreateFromRange(Vm, String, Start, Count, Step);
+    Arguments[0] = CkpStringSliceBytes(Vm, String, Start, Count);
+    return TRUE;
+}
+
+BOOL
+CkpStringSliceCharacters (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns a substring slice of a given string.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    UINTN Count;
+    INTN Start;
+    PCK_STRING String;
+
+    String = CK_AS_STRING(Arguments[0]);
+    if (CK_IS_INTEGER(Arguments[1])) {
+        Start = CK_AS_INTEGER(Arguments[1]);
+        if (Start < 0) {
+            Start += String->Length;
+        }
+
+        if ((Start < 0) || (Start >= String->Length)) {
+            CkpRuntimeError(Vm, "IndexError", "String index out of range");
+            return FALSE;
+        }
+
+        Count = 1;
+
+    } else {
+        if (!CK_IS_RANGE(Arguments[1])) {
+            CkpRuntimeError(Vm, "TypeError", "Expected an integer or range");
+            return FALSE;
+        }
+
+        Count = String->Length;
+        Start = CkpGetRange(Vm, CK_AS_RANGE(Arguments[1]), &Count);
+        if (Start == MAX_UINTN) {
+            return FALSE;
+        }
+    }
+
+    Arguments[0] = CkpStringCreateFromCharacterRange(Vm, String, Start, Count);
     return TRUE;
 }
 
@@ -1860,10 +2719,10 @@ Return Value:
 
     PSTR Destination;
     CHAR Digit;
-    PCSTR End;
+    PCUCHAR End;
     UINTN Length;
     PCK_STRING Result;
-    PCSTR Source;
+    PCUCHAR Source;
     PCK_STRING SourceString;
 
     SourceString = CK_AS_STRING(Arguments[0]);
@@ -1872,7 +2731,7 @@ Return Value:
     // Figure out how long the string is.
     //
 
-    Source = SourceString->Value;
+    Source = (PCUCHAR)(SourceString->Value);
     End = Source + SourceString->Length;
     Length = 2;
     while (Source < End) {
@@ -1900,7 +2759,7 @@ Return Value:
     }
 
     Destination = (PSTR)(Result->Value);
-    Source = SourceString->Value;
+    Source = (PCUCHAR)(SourceString->Value);
     *Destination = '"';
     Destination += 1;
     while (Source < End) {
@@ -1954,5 +2813,145 @@ Return Value:
     CkpStringHash(Result);
     CK_OBJECT_VALUE(Arguments[0], Result);
     return TRUE;
+}
+
+CK_VALUE
+CkpStringCreateFromCharacterRange (
+    PCK_VM Vm,
+    PCK_STRING Source,
+    UINTN Start,
+    UINTN Count
+    )
+
+/*++
+
+Routine Description:
+
+    This routine creates a new string object based on a portion of another
+    string.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Source - Supplies a pointer to the source string.
+
+    Start - Supplies the starting index to slice from.
+
+    Count - Supplies the number of characters to slice.
+
+Return Value:
+
+    Returns the new string value on success.
+
+    CK_NULL_VALUE on allocation failure.
+
+--*/
+
+{
+
+    INT Character;
+    UINTN CurrentIndex;
+    PUCHAR From;
+    UINTN Index;
+    UINTN Length;
+    PCK_STRING NewString;
+    UINTN SourceLength;
+    PUCHAR To;
+    CK_VALUE Value;
+
+    CK_ASSERT(Source->Header.Type == CkObjectString);
+
+    //
+    // Reuse the old string if the whole thing is being copied.
+    //
+
+    if ((Start == 0) && (Count >= Source->Length)) {
+        CK_OBJECT_VALUE(Value, Source);
+        return Value;
+    }
+
+    From = (PUCHAR)(Source->Value);
+    SourceLength = Source->Length;
+    Length = 0;
+    for (Index = 0; Index < Count; Index += 1) {
+        CurrentIndex = Start + Index;
+
+        CK_ASSERT(CurrentIndex < SourceLength);
+
+        Length += CkpUtf8DecodeSize(From[CurrentIndex]);
+    }
+
+    NewString = CkpStringAllocate(Vm, Length);
+    if (NewString == NULL) {
+        return CK_NULL_VALUE;
+    }
+
+    To = (PUCHAR)(NewString->Value);
+    for (Index = 0; Index < Count; Index += 1) {
+        CurrentIndex = Start + Index;
+        Character = CkpUtf8Decode(From + CurrentIndex,
+                                  SourceLength - CurrentIndex);
+
+        if (Character != -1) {
+            To += CkpUtf8Encode(Character, To);
+        }
+    }
+
+    CkpStringHash(NewString);
+    CK_OBJECT_VALUE(Value, NewString);
+    return Value;
+}
+
+CK_VALUE
+CkpStringSliceBytes (
+    PCK_VM Vm,
+    PCK_STRING Source,
+    UINTN Start,
+    UINTN Count
+    )
+
+/*++
+
+Routine Description:
+
+    This routine creates a new string object based on a portion of another
+    string.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Source - Supplies a pointer to the source string.
+
+    Start - Supplies the starting byte index to slice from.
+
+    Count - Supplies the number of bytes to slice.
+
+Return Value:
+
+    Returns the new string value on success.
+
+    CK_NULL_VALUE on allocation failure.
+
+--*/
+
+{
+
+    CK_VALUE Value;
+
+    CK_ASSERT(Source->Header.Type == CkObjectString);
+    CK_ASSERT((Start <= Source->Length) && (Start + Count <= Source->Length));
+
+    //
+    // Reuse the old string if the whole thing is being copied.
+    //
+
+    if ((Start == 0) && (Count >= Source->Length)) {
+        CK_OBJECT_VALUE(Value, Source);
+        return Value;
+    }
+
+    return CkpStringCreate(Vm, Source->Value + Start, Count);
 }
 

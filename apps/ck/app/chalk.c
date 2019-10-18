@@ -53,12 +53,13 @@ Environment:
     "usage: chalk [options] [file] [arguments...]\n"                           \
     "Chalk is a nifty scripting language. It's designed to be intuitive, \n"   \
     "small, and easily embeddable. Options are:\n"                             \
+    "  -c \"expr\" -- Execute the given expression and exit.\n"                \
     "  --debug-gc -- Stress the garbage collector.\n"                          \
     "  --debug-compiler -- Print the compiled bytecode.\n"                     \
     "  --help -- Show this help text and exit.\n"                              \
     "  --version -- Print the application version information and exit.\n"
 
-#define CHALK_OPTIONS_STRING "hV"
+#define CHALK_OPTIONS_STRING "+c:chV"
 
 #define CHALK_LINE_MAX 2048
 
@@ -173,16 +174,23 @@ Return Value:
 
 {
 
+    BOOL AppIsBundle;
+    PSTR ArgumentCopy;
     ULONG ArgumentIndex;
     PSTR BaseName;
     CK_APP_CONTEXT Context;
+    PCSTR Expression;
     PSTR FileBuffer;
     UINTN FileSize;
     INT Option;
     PSTR ScriptPath;
     int Status;
 
+    ArgumentIndex = 1;
+    AppIsBundle = FALSE;
+    Expression = NULL;
     FileBuffer = NULL;
+    ScriptPath = NULL;
     Status = ChalkInitializeContext(&Context);
     if (Status != 0) {
         fprintf(stderr, "Failed to initialize: %s.\n", strerror(Status));
@@ -191,53 +199,94 @@ Return Value:
     }
 
     //
-    // Process the control arguments.
+    // Figure out early if this executable is a bundle. If it is, don't do
+    // regular argument parsing.
     //
 
-    while (TRUE) {
-        Option = getopt_long(ArgumentCount,
-                             Arguments,
-                             CHALK_OPTIONS_STRING,
-                             ChalkLongOptions,
-                             NULL);
+    if (ArgumentCount == 0) {
+        fprintf(stderr, "Arg0 required.\n");
+        Status = 2;
+        goto MainEnd;
+    }
 
-        if (Option == -1) {
-            break;
+    ArgumentCopy = strdup(Arguments[0]);
+    if (ArgumentCopy != NULL) {
+        BaseName = basename(Arguments[0]);
+        if (BaseName != NULL) {
+            if (strncasecmp(BaseName, "chalk", 5) != 0) {
+                AppIsBundle = TRUE;
+            }
         }
 
-        if ((Option == '?') || (Option == ':')) {
-            Status = 2;
-            goto MainEnd;
+        free(ArgumentCopy);
+    }
+
+    CkAppArgv = Arguments;
+    CkAppArgc = ArgumentCount;
+
+    //
+    // Process the control arguments if this is the Chalk app acting as the
+    // Chalk app.
+    //
+
+    if (AppIsBundle == FALSE) {
+        while (TRUE) {
+            optarg = NULL;
+            Option = getopt_long(ArgumentCount,
+                                 Arguments,
+                                 CHALK_OPTIONS_STRING,
+                                 ChalkLongOptions,
+                                 NULL);
+
+            if (Option == -1) {
+                break;
+            }
+
+            if ((Option == '?') || (Option == ':')) {
+                Status = 2;
+                goto MainEnd;
+            }
+
+            switch (Option) {
+            case 'c':
+                Expression = optarg;
+                break;
+
+            case CHALK_OPTION_DEBUG_GC:
+                Context.Configuration.Flags |= CK_CONFIGURATION_GC_STRESS;
+                break;
+
+            case CHALK_OPTION_DEBUG_COMPILER:
+                Context.Configuration.Flags |= CK_CONFIGURATION_DEBUG_COMPILER;
+                break;
+
+            case 'V':
+                printf("Chalk version %d.%d.%d. Copyright 2017 Minoca Corp. "
+                       "All Rights Reserved.\n",
+                       CHALK_VERSION_MAJOR,
+                       CHALK_VERSION_MINOR,
+                       CHALK_VERSION_REVISION);
+
+                return 1;
+
+            case 'h':
+                printf(CHALK_USAGE);
+                return 2;
+
+            default:
+
+                assert(FALSE);
+
+                Status = 2;
+                goto MainEnd;
+            }
         }
 
-        switch (Option) {
-        case CHALK_OPTION_DEBUG_GC:
-            Context.Configuration.Flags |= CK_CONFIGURATION_GC_STRESS;
-            break;
-
-        case CHALK_OPTION_DEBUG_COMPILER:
-            Context.Configuration.Flags |= CK_CONFIGURATION_DEBUG_COMPILER;
-            break;
-
-        case 'V':
-            printf("Chalk version %d.%d.%d. Copyright 2016 Minoca Corp. "
-                   "All Rights Reserved.\n",
-                   CHALK_VERSION_MAJOR,
-                   CHALK_VERSION_MINOR,
-                   CHALK_VERSION_REVISION);
-
-            return 1;
-
-        case 'h':
-            printf(CHALK_USAGE);
-            return 2;
-
-        default:
-
-            assert(FALSE);
-
-            Status = 2;
-            goto MainEnd;
+        ArgumentIndex = optind;
+        if (ArgumentIndex < ArgumentCount) {
+            ScriptPath = Arguments[ArgumentIndex];
+            CkAppArgc = ArgumentCount - ArgumentIndex;
+            CkAppArgv = Arguments + ArgumentIndex;
         }
     }
 
@@ -248,20 +297,12 @@ Return Value:
         goto MainEnd;
     }
 
-    if ((!CkPreloadAppModule(Context.Vm)) ||
+    if ((!CkPreloadAppModule(Context.Vm, Arguments[0])) ||
         (!CkPreloadBundleModule(Context.Vm))) {
 
         fprintf(stderr, "Error: Failed to preload builtin modules.\n");
         Status = 2;
         goto MainEnd;
-    }
-
-    CkBundleExecName = Arguments[0];
-    CkAppExecName = Arguments[0];
-    ArgumentIndex = optind;
-    ScriptPath = NULL;
-    if (ArgumentIndex < ArgumentCount) {
-        ScriptPath = Arguments[ArgumentIndex];
     }
 
     //
@@ -284,21 +325,32 @@ Return Value:
     // the app.
     //
 
-    BaseName = basename(Arguments[0]);
-    if (strncasecmp(BaseName, "chalk", 5) != 0) {
-        CkAppArgv = Arguments + 1;
-        CkAppArgc = ArgumentCount - 1;
+    if (AppIsBundle != FALSE) {
         Status = CkBundleThaw(Context.Vm);
-        if (Status != -1) {
-            goto MainEnd;
-        }
+        goto MainEnd;
     }
+
+    //
+    // Run the expression if there was one.
+    //
+
+    if (Expression != NULL) {
+        Status = CkInterpret(Context.Vm,
+                             NULL,
+                             Expression,
+                             strlen(Expression),
+                             1,
+                             FALSE);
+
+        if (Status != CkSuccess) {
+            Status = 1;
+        }
 
     //
     // Run the script if there was one.
     //
 
-    if (ScriptPath != NULL) {
+    } else if (ScriptPath != NULL) {
         FileBuffer = ChalkLoadFile(ScriptPath, &FileSize);
         if (FileBuffer == NULL) {
             fprintf(stderr,
@@ -312,7 +364,12 @@ Return Value:
 
         CkAppArgc = ArgumentCount - ArgumentIndex;
         CkAppArgv = Arguments + ArgumentIndex;
-        Status = CkInterpret(Context.Vm, ScriptPath, FileBuffer, FileSize, 1);
+        Status = CkInterpret(Context.Vm,
+                             ScriptPath,
+                             FileBuffer,
+                             FileSize,
+                             1,
+                             FALSE);
 
     //
     // With no arguments, run the interactive interpreter.
@@ -606,6 +663,7 @@ Return Value:
     while (TRUE) {
         Line = Context->LineNumber;
         printf("%d> ", Line);
+        fflush(NULL);
         Status = ChalkReadLine(Context);
         if (Status == EOF) {
             Status = 0;
@@ -619,7 +677,8 @@ Return Value:
                     NULL,
                     Context->Line,
                     strlen(Context->Line),
-                    Line);
+                    Line,
+                    TRUE);
     }
 
     return Status;
@@ -674,6 +733,7 @@ Return Value:
         return EOF;
     }
 
+    fprintf(stderr, "Failed to read line: %s", strerror(errno));
     return errno;
 }
 

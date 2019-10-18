@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2016 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2016 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -32,13 +37,15 @@ VPATH += $(SRCDIR)/..:
 
 include $(SRCDIR)/../sources
 
-ifeq ($(OS),Windows_NT)
+OS ?= $(shell uname -s)
 
-# OBJS += $(WIN32_OBJS)
+ifeq ($(OS),$(filter Windows_NT cygwin,$(OS)))
+
+OBJS += $(WIN32_OBJS)
 
 else
 
-# OBJS += $(POSIX_OBJS)
+OBJS += $(POSIX_OBJS)
 
 endif
 

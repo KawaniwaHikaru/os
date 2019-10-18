@@ -246,15 +246,8 @@ typedef enum _KE_INFORMATION_TYPE {
     KeInformationProcessorUsage,
     KeInformationProcessorCount,
     KeInformationKernelCommandLine,
+    KeInformationBannerThread,
 } KE_INFORMATION_TYPE, *PKE_INFORMATION_TYPE;
-
-typedef enum _SYSTEM_RESET_TYPE {
-    SystemResetInvalid,
-    SystemResetShutdown,
-    SystemResetWarm,
-    SystemResetCold,
-    SystemResetTypeCount
-} SYSTEM_RESET_TYPE, *PSYSTEM_RESET_TYPE;
 
 typedef enum _SYSTEM_FIRMWARE_TYPE {
     SystemFirmwareInvalid,
@@ -571,9 +564,12 @@ Members:
 
     RunLevel - Stores the current run level of the processor.
 
-    Tss - Stores a pointer to the current Task Segment for this processor. This
-        only applies to PC processors. This member is accessed directly by
-        assembly code, so its offset must be manually maintained.
+    Tss - Stores a pointer to the current Task Segment for this processor.
+        This member is accessed directly by assembly code, so its offset must
+        be manually maintained. On ARM, this member stores the virtual address
+        of the current top level page table. This is needed so that the check
+        for directory updates function can get to the first level table without
+        dereferencing the thread during delicate context swap regions.
 
     Gdt - Stores a pointer to the GDT for this processor. This only applies to
         PC processors. This member is accessed directly by assembly code, so
@@ -975,9 +971,6 @@ Members:
         other time members are updated (with a memory barrier in between the
         updates of all other time variables and this one).
 
-    CurrentTimeZoneDataSize - Stores the size in bytes needed to get the
-        current system time zone data.
-
     ProcessorFeatures - Stores a bitfield of architecture-specific feature
         flags.
 
@@ -994,7 +987,6 @@ typedef struct _USER_SHARED_DATA {
     volatile SYSTEM_TIME SystemTime;
     volatile ULONGLONG TickCount;
     volatile ULONGLONG TickCount2;
-    volatile ULONG CurrentTimeZoneDataSize;
     ULONG ProcessorFeatures;
 } USER_SHARED_DATA, *PUSER_SHARED_DATA;
 
@@ -2065,67 +2057,6 @@ Return Value:
 
 KERNEL_API
 KSTATUS
-KeSetSystemTimeZone (
-    PSTR ZoneName,
-    PSTR OriginalZoneBuffer,
-    PULONG OriginalZoneBufferSize
-    );
-
-/*++
-
-Routine Description:
-
-    This routine attempts to set the system's time zone.
-
-Arguments:
-
-    ZoneName - Supplies an optional pointer to the null terminated string
-        containing the name of the time zone to set. If this parameter is NULL,
-        then the current time zone will be returned an no other changes will
-        be made.
-
-    OriginalZoneBuffer - Supplies an optional pointer where the original (or
-        current if no new time zone was provided) time zone will be returned.
-        This must be allocated in non-paged pool.
-
-    OriginalZoneBufferSize - Supplies a pointer that on input contains the
-        size of the original zone buffer in bytes. On output, this value will
-        contain the size of the original zone buffer needed to contain the
-        name of the current time zone (even if no buffer was provided).
-
-Return Value:
-
-    Status code.
-
---*/
-
-KERNEL_API
-KSTATUS
-KeGetCurrentTimeZoneOffset (
-    PLONG TimeZoneOffset
-    );
-
-/*++
-
-Routine Description:
-
-    This routine returns the current time zone offset. Note that this data is
-    stale as soon as it is returned.
-
-Arguments:
-
-    TimeZoneOffset - Supplies a pointer where the current (or really
-        immediately previous) time zone offset in seconds to be added to GMT
-        will be returned.
-
-Return Value:
-
-    Status code.
-
---*/
-
-KERNEL_API
-KSTATUS
 KeGetSetSystemInformation (
     SYSTEM_INFORMATION_SUBSYSTEM Subsystem,
     UINTN InformationType,
@@ -2178,8 +2109,8 @@ KERNEL_API
 PKERNEL_ARGUMENT
 KeGetKernelArgument (
     PKERNEL_ARGUMENT Start,
-    PSTR Component,
-    PSTR Name
+    PCSTR Component,
+    PCSTR Name
     );
 
 /*++
@@ -2233,31 +2164,6 @@ Return Value:
     STATUS_NOT_SUPPORTED if the system cannot be reset.
 
     STATUS_UNSUCCESSFUL if the system did not reset.
-
---*/
-
-INTN
-KeSysTimeZoneControl (
-    PVOID SystemCallParameter
-    );
-
-/*++
-
-Routine Description:
-
-    This routine performs system time zone control operations.
-
-Arguments:
-
-    SystemCallParameter - Supplies a pointer to the parameters supplied with
-        the system call. This structure will be a stack-local copy of the
-        actual parameters passed from user-mode.
-
-Return Value:
-
-    STATUS_SUCCESS or positive integer on success.
-
-    Error status code on failure.
 
 --*/
 
@@ -2596,7 +2502,7 @@ KERNEL_API
 PWORK_QUEUE
 KeCreateWorkQueue (
     ULONG Flags,
-    PSTR Name
+    PCSTR Name
     );
 
 /*++
@@ -3449,7 +3355,7 @@ VOID
 KeVideoPrintString (
     ULONG XCoordinate,
     ULONG YCoordinate,
-    PSTR String
+    PCSTR String
     );
 
 /*++
@@ -3537,8 +3443,46 @@ Return Value:
 
 --*/
 
+VOID
+KeVideoClearScreen (
+    LONG MinimumX,
+    LONG MinimumY,
+    LONG MaximumX,
+    LONG MaximumY
+    );
+
+/*++
+
+Routine Description:
+
+    This routine clears a portion of the video screen.
+
+Arguments:
+
+    MinimumX - Supplies the minimum X coordinate of the rectangle to clear,
+        inclusive.
+
+    MinimumY - Supplies the minimum Y coordinate of the rectangle to clear,
+        inclusive.
+
+    MaximumX - Supplies the maximum X coordinate of the rectangle to clear,
+        exclusive.
+
+    MaximumY - Supplies the maximum Y coordinate of the rectangle to clear,
+        exclusive.
+
+Return Value:
+
+    None.
+
+--*/
+
 KSTATUS
 KeVideoGetDimensions (
+    PULONG Width,
+    PULONG Height,
+    PULONG CellWidth,
+    PULONG CellHeight,
     PULONG Columns,
     PULONG Rows
     );
@@ -3547,9 +3491,25 @@ KeVideoGetDimensions (
 
 Routine Description:
 
-    This routine returns the text dimensions of the kernel's video frame buffer.
+    This routine returns the dimensions of the kernel's video frame buffer.
 
 Arguments:
+
+    Width - Supplies an optional pointer where the width in pixels will be
+        returned. For text-based frame buffers, this will be equal to the
+        number of text columns.
+
+    Height - Supplies an optional pointer where the height in pixels will be
+        returned. For text-based frame buffers, this will be equal to the
+        number of text rows.
+
+    CellWidth - Supplies an optional pointer where the width in pixels of a
+        text character will be returned on success. For text-based frame
+        buffers, 1 will be returned.
+
+    CellHeight - Supplies an optional pointer where the height in pixels of a
+        text character will be returned on success. For text-based frame
+        buffers, 1 will be returned.
 
     Columns - Supplies an optional pointer where the number of text columns
         will be returned.
@@ -3569,7 +3529,8 @@ INTN
 KeSystemCallHandler (
     ULONG SystemCallNumber,
     PVOID SystemCallParameter,
-    PTRAP_FRAME TrapFrame
+    PTRAP_FRAME TrapFrame,
+    PUINTN SignalPending
     );
 
 /*++
@@ -3590,6 +3551,10 @@ Arguments:
 
     TrapFrame - Supplies a pointer to the trap frame generated by this jump
         from user mode to kernel mode.
+
+    SignalPending - Supplies a pointer where a boolean will be returned
+        indicating if a signal is pending on the current thread or process that
+        needs to be dispatched.
 
 Return Value:
 

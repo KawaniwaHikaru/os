@@ -247,6 +247,7 @@ UUID PartPartitionDeviceInformationUuid = PARTITION_DEVICE_INFORMATION_UUID;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -256,7 +257,7 @@ DriverEntry (
 
 Routine Description:
 
-    This routine implements the initial entry point of the networking core
+    This routine implements the initial entry point of the partition
     library, called when the library is first loaded.
 
 Arguments:
@@ -816,13 +817,13 @@ Return Value:
                 // Enable opening of the root as a single file.
                 //
 
-                Properties = &(Lookup->Properties);
+                Properties = Lookup->Properties;
                 Properties->FileId = 0;
                 Properties->Type = IoObjectBlockDevice;
                 Properties->HardLinkCount = 1;
                 Properties->BlockSize = BlockSize;
                 Properties->BlockCount = BlockCount;
-                WRITE_INT64_SYNC(&(Properties->FileSize), FileSize);
+                Properties->Size = FileSize;
                 Status = STATUS_SUCCESS;
             }
 
@@ -841,7 +842,7 @@ Return Value:
 
             FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
             Properties = FileOperation->FileProperties;
-            READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+            PropertiesFileSize = Properties->Size;
             if ((Properties->FileId != 0) ||
                 (Properties->Type != IoObjectBlockDevice) ||
                 (Properties->HardLinkCount != 1) ||

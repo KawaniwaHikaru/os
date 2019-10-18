@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -587,7 +586,7 @@ Members:
 
     sa_sigaction - Stores a pointer to a function to be called to handle the
         signal. It takes three parameters: the signal number, a pointer to the
-        signal information, and an unused context pointer.
+        signal information, and a pointer to the signal context.
 
     sa_mask - Stores the mask of signals to add to the mask of blocked signals
         when this handler is called.
@@ -1161,7 +1160,7 @@ sigwait (
 Routine Description:
 
     This routine waits for a signal from the given set and returns the number
-    of the recieved signal.
+    of the received signal.
 
 Arguments:
 

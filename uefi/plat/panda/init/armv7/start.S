@@ -26,45 +26,52 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------- Includes
-##
+//
+// ------------------------------------------------------------------- Includes
+//
 
-##
-## ---------------------------------------------------------------- Definitions
-##
+//
+// ---------------------------------------------------------------- Definitions
+//
 
-##
-## ----------------------------------------------------------------------- Code
-##
+//
+// ----------------------------------------------------------------------- Code
+//
 
-##
-## .text specifies that this code belongs in the executable section.
-##
-## .arm specifies that this is ARM code, not Thumb code.
-##
-## .align 4 specifies that ARM instructions must be word aligned.
-##
+//
+// .text specifies that this code belongs in the executable section.
+//
+// .arm specifies that this is ARM code, not Thumb code.
+//
+// .align 4 specifies that ARM instructions must be word aligned.
+//
 
 .text
 .arm
 .align 4
 
-##
-## .globl allows this label to be visible to the linker.
-##
+//
+// Stick this in the .init section so it ends up at the front of the binary.
+//
+
+.section .init
+
+//
+// .globl allows this label to be visible to the linker.
+//
 
 .globl _start
+.globl _end
 .globl EfiDisableInterrupts
 .globl EfiEnableInterrupts
 
 .func _start
 
-##
-## VOID
-## _start (
-##     )
-##
+//
+// VOID
+// _start (
+//     )
+//
 
 /*++
 
@@ -86,17 +93,17 @@ Return Value:
 
 _start:
 
-    ##
-    ## Copy the image whereever it was loaded to where it was supposed to be
-    ## loaded.
-    ##
+    //
+    // Copy the image whereever it was loaded to where it was supposed to be
+    // loaded.
+    //
 
     adr     %r7, _start             @ Get the current address.
     adr     %r8, ImageSize          @ Get the image size address (relatively).
     ldr     %r8, [%r8]              @ Get the image size.
     add     %r7, %r7, %r8           @ Add size to start to get image end.
-    ldr     %r8, =_start            @ Get correct address of start.
-    ldr     %r9, =__bss_end         @ Get correct address of end.
+    ldr     %r8, =_start            @ Get correct address of image start.
+    ldr     %r9, =_end              @ Get correct address of image end.
 
 CopyImage:
     ldr     %r6, [%r7], #-4         @ Load a word from the source.
@@ -104,9 +111,9 @@ CopyImage:
     cmp     %r9, %r8                @ Finished?
     bne     CopyImage               @ If not, keep copying.
 
-    ##
-    ## Jump to the C routine.
-    ##
+    //
+    // Jump to the C routine.
+    //
 
     ldr     %r8, =EfiFirstStageLoader   @ Get C routine address, absolute.
     bx      %r8                     @ Jump to destination image.
@@ -115,16 +122,16 @@ DeadLoop:
     b       DeadLoop                @ Spin forever.
 
 ImageSize:
-    .word   __bss_end - _start
+    .word   _end - _start
 
 .ltorg
 
-##
-## BOOLEAN
-## EfiDisableInterrupts (
-##     VOID
-##     )
-##
+//
+// BOOLEAN
+// EfiDisableInterrupts (
+//     VOID
+//     )
+//
 
 /*++
 
@@ -153,12 +160,12 @@ EfiDisableInterrupts:
     movne   %r0, #1                 @ If enabled, return TRUE.
     bx      %lr                     @
 
-##
-## VOID
-## EfiEnableInterrupts (
-##     VOID
-##     )
-##
+//
+// VOID
+// EfiEnableInterrupts (
+//     VOID
+//     )
+//
 
 /*++
 

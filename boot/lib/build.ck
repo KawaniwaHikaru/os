@@ -25,8 +25,28 @@ Environment:
 
 --*/
 
+from menv import addConfig, compiledSources, mconfig, kernelLibrary;
+
 function build() {
-    common_sources = [
+    var arch = mconfig.arch;
+    var commonArmEfiSources;
+    var commonArmSources;
+    var commonLib;
+    var commonList;
+    var commonSources;
+    var commonX86Sources;
+    var entries;
+    var includes;
+    var efiLib;
+    var efiSources;
+    var pcat32Lib;
+    var pcatLib;
+    var pcatSources;
+    var pcat32Sources;
+    var pcatX86Sources;
+    var sourcesConfig;
+
+    commonSources = [
         "bootfat.c",
         "bootmem.c",
         "file.c",
@@ -34,19 +54,18 @@ function build() {
         "version.c"
     ];
 
-    pcat_sources = [
+    pcatSources = [
         "pcat/fwapi.c",
         "pcat/int10.c",
         "pcat/int13.c",
         "pcat/memory.c",
-        "pcat/realmexe.S",
         "pcat/realmode.c",
         "pcat/reset.c",
         "pcat/rsdp.c",
         "pcat/time.c"
     ];
 
-    efi_sources = [
+    efiSources = [
         "efi/dbgser.c",
         "efi/disk.c",
         "efi/fwapi.c",
@@ -56,60 +75,126 @@ function build() {
         "efi/video.c"
     ];
 
-    common_arm_sources = [
+    commonArmSources = [
         "armv7/commsup.S",
         "armv7/inttable.S",
         "armv7/prochw.c"
     ];
 
-    common_arm_efi_sources = [
+    commonArmEfiSources = [
         "efi/armv7/efia.S",
         "efi/armv7/efiarch.c"
     ];
 
+    commonX86Sources = [
+        "x86/archsup.S",
+        "x86/prochw.c"
+    ];
+
+    pcatX86Sources = [
+        "pcat/x86/realmexe.S",
+    ];
+
     if (arch == "armv7") {
-        common_sources += common_arm_sources + [
+        commonSources += commonArmSources + [
             "armv7/archsup.S"
         ];
 
-        efi_sources += common_arm_efi_sources;
+        efiSources += commonArmEfiSources;
 
     } else if (arch == "armv6") {
-        common_sources += common_arm_sources + [
+        commonSources += commonArmSources + [
             "armv6/archsup.S"
         ];
 
-        efi_sources += common_arm_efi_sources;
+        efiSources += commonArmEfiSources;
 
     } else if (arch == "x86") {
-        common_sources += [
-            "x86/archsup.S",
-            "x86/prochw.c"
-        ];
-
-        efi_sources += [
+        efiSources += [
             "efi/x86/efia.S",
             "efi/x86/efiarch.c"
+        ];
+
+        commonSources += commonX86Sources;
+        pcatSources += pcatX86Sources;
+
+    } else if (arch == "x64") {
+        pcat32Sources = commonSources + commonX86Sources +
+                        pcatSources + pcatX86Sources;
+
+        commonSources += [
+            "x64/archsup.S",
+            "x64/prochw.c"
+        ];
+
+        efiSources += [
+            "efi/x64/efia.S",
+            "efi/x64/efiarch.c"
+        ];
+
+        pcatSources += [
+            "pcat/x64/realmexe.S"
         ];
     }
 
     includes = [
-        "$//boot/lib/include",
-        "$//boot/lib"
+        "$S/boot/lib/include",
+        "$S/boot/lib"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-fshort-wchar"],
     };
 
-    common_lib = {
-        "inputs": common_sources,
-        "sources_config": sources_config,
+    commonLib = {
+        "inputs": commonSources,
+        "sources_config": sourcesConfig,
         "includes": includes
     };
 
-    common_list = compiled_sources(common_lib);
-    entries = common_list[1];
+    commonList = compiledSources(commonLib);
+    entries = commonList[1];
+    efiLib = {
+        "label": "bootefi",
+        "inputs": commonList[0] + efiSources,
+        "sources_config": sourcesConfig
+    };
+
+    entries += kernelLibrary(efiLib);
+
+    //
+    // On PC machines, build the BIOS library as well.
+    //
+
+    if ((arch == "x86") || (arch == "x64")) {
+        pcatLib = {
+            "label": "bootpcat",
+            "inputs": commonList[0] + pcatSources,
+            "sources_config": sourcesConfig,
+            "includes": includes
+        };
+
+        entries += kernelLibrary(pcatLib);
+
+        //
+        // Also build the 32-bit version of the PCAT library in 64-bit mode
+        // for the boot manager (which is 32-bits always).
+        //
+
+        if (arch == "x64") {
+            sourcesConfig = sourcesConfig.copy();
+            sourcesConfig["CPPFLAGS"] = ["-m32"];
+            pcat32Lib = {
+                "label": "bootpcat32",
+                "inputs": pcat32Sources,
+                "sources_config": sourcesConfig,
+                "includes": includes,
+                "prefix": "x6432"
+            };
+
+            entries += kernelLibrary(pcat32Lib);
+        }
+    }
 
     //
     // Add the include and dependency for version.c, which uses the kernel's
@@ -117,37 +202,12 @@ function build() {
     //
 
     for (entry in entries) {
-        if (entry["output"] == "version.o") {
-            add_config(entry, "CPPFLAGS", "-I$^/kernel");
-            entry["implicit"] = ["//kernel:version.h"];
-            break;
+        if (entry["output"].endsWith("version.o")) {
+            addConfig(entry, "CPPFLAGS", "-I$O/kernel");
+            entry["implicit"] = ["kernel:version.h"];
         }
-    }
-
-    efi_lib = {
-        "label": "bootefi",
-        "inputs": common_list[0] + efi_sources,
-        "sources_config": sources_config
-    };
-
-    entries += static_library(efi_lib);
-
-    //
-    // On PC machines, build the BIOS library as well.
-    //
-
-    if (arch == "x86") {
-        pcat_lib = {
-            "label": "bootpcat",
-            "inputs": common_list[0] + pcat_sources,
-            "sources_config": sources_config,
-            "includes": includes
-        };
-
-        entries += static_library(pcat_lib);
     }
 
     return entries;
 }
 
-return build();

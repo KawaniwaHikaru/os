@@ -32,6 +32,7 @@ Environment:
 #include <minoca/kernel/driver.h>
 #include <minoca/intrface/disk.h>
 #include <minoca/intrface/pci.h>
+#include <minoca/storage/ata.h>
 #include "ata.h"
 
 //
@@ -320,6 +321,7 @@ DISK_INTERFACE AtaDiskInterfaceTemplate = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -1318,15 +1320,13 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectBlockDevice;
             Properties->HardLinkCount = 1;
             Properties->BlockSize = ATA_SECTOR_SIZE;
             Properties->BlockCount = Device->TotalSectors;
-            WRITE_INT64_SYNC(&(Properties->FileSize),
-                             Device->TotalSectors * ATA_SECTOR_SIZE);
-
+            Properties->Size = Device->TotalSectors * ATA_SECTOR_SIZE;
             Status = STATUS_SUCCESS;
         }
 
@@ -1341,7 +1341,7 @@ Return Value:
     case IrpMinorSystemControlWriteFileProperties:
         FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
         Properties = FileOperation->FileProperties;
-        READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+        PropertiesFileSize = Properties->Size;
         if ((Properties->FileId != 0) ||
             (Properties->Type != IoObjectBlockDevice) ||
             (Properties->HardLinkCount != 1) ||
@@ -2162,7 +2162,7 @@ Return Value:
     Device->DmaSupported = FALSE;
     Status = AtapPioCommand(Device,
                             AtaCommandIdentify,
-                            FALSE,
+                            TRUE,
                             FALSE,
                             0,
                             0,
@@ -2209,9 +2209,7 @@ Return Value:
     // Determine whether or not to do DMA to this device.
     //
 
-    if ((Device->Channel->BusMasterBase != (USHORT)-1) &&
-        (Identify.UltraDmaSettings != 0)) {
-
+    if (Device->Channel->BusMasterBase != (USHORT)-1) {
         Device->DmaSupported = TRUE;
     }
 
@@ -2439,6 +2437,12 @@ Return Value:
         }
     }
 
+    OldRunLevel = RunLevelCount;
+    if (HaveDpcLock == FALSE) {
+        OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
+        KeAcquireSpinLock(&(Device->Controller->DpcLock));
+    }
+
     Status = AtapSelectDevice(Device, FALSE);
     if (!KSUCCESS(Status)) {
         goto PerformDmaIoEnd;
@@ -2449,10 +2453,6 @@ Return Value:
     //
 
     AtapSetupCommand(Device, Lba48, 0, (ULONG)SectorCount, BlockAddress, 0);
-    if (HaveDpcLock == FALSE) {
-        OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
-        KeAcquireSpinLock(&(Device->Controller->DpcLock));
-    }
 
     //
     // Enable interrupts and start the command.
@@ -2495,14 +2495,14 @@ Return Value:
                       IDE_STATUS_INTERRUPT | IDE_STATUS_ERROR);
 
     AtapWriteRegister(Device->Channel, AtaRegisterBusMasterCommand, DmaCommand);
+    Status = STATUS_SUCCESS;
+
+PerformDmaIoEnd:
     if (HaveDpcLock == FALSE) {
         KeReleaseSpinLock(&(Device->Controller->DpcLock));
         KeLowerRunLevel(OldRunLevel);
     }
 
-    Status = STATUS_SUCCESS;
-
-PerformDmaIoEnd:
     return Status;
 }
 
@@ -2710,14 +2710,19 @@ Return Value:
 
 {
 
+    RUNLEVEL OldRunLevel;
     KSTATUS Status;
 
     KeAcquireQueuedLock(Device->Channel->Lock);
+    OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
+    KeAcquireSpinLock(&(Device->Controller->DpcLock));
     Status = AtapSelectDevice(Device, FALSE);
     if (KSUCCESS(Status)) {
         Status = AtapExecuteCacheFlush(Device, FALSE);
     }
 
+    KeReleaseSpinLock(&(Device->Controller->DpcLock));
+    KeLowerRunLevel(OldRunLevel);
     KeReleaseQueuedLock(Device->Channel->Lock);
     return Status;
 }
@@ -2934,6 +2939,7 @@ Return Value:
                                 CriticalMode);
 
         if (!KSUCCESS(Status)) {
+            RtlDebugPrint("ATA: Failed IO: %x\n", Status);
             goto ReadWriteSectorsPioEnd;
         }
 
@@ -2987,7 +2993,7 @@ Arguments:
         The IDENTIFY and PACKET IDENTIFY commands have a known sector count of
         one, zero should be passed in for those.
 
-    MultiCount - Supplies the value of the multicount register.
+    MultiCount - Supplies the actual number of sectors.
 
     CriticalMode - Supplies a boolean indicating if this I/O operation is in
         a critical code path (TRUE), such as a crash dump I/O request, or in
@@ -3009,6 +3015,7 @@ Return Value:
     PATA_CHANNEL Channel;
     PUSHORT CurrentBuffer;
     UCHAR DeviceStatus;
+    RUNLEVEL OldRunLevel;
     PATA_QUERY_TIME_COUNTER QueryTimeCounter;
     KSTATUS Status;
     ULONGLONG Timeout;
@@ -3023,8 +3030,11 @@ Return Value:
     //
 
     QueryTimeCounter = ATA_GET_TIME_FUNCTION(CriticalMode);
+    OldRunLevel = RunLevelCount;
     if (CriticalMode == FALSE) {
         KeAcquireQueuedLock(Channel->Lock);
+        OldRunLevel = KeRaiseRunLevel(RunLevelDispatch);
+        KeAcquireSpinLock(&(Device->Controller->DpcLock));
     }
 
     //
@@ -3207,6 +3217,8 @@ Return Value:
 
 PioCommandEnd:
     if (CriticalMode == FALSE) {
+        KeReleaseSpinLock(&(Device->Controller->DpcLock));
+        KeLowerRunLevel(OldRunLevel);
         KeReleaseQueuedLock(Channel->Lock);
     }
 
@@ -3320,6 +3332,12 @@ Return Value:
     if (Channel->SelectedDevice == Device->Slave) {
         return STATUS_SUCCESS;
     }
+
+    //
+    // Clear the selected device in case this selection fails.
+    //
+
+    Channel->SelectedDevice = 0xFF;
 
     //
     // Get the appropriate time counter routine. The recent time counter

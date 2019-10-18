@@ -53,7 +53,7 @@ Environment:
 // ----------------------------------------------- Internal Function Prototypes
 //
 
-PSTR
+PCSTR
 RtlpTimeZoneGetString (
     PTIME_ZONE_HEADER Header,
     ULONG Offset
@@ -70,7 +70,7 @@ RtlpTimeZoneAddString (
     PSTR StringsBase,
     ULONG StringsSize,
     PULONG CurrentStringsSize,
-    PSTR String,
+    PCSTR String,
     PULONG Offset
     );
 
@@ -111,7 +111,7 @@ RtlpPrintTimeZoneTime (
 
 KSTATUS
 RtlpSelectTimeZone (
-    PSTR ZoneName
+    PCSTR ZoneName
     );
 
 KSTATUS
@@ -139,13 +139,13 @@ VOID
 RtlpTimeZonePerformSubstitution (
     PSTR Destination,
     ULONG DestinationSize,
-    PSTR Format,
+    PCSTR Format,
     PTIME_ZONE_RULE Rule
     );
 
-PSTR
+PCSTR
 RtlpTimeZoneCacheString (
-    PSTR String
+    PCSTR String
     );
 
 //
@@ -236,8 +236,8 @@ SHORT RtlMonthDays[2][MONTHS_PER_YEAR] = {
 // Store the current time zone for standard and daylight time.
 //
 
-PSTR RtlStandardTimeZoneName;
-PSTR RtlDaylightTimeZoneName;
+PCSTR RtlStandardTimeZoneName;
+PCSTR RtlDaylightTimeZoneName;
 LONG RtlStandardTimeZoneOffset;
 LONG RtlDaylightTimeZoneOffset;
 
@@ -301,7 +301,7 @@ KSTATUS
 RtlFilterTimeZoneData (
     PVOID TimeZoneData,
     ULONG TimeZoneDataSize,
-    PSTR TimeZoneName,
+    PCSTR TimeZoneName,
     PVOID FilteredData,
     PULONG FilteredDataSize
     )
@@ -361,7 +361,8 @@ Return Value:
     PTIME_ZONE_RULE Rules;
     ULONG SearchIndex;
     KSTATUS Status;
-    PSTR String;
+    PCSTR String;
+    ULONG StringOffset;
     PSTR StringsBase;
     ULONG StringsSize;
     PTIME_ZONE Zone;
@@ -369,7 +370,7 @@ Return Value:
     PTIME_ZONE_ENTRY ZoneEntry;
     ULONG ZoneEntryCount;
     ULONG ZoneIndex;
-    PSTR ZoneName;
+    PCSTR ZoneName;
     PTIME_ZONE Zones;
 
     NeededSize = 0;
@@ -543,12 +544,13 @@ Return Value:
                                    StringsSize,
                                    &CurrentStringsSize,
                                    ZoneName,
-                                   &(NewZone->Name));
+                                   &StringOffset);
 
     if (!KSUCCESS(Status)) {
         goto FilterTimeZoneDataEnd;
     }
 
+    NewZone->Name = StringOffset;
     NewZone->EntryIndex = 0;
     NewZone->EntryCount = ZoneEntryCount;
 
@@ -570,12 +572,13 @@ Return Value:
                                        StringsSize,
                                        &CurrentStringsSize,
                                        String,
-                                       &(NewZoneEntry->Format));
+                                       &StringOffset);
 
         if (!KSUCCESS(Status)) {
             goto FilterTimeZoneDataEnd;
         }
 
+        NewZoneEntry->Format = StringOffset;
         if (ZoneEntry->Rules == -1) {
             continue;
         }
@@ -616,12 +619,13 @@ Return Value:
                                                StringsSize,
                                                &CurrentStringsSize,
                                                String,
-                                               &(NewRule->Letters));
+                                               &StringOffset);
 
                 if (!KSUCCESS(Status)) {
                     goto FilterTimeZoneDataEnd;
                 }
 
+                NewRule->Letters = StringOffset;
                 CurrentRuleCount += 1;
             }
         }
@@ -706,7 +710,7 @@ KSTATUS
 RtlSetTimeZoneData (
     PVOID Data,
     ULONG DataSize,
-    PSTR ZoneName,
+    PCSTR ZoneName,
     PVOID *OldData,
     PULONG OldDataSize,
     PSTR OriginalZoneBuffer,
@@ -858,7 +862,7 @@ Return Value:
     KSTATUS Status;
     PTIME_ZONE Zone;
     ULONG ZoneIndex;
-    PSTR ZoneName;
+    PCSTR ZoneName;
     ULONG ZoneNameLength;
     PTIME_ZONE Zones;
 
@@ -947,8 +951,8 @@ ListTimeZonesEnd:
 RTL_API
 VOID
 RtlGetTimeZoneNames (
-    PSTR *StandardName,
-    PSTR *DaylightName,
+    PCSTR *StandardName,
+    PCSTR *DaylightName,
     PLONG StandardGmtOffset,
     PLONG DaylightGmtOffset
     )
@@ -1112,7 +1116,7 @@ Return Value:
     LONG DaysInMonth;
     PTIME_ZONE_RULE EffectiveRule;
     ULONG EntryIndex;
-    PSTR Format;
+    PCSTR Format;
     CALENDAR_TIME GmtTime;
     PTIME_ZONE_HEADER Header;
     LONG Leap;
@@ -1857,7 +1861,7 @@ DebugPrintTimeZoneDataEnd:
 // --------------------------------------------------------- Internal Functions
 //
 
-PSTR
+PCSTR
 RtlpTimeZoneGetString (
     PTIME_ZONE_HEADER Header,
     ULONG Offset
@@ -1889,7 +1893,7 @@ Return Value:
         return NULL;
     }
 
-    return (PSTR)Header + Header->StringsOffset + Offset;
+    return (PCSTR)Header + Header->StringsOffset + Offset;
 }
 
 KSTATUS
@@ -1983,7 +1987,7 @@ RtlpTimeZoneAddString (
     PSTR StringsBase,
     ULONG StringsSize,
     PULONG CurrentStringsSize,
-    PSTR String,
+    PCSTR String,
     PULONG Offset
     )
 
@@ -2088,7 +2092,7 @@ Return Value:
 {
 
     INT Month;
-    PSTR String;
+    PCSTR String;
     INT Weekday;
 
     if ((Rule->Number == 0) && (Rule->On.Type == TimeZoneOccasionInvalid)) {
@@ -2173,7 +2177,7 @@ Return Value:
     ULONG EntryIndex;
     PTIME_ZONE_ENTRY ZoneEntries;
     PTIME_ZONE_ENTRY ZoneEntry;
-    PSTR ZoneName;
+    PCSTR ZoneName;
 
     ZoneName = RtlpTimeZoneGetString(Header, Zone->Name);
     RtlDebugPrint("    %s\n", ZoneName);
@@ -2257,7 +2261,7 @@ Return Value:
 
 {
 
-    PSTR String;
+    PCSTR String;
 
     RtlpPrintTimeZoneTime(ZoneEntry->GmtOffset, TimeZoneLensLocalTime);
     RtlDebugPrint(" ");
@@ -2450,7 +2454,7 @@ Return Value:
 
 KSTATUS
 RtlpSelectTimeZone (
-    PSTR ZoneName
+    PCSTR ZoneName
     )
 
 /*++
@@ -2479,7 +2483,7 @@ Return Value:
 
 {
 
-    PSTR CurrentZoneName;
+    PCSTR CurrentZoneName;
     PTIME_ZONE_HEADER Header;
     ULONG Length;
     BOOL Match;
@@ -2575,7 +2579,7 @@ Return Value:
 
     PTIME_ZONE_HEADER Header;
     ULONG Length;
-    PSTR Name;
+    PCSTR Name;
     PTIME_ZONE Zone;
 
     Header = RtlTimeZoneData;
@@ -2842,7 +2846,7 @@ Return Value:
     CHAR Buffer[TIME_ZONE_NAME_MAX];
     PTIME_ZONE_RULE DaylightRule;
     ULONG FirstLength;
-    PSTR Format;
+    PCSTR Format;
     PTIME_ZONE_HEADER Header;
     ULONG Length;
     PTIME_ZONE_RULE Rule;
@@ -2957,7 +2961,7 @@ VOID
 RtlpTimeZonePerformSubstitution (
     PSTR Destination,
     ULONG DestinationSize,
-    PSTR Format,
+    PCSTR Format,
     PTIME_ZONE_RULE Rule
     )
 
@@ -2989,7 +2993,7 @@ Return Value:
 {
 
     ULONG LetterIndex;
-    PSTR Letters;
+    PCSTR Letters;
     ULONG RemainingSize;
     PSTR Result;
 
@@ -3003,7 +3007,7 @@ Return Value:
     }
 
     Result = Destination;
-    RemainingSize = DestinationSize;
+    RemainingSize = DestinationSize - 1;
     while (RemainingSize != 0) {
 
         //
@@ -3039,12 +3043,13 @@ Return Value:
         }
     }
 
+    *Result = '\0';
     return;
 }
 
-PSTR
+PCSTR
 RtlpTimeZoneCacheString (
-    PSTR String
+    PCSTR String
     )
 
 /*++

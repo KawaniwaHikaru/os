@@ -1,6 +1,11 @@
 /*++
 
-Copyright (c) 2014 Minoca Corp. All Rights Reserved
+Copyright (c) 2014 Minoca Corp.
+
+    This file is licensed under the terms of the GNU General Public License
+    version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details. See the LICENSE file at the root of this
+    project for complete licensing information.
 
 Module Name:
 
@@ -25,7 +30,7 @@ Environment:
 //
 
 [0004]                          Signature : "BCM2"
-[0004]                       Table Length : 00000078
+[0004]                       Table Length : 0000007C
 [0001]                           Revision : 01
 [0001]                           Checksum : 00
 [0006]                             Oem ID : "Minoca"
@@ -95,11 +100,17 @@ Environment:
                                    UINT32 : 00000000
 
 //
+// PWM clock frequency.
+//
+
+                                   UINT32 : 1DCD6500
+
+//
 // Mailbox physical address.
 //
 
                                    UINT64 : 000000002000B880
-                                   
+
 //
 // Local CPU physical address.
 //

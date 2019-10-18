@@ -60,8 +60,27 @@ Author:
 #define NON_PAGED_POOL_MAGIC 0x506E6F4E
 #define PAGED_POOL_MAGIC 0x50676150
 
+//
+// Define the kernel address space. For 64-bit mode, leave a page at the end
+// to avoid rollover issues and to keep the space immediately underflowing NULL
+// clear.
+//
+
+#if __SIZEOF_LONG__ == 8
+
+#define KERNEL_VA_START (PVOID)0xFFFF800000000000
+#define KERNEL_VA_END 0xFFFFFFFFFFFFF000
+#define USER_VA_END (PVOID)0x0000800000000000
+
+#else
+
 #define KERNEL_VA_START (PVOID)0x80000000
 #define KERNEL_VA_END 0x100000000ULL
+#define USER_VA_END KERNEL_VA_START
+
+#endif
+
+#define SWAP_VA_PAGES 1
 
 #define INVALID_PHYSICAL_ADDRESS 0
 
@@ -121,11 +140,12 @@ Author:
 #define IMAGE_SECTION_NON_PAGED         0x00000008
 #define IMAGE_SECTION_SHARED            0x00000010
 #define IMAGE_SECTION_MAP_SYSTEM_CALL   0x00000020
-#define IMAGE_SECTION_PAGE_CACHE_BACKED 0x00000040
+#define IMAGE_SECTION_BACKED            0x00000040
 #define IMAGE_SECTION_NO_IMAGE_BACKING  0x00000080
 #define IMAGE_SECTION_DESTROYING        0x00000100
 #define IMAGE_SECTION_DESTROYED         0x00000200
 #define IMAGE_SECTION_WAS_WRITABLE      0x00000400
+#define IMAGE_SECTION_PAGE_CACHE_BACKED 0x00000800
 
 //
 // Define a mask of image section flags that should be transfered when an image
@@ -150,7 +170,8 @@ Author:
 //
 
 #define IMAGE_SECTION_INTERNAL_MASK \
-    (IMAGE_SECTION_PAGE_CACHE_BACKED | IMAGE_SECTION_NO_IMAGE_BACKING)
+    (IMAGE_SECTION_BACKED | IMAGE_SECTION_NO_IMAGE_BACKING | \
+     IMAGE_SECTION_PAGE_CACHE_BACKED)
 
 //
 // Define flags used for unmapping image sections.
@@ -211,7 +232,15 @@ Author:
 // Define user mode virtual address for the user shared data page.
 //
 
+#if defined(__amd64)
+
+#define USER_SHARED_DATA_USER_ADDRESS ((PVOID)0x00007FFFFFFFF000)
+
+#else
+
 #define USER_SHARED_DATA_USER_ADDRESS ((PVOID)0x7FFFF000)
+
+#endif
 
 //
 // Define the maximum number of I/O vector elements that will be tolerated from
@@ -222,11 +251,19 @@ Author:
 
 //
 // Define the native sized user write function.
-// TODO: 64-bit.
 //
+
+#if __SIZEOF_LONG__ == 8
+
+#define MmUserWrite MmUserWrite64
+#define MmUserRead MmUserRead64
+
+#else
 
 #define MmUserWrite MmUserWrite32
 #define MmUserRead MmUserRead32
+
+#endif
 
 //
 // Define the bitmask of flags used to initialize or allocate an I/O buffer.
@@ -480,8 +517,7 @@ typedef struct _MEMORY_ACCOUNTING {
 
 Structure Description:
 
-    This structure stores memory page backing information for a section of
-    memory.
+    This structure stores image backing information for a section of memory.
 
 Members:
 
@@ -571,6 +607,9 @@ Members:
     PageCacheEntries - Stores an array of page cache entries associated with
         this I/O buffer.
 
+    MapFlags - Stores any additional mapping flags mandated by the file object
+        for this I/O buffer. See MAP_FLAG_* definitions.
+
     Fragment - Stores an I/O buffer fragment structure used for stack-allocated
         I/O buffers that only require one fragment.
 
@@ -584,6 +623,7 @@ typedef struct _IO_BUFFER_INTERNAL {
     UINTN PageCacheEntryCount;
     PVOID PageCacheEntry;
     PVOID *PageCacheEntries;
+    ULONG MapFlags;
     IO_BUFFER_FRAGMENT Fragment;
 } IO_BUFFER_INTERNAL, *PIO_BUFFER_INTERNAL;
 
@@ -1113,6 +1153,72 @@ Arguments:
 
     Flags - Supplies a bitmask of flags used to initialize the I/O buffer. See
         IO_BUFFER_FLAG_* for definitions.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KERNEL_API
+KSTATUS
+MmAppendIoBufferData (
+    PIO_BUFFER IoBuffer,
+    PVOID VirtualAddress,
+    PHYSICAL_ADDRESS PhysicalAddress,
+    UINTN SizeInBytes
+    );
+
+/*++
+
+Routine Description:
+
+    This routine appends a fragment to and I/O buffer.
+
+Arguments:
+
+    IoBuffer - Supplies a pointer to the I/O buffer on which to append.
+
+    VirtualAddress - Supplies the starting virtual address of the data to
+        append.
+
+    PhysicalAddress - Supplies the starting physical address of the data to
+        append.
+
+    SizeInBytes - Supplies the size of the data to append, in bytes.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KERNEL_API
+KSTATUS
+MmAppendIoBuffer (
+    PIO_BUFFER IoBuffer,
+    PIO_BUFFER AppendBuffer,
+    UINTN AppendOffset,
+    UINTN SizeInBytes
+    );
+
+/*++
+
+Routine Description:
+
+    This routine appends one I/O buffer on another.
+
+Arguments:
+
+    IoBuffer - Supplies a pointer to the I/O buffer on which to append.
+
+    AppendBuffer - Supplies a pointer to the I/O buffer that owns the data to
+        append.
+
+    AppendOffset - Supplies the offset into the append buffer where the data to
+        append starts.
+
+    SizeInBytes - Supplies the size of the data to append, in bytes.
 
 Return Value:
 
@@ -2874,6 +2980,60 @@ Return Value:
 
 --*/
 
+BOOL
+MmUserRead64 (
+    PVOID Buffer,
+    PULONGLONG Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine performs a 32-bit read from user mode. This is assumed to be
+    naturally aligned.
+
+Arguments:
+
+    Buffer - Supplies a pointer to the buffer to read.
+
+    Value - Supplies a pointer where the read value will be returned.
+
+Return Value:
+
+    TRUE if the read succeeded.
+
+    FALSE if the read failed.
+
+--*/
+
+BOOL
+MmUserWrite64 (
+    PVOID Buffer,
+    ULONGLONG Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine performs a 32-bit write to user mode. This is assumed to be
+    naturally aligned.
+
+Arguments:
+
+    Buffer - Supplies a pointer to the buffer to write to.
+
+    Value - Supplies the value to write.
+
+Return Value:
+
+    TRUE if the write succeeded.
+
+    FALSE if the write failed.
+
+--*/
+
 PMEMORY_RESERVATION
 MmCreateMemoryReservation (
     PVOID PreferredVirtualAddress,
@@ -3196,7 +3356,6 @@ Return Value:
 VOID
 MmSwitchAddressSpace (
     PVOID Processor,
-    PVOID CurrentStack,
     PADDRESS_SPACE AddressSpace
     );
 
@@ -3210,10 +3369,6 @@ Arguments:
 
     Processor - Supplies a pointer to the current processor block.
 
-    CurrentStack - Supplies the address of the current thread's kernel stack.
-        This routine will ensure this address is visible in the address space
-        being switched to. Stacks must not cross page directory boundaries.
-
     AddressSpace - Supplies a pointer to the address space to switch to.
 
 Return Value:
@@ -3224,7 +3379,7 @@ Return Value:
 
 VOID
 MmVolumeArrival (
-    PSTR VolumeName,
+    PCSTR VolumeName,
     ULONG VolumeNameLength,
     BOOL SystemVolume
     );
@@ -3383,6 +3538,53 @@ Return Value:
 --*/
 
 KSTATUS
+MmPageFilePerformIo (
+    PIMAGE_BACKING ImageBacking,
+    PIO_BUFFER IoBuffer,
+    UINTN Offset,
+    UINTN SizeInBytes,
+    ULONG Flags,
+    ULONG TimeoutInMilliseconds,
+    BOOL Write,
+    PUINTN BytesCompleted
+    );
+
+/*++
+
+Routine Description:
+
+    This routine performs I/O on the page file region described by the given
+    image backing.
+
+Arguments:
+
+    ImageBacking - Supplies a pointer to the image backing that holds a device
+        handle and offset for the page file region.
+
+    IoBuffer - Supplies a pointer to an I/O buffer to use for the read or write.
+
+    Offset - Supplies the offset from the beginning of the file or device where
+        the I/O should be done.
+
+    SizeInBytes - Supplies the number of bytes to read or write.
+
+    Flags - Supplies flags regarding the I/O operation. See IO_FLAG_*
+        definitions.
+
+    TimeoutInMilliseconds - Supplies the number of milliseconds that the I/O
+        operation should be waited on before timing out. Use
+        WAIT_TIME_INDEFINITE to wait forever on the I/O.
+
+    BytesCompleted - Supplies the a pointer where the number of bytes actually
+        read or written will be returned.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KSTATUS
 MmMapFileSection (
     HANDLE FileHandle,
     IO_OFFSET FileOffset,
@@ -3465,7 +3667,8 @@ Return Value:
 
 VOID
 MmCleanUpProcessMemory (
-    PVOID ExitedProcess
+    PADDRESS_SPACE AddressSpace,
+    BOOL Terminated
     );
 
 /*++
@@ -3477,7 +3680,11 @@ Routine Description:
 
 Arguments:
 
-    ExitedProcess - Supplies a pointer to the process to clean up.
+    AddressSpace - Supplies a pointer to the address space to clean up. It is
+        assumed to be still live at this point.
+
+    Terminated - Supplies a boolean indicating wheter the process is being
+        terminated (TRUE) or just undergoing an exec (FALSE).
 
 Return Value:
 

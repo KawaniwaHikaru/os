@@ -39,23 +39,6 @@ Environment:
 // ---------------------------------------------------------------- Definitions
 //
 
-#define MAX_X86_WATCH_REGISTERS 4
-
-#define DEBUG_REGISTER_BREAK_READ       0
-#define DEBUG_REGISTER_BREAK_WRITE      1
-#define DEBUG_REGISTER_BREAK_READ_WRITE 3
-#define DEBUG_REGISTER_BREAK_SHIFT      16
-#define DEBUG_REGISTER_ACCESS_1         0
-#define DEBUG_REGISTER_ACCESS_2         1
-#define DEBUG_REGISTER_ACCESS_4         3
-#define DEBUG_REGISTER_ACCESS_8         2
-#define DEBUG_REGISTER_ACCESS_SHIFT     18
-#define DEBUG_REGISTER_ENABLE_GLOBAL    0x2
-#define DEBUG_REGISTER_0_MASK           0x000F0003
-#define DEBUG_REGISTER_1_MASK           0x00F0000C
-#define DEBUG_REGISTER_2_MASK           0x0F000030
-#define DEBUG_REGISTER_3_MASK           0xF00000C0
-
 //
 // ----------------------------------------------- Internal Function Prototypes
 //
@@ -496,7 +479,7 @@ Return Value:
 
 {
 
-    PIA_SPECIAL_REGISTERS IaRegisters;
+    PX86_SPECIAL_REGISTERS IaRegisters;
     TABLE_REGISTER TableRegister;
     ULONG TrRegister;
 
@@ -550,8 +533,8 @@ Return Value:
 
 {
 
-    PIA_SPECIAL_REGISTERS New;
-    PIA_SPECIAL_REGISTERS Original;
+    PX86_SPECIAL_REGISTERS New;
+    PX86_SPECIAL_REGISTERS Original;
     TABLE_REGISTER TableRegister;
 
     Original = &(OriginalRegisters->Ia);

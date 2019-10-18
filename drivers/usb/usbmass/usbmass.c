@@ -176,6 +176,12 @@ Environment:
 #define USB_MASS_RETRY_COUNT 3
 
 //
+// Define the number of seconds to wait to get the capacities information.
+//
+
+#define USB_MASS_READ_CAPACITY_TIMEOUT 5
+
+//
 // Define the number of seconds to wait for the unit to become ready.
 //
 
@@ -415,6 +421,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _SCSI_COMMAND_BLOCK {
     ULONG Signature;
     ULONG Tag;
@@ -565,6 +573,8 @@ typedef struct _SCSI_CAPACITY {
     ULONG LastValidBlockAddress;
     ULONG BlockLength;
 } PACKED SCSI_CAPACITY, *PSCSI_CAPACITY;
+
+#pragma pack(pop)
 
 //
 // ----------------------------------------------- Internal Function Prototypes
@@ -886,6 +896,7 @@ DISK_INTERFACE UsbMassDiskInterfaceTemplate = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -1352,7 +1363,7 @@ Return Value:
         //
 
         Status = IoPrepareReadWriteIrp(&(Irp->U.ReadWrite),
-                                       1 << Disk->BlockShift,
+                                       1ULL << Disk->BlockShift,
                                        0,
                                        MAX_ULONG,
                                        IrpReadWriteFlags);
@@ -1418,9 +1429,10 @@ Return Value:
 
         ASSERT(Irp->U.ReadWrite.IoSizeInBytes != 0);
         ASSERT(IS_ALIGNED(Irp->U.ReadWrite.IoSizeInBytes,
-                          (1 << Disk->BlockShift)));
+                          (1ULL << Disk->BlockShift)));
 
-        ASSERT(IS_ALIGNED(Irp->U.ReadWrite.IoOffset, (1 << Disk->BlockShift)));
+        ASSERT(IS_ALIGNED(Irp->U.ReadWrite.IoOffset,
+                          (1ULL << Disk->BlockShift)));
 
         //
         // Pend the IRP first so that the request can't complete in between
@@ -1533,19 +1545,20 @@ Return Value:
             // Enable opening of the root as a single file.
             //
 
-            Properties = &(Lookup->Properties);
+            Properties = Lookup->Properties;
             Properties->FileId = 0;
             Properties->Type = IoObjectBlockDevice;
             Properties->HardLinkCount = 1;
 
-            ASSERT(((1 << Disk->BlockShift) != 0) && (Disk->BlockCount != 0));
+            ASSERT(((1ULL << Disk->BlockShift) != 0) &&
+                   (Disk->BlockCount != 0));
 
-            Properties->BlockSize = 1 << Disk->BlockShift;
+            Properties->BlockSize = 1ULL << Disk->BlockShift;
             Properties->BlockCount = Disk->BlockCount;
             FileSize = (ULONGLONG)Disk->BlockCount <<
                        (ULONGLONG)Disk->BlockShift;
 
-            WRITE_INT64_SYNC(&(Properties->FileSize), FileSize);
+            Properties->Size = FileSize;
             Status = STATUS_SUCCESS;
         }
 
@@ -1560,12 +1573,12 @@ Return Value:
     case IrpMinorSystemControlWriteFileProperties:
         FileOperation = (PSYSTEM_CONTROL_FILE_OPERATION)Context;
         Properties = FileOperation->FileProperties;
-        READ_INT64_SYNC(&(Properties->FileSize), &PropertiesFileSize);
+        PropertiesFileSize = Properties->Size;
         FileSize = (ULONGLONG)Disk->BlockCount << (ULONGLONG)Disk->BlockShift;
         if ((Properties->FileId != 0) ||
             (Properties->Type != IoObjectBlockDevice) ||
             (Properties->HardLinkCount != 1) ||
-            (Properties->BlockSize != (1 << Disk->BlockShift)) ||
+            (Properties->BlockSize != (1ULL << Disk->BlockShift)) ||
             (Properties->BlockCount != Disk->BlockCount) ||
             (PropertiesFileSize != FileSize)) {
 
@@ -2915,12 +2928,6 @@ Return Value:
         goto StartDiskEnd;
     }
 
-    BufferSize = sizeof(SCSI_INQUIRY_PAGE0);
-    Status = UsbMasspSendInquiry(Disk, 0, (PVOID)&Page0, &BufferSize);
-    if (!KSUCCESS(Status)) {
-        goto StartDiskEnd;
-    }
-
     //
     // Get the block device parameters of the disk.
     //
@@ -2937,7 +2944,15 @@ Return Value:
         }
     }
 
-    for (Try = 0; Try < USB_MASS_RETRY_COUNT; Try += 1) {
+    //
+    // Ignore any errors from the read format capacities command and just try
+    // to read the capacity.
+    //
+
+    Timeout = KeGetRecentTimeCounter() +
+              (HlQueryTimeCounterFrequency() * USB_MASS_READ_CAPACITY_TIMEOUT);
+
+    do {
         Status = UsbMasspReadCapacity(Disk);
         if (KSUCCESS(Status)) {
             break;
@@ -2946,11 +2961,20 @@ Return Value:
         if (!KSUCCESS(UsbMasspRequestSense(Disk))) {
             goto StartDiskEnd;
         }
-    }
+
+        KeDelayExecution(FALSE, FALSE, 10 * MICROSECONDS_PER_MILLISECOND);
+        Status = STATUS_TIMEOUT;
+
+    } while (KeGetRecentTimeCounter() <= Timeout);
 
     if (!KSUCCESS(Status)) {
+        RtlDebugPrint("USB Mass: Failed to read capacity: %d\n", Status);
         goto StartDiskEnd;
     }
+
+    //
+    // Wait for the unit to become ready.
+    //
 
     Timeout = KeGetRecentTimeCounter() +
               (HlQueryTimeCounterFrequency() * USB_MASS_UNIT_READY_TIMEOUT);
@@ -2987,7 +3011,10 @@ Return Value:
                           sizeof(DISK_INTERFACE));
 
             Disk->DiskInterface.DiskToken = Disk;
-            Disk->DiskInterface.BlockSize = 1 << Disk->BlockShift;
+            Disk->DiskInterface.BlockSize = 1ULL << Disk->BlockShift;
+
+            ASSERT(Disk->DiskInterface.BlockSize == (1ULL << Disk->BlockShift));
+
             Disk->DiskInterface.BlockCount = Disk->BlockCount;
             Status = IoCreateInterface(&UsbMassDiskInterfaceUuid,
                                        Disk->OsDevice,
@@ -4508,11 +4535,11 @@ Return Value:
 
     Block = Irp->U.ReadWrite.IoOffset + Disk->CurrentBytesTransferred;
 
-    ASSERT(IS_ALIGNED(Block, (1 << Disk->BlockShift)) != FALSE);
+    ASSERT(IS_ALIGNED(Block, (1ULL << Disk->BlockShift)) != FALSE);
 
     Block >>= Disk->BlockShift;
 
-    ASSERT(IS_ALIGNED(RequestSize, (1 << Disk->BlockShift)) != FALSE);
+    ASSERT(IS_ALIGNED(RequestSize, (1ULL << Disk->BlockShift)) != FALSE);
     ASSERT(Block == (ULONG)Block);
 
     BlockCount = RequestSize >> Disk->BlockShift;
@@ -5146,7 +5173,7 @@ Return Value:
     }
 
     Status = IoPrepareReadWriteIrp(IrpReadWrite,
-                                   1 << Disk->BlockShift,
+                                   1ULL << Disk->BlockShift,
                                    0,
                                    MAX_ULONG,
                                    IrpReadWriteFlags);
@@ -5203,8 +5230,9 @@ Return Value:
 
     BytesRemaining = IrpReadWrite->IoSizeInBytes;
 
-    ASSERT(IS_ALIGNED(BytesRemaining, 1 << Disk->BlockShift) != FALSE);
-    ASSERT(IS_ALIGNED(IrpReadWrite->IoOffset, 1 << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(BytesRemaining, 1ULL << Disk->BlockShift) != FALSE);
+    ASSERT(IS_ALIGNED(IrpReadWrite->IoOffset, 1ULL << Disk->BlockShift) !=
+           FALSE);
 
     BlockOffset = IrpReadWrite->IoOffset >> Disk->BlockShift;
     while (BytesRemaining != 0) {
@@ -5230,7 +5258,7 @@ Return Value:
         }
 
         ASSERT(BytesThisRound != 0);
-        ASSERT(IS_ALIGNED(BytesThisRound, 1 << Disk->BlockShift) != FALSE);
+        ASSERT(IS_ALIGNED(BytesThisRound, 1ULL << Disk->BlockShift) != FALSE);
 
         BlockCount = BytesThisRound >> Disk->BlockShift;
 

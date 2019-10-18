@@ -566,7 +566,7 @@ Return Value:
         }
 
         if (!KSUCCESS(Status)) {
-            RtlDebugPrint("Failed to recieve: %d\n", Status);
+            RtlDebugPrint("Failed to receive: %d\n", Status);
         }
 
         if (Size > KD_TEST_RECEIVE_BUFFER_SIZE) {
@@ -981,7 +981,8 @@ KdpUsbRetireTransfer (
 
 Routine Description:
 
-    This routine retires an EHCI. This frees the buffer allocated during setup.
+    This routine retires a USB transfer. This frees the buffer allocated
+    during setup.
 
 Arguments:
 
@@ -1556,7 +1557,7 @@ Return Value:
                             USB_SETUP_REQUEST_DEVICE_RECIPIENT;
 
         Setup.Request = USB_DEVICE_REQUEST_GET_DESCRIPTOR;
-        Setup.Value = USB_HUB_DESCRIPTOR_TYPE << 8;
+        Setup.Value = UsbDescriptorTypeHub << 8;
         Setup.Index = 0;
         Setup.Length = USB_HUB_DESCRIPTOR_MAX_SIZE;
         Length = Setup.Length;
@@ -1575,7 +1576,7 @@ Return Value:
             goto UsbEnumerateDeviceEnd;
         }
 
-        if ((HubDescriptor->DescriptorType != USB_HUB_DESCRIPTOR_TYPE) ||
+        if ((HubDescriptor->DescriptorType != UsbDescriptorTypeHub) ||
             (HubDescriptor->Length < sizeof(USB_HUB_DESCRIPTOR))) {
 
             Status = STATUS_NOT_SUPPORTED;

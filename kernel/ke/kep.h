@@ -74,9 +74,9 @@ extern volatile ULONG KeActiveProcessorCount;
 // Store the version information jammed into a packed format.
 //
 
-extern ULONGLONG KeEncodedVersion;
-extern ULONGLONG KeVersionSerial;
-extern ULONGLONG KeBuildTime;
+extern ULONG KeEncodedVersion;
+extern ULONG KeVersionSerial;
+extern ULONG KeBuildTime;
 extern PSTR KeBuildString;
 extern PSTR KeProductName;
 
@@ -176,31 +176,6 @@ Routine Description:
 Arguments:
 
     None.
-
-Return Value:
-
-    Status code.
-
---*/
-
-KSTATUS
-KepInitializeTimeZoneSupport (
-    PVOID TimeZoneData,
-    ULONG TimeZoneDataSize
-    );
-
-/*++
-
-Routine Description:
-
-    This routine initializes time zone support in the kernel.
-
-Arguments:
-
-    TimeZoneData - Supplies a pointer to the initial time zone data from the
-        loader. A copy of this data will be made.
-
-    TimeZoneDataSize - Supplies the size of the data in bytes.
 
 Return Value:
 
@@ -539,6 +514,36 @@ Arguments:
     Parameter3 - Supplies an optional parameter regarding the crash.
 
     Parameter4 - Supplies an optional parameter regarding the crash.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KSTATUS
+KepSetBannerThread (
+    PVOID Data,
+    PUINTN DataSize,
+    BOOL Set
+    );
+
+/*++
+
+Routine Description:
+
+    This routine enables or disables the banner thread.
+
+Arguments:
+
+    Data - Supplies a pointer to the data buffer where the data is either
+        returned for a get operation or given for a set operation.
+
+    DataSize - Supplies a pointer that on input contains the size of the
+        data buffer. On output, contains the required size of the data buffer.
+
+    Set - Supplies a boolean indicating if this is a get operation (FALSE) or
+        a set operation (TRUE).
 
 Return Value:
 

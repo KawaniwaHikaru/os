@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -25,7 +30,7 @@
 
 BINARY = mm.a
 
-BINARYTYPE = library
+BINARYTYPE = klibrary
 
 OBJS = block.o    \
        imgsec.o   \
@@ -58,7 +63,12 @@ X86_OBJS = x86/archsupc.o \
            x86/mapping.o  \
            x86/usermem.o  \
 
-EXTRA_SRC_DIRS = x86 armv7 armv6
+X64_OBJS = x64/archsupc.o \
+           x64/mapping.o  \
+           x64/usermem.o  \
+           x86/flush.o    \
+
+EXTRA_SRC_DIRS = x86 x64 armv7 armv6
 
 DIRS = boot
 

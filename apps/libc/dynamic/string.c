@@ -575,6 +575,46 @@ Return Value:
 }
 
 LIBC_API
+size_t
+strnlen (
+    const char *String,
+    size_t MaxLength
+    )
+
+/*++
+
+Routine Description:
+
+    This routine computes the length of the given string, not including the
+    null terminator, but will only examine up to the given maximum number of
+    bytes.
+
+Arguments:
+
+    String - Supplies a pointer to the string whose length should be computed.
+
+    MaxLength - Supplies the maximum number of bytes to examine.
+
+Return Value:
+
+    Returns the length of the string, not including the null terminator, or
+    the maximum length provided if no null terminator was found.
+
+--*/
+
+{
+
+    size_t Size;
+
+    Size = 0;
+    while ((Size < MaxLength) && (String[Size] != '\0')) {
+        Size += 1;
+    }
+
+    return Size;
+}
+
+LIBC_API
 char *
 strcpy (
     char *DestinationString,
@@ -1230,6 +1270,60 @@ Return Value:
 
 LIBC_API
 char *
+strndup (
+    const char *String,
+    size_t Size
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns a pointer to a newly allocated string which is a
+    duplicate of the given input string. This returned pointer must be passed
+    to the free function when the caller is done with it.
+
+Arguments:
+
+    String - Supplies a pointer to the string to duplicate.
+
+    Size - Supplies the maximum number of bytes to copy before terminating the
+        string.
+
+Return Value:
+
+    Returns a pointer to the newly allocated duplicate string on success.
+
+    NULL on failure.
+
+--*/
+
+{
+
+    size_t Length;
+    char *NewString;
+
+    Length = 0;
+    if (String != NULL) {
+        Length = strlen(String);
+    }
+
+    if (Length > Size) {
+        Length = Size;
+    }
+
+    NewString = malloc(Length + 1);
+    if (NewString == NULL) {
+        return NULL;
+    }
+
+    memcpy(NewString, String, Length);
+    NewString[Length] = '\0';
+    return NewString;
+}
+
+LIBC_API
+char *
 strpbrk (
     const char *String,
     const char *Characters
@@ -1444,6 +1538,55 @@ Return Value:
 
 LIBC_API
 char *
+strcasestr (
+    const char *InputString,
+    const char *QueryString
+    )
+
+/*++
+
+Routine Description:
+
+    This routine attempts to find the first occurrence of the query string in
+    the given input string. This routine is case insensitive.
+
+Arguments:
+
+    InputString - Supplies a pointer to the input string to search.
+
+    QueryString - Supplies a pointer to the query string to search for.
+
+Return Value:
+
+    Returns a pointer within the input string to the first instance of the
+    query string.
+
+    NULL if no instances of the query string were found in the input string.
+
+--*/
+
+{
+
+    size_t InputStringLength;
+    size_t QueryStringLength;
+    char *Result;
+
+    if ((QueryString == NULL) || (InputString == NULL)) {
+        return NULL;
+    }
+
+    InputStringLength = strlen(InputString) + 1;
+    QueryStringLength = strlen(QueryString) + 1;
+    Result =  RtlStringSearchIgnoringCase((PSTR)InputString,
+                                          InputStringLength,
+                                          (PSTR)QueryString,
+                                          QueryStringLength);
+
+    return Result;
+}
+
+LIBC_API
+char *
 strtok (
     char *InputString,
     const char *Separators
@@ -1584,6 +1727,89 @@ Return Value:
     }
 
     return Token;
+}
+
+LIBC_API
+char *
+strsep (
+    char **InputString,
+    const char *Delimiters
+    )
+
+/*++
+
+Routine Description:
+
+    This routine breaks a string into a series of tokens delimited by any
+    character from the given delimiter set. It scans looking for a delimiter
+    character and sets that byte to the null terminator to delimit the first
+    token. This may result in an empty field where the returned token is made
+    up of just the null terminator. This routine is thread safe and re-entrant
+    so long as the input string is not used by multiple threads.
+
+Arguments:
+
+    InputString - Supplies a pointer to a pointer to the input string to
+        tokenize. On output, this will point to the character after the
+        modified delimiter or NULL if the end of the string was reached without
+        finding a delimiter.
+
+    Delimiters - Supplies a pointer to a null terminated string containing the
+        set of characters that delimit tokens.
+
+Return Value:
+
+    Returns a pointer to the the original input string (now delimited).
+
+    NULL if there are no more tokens or no string was supplied.
+
+--*/
+
+{
+
+    size_t Count;
+    PSTR OriginalString;
+    PSTR Token;
+
+    if ((InputString == NULL) || (*InputString == NULL)) {
+        return NULL;
+    }
+
+    //
+    // The original string is always returned. Save it.
+    //
+
+    OriginalString = *InputString;
+    Token = OriginalString;
+
+    //
+    // Get the count of characters not in the set. This may be 0, indicating an
+    // empty field. The original string is still returned and the character is
+    // still converted to the null terminator, unless of course it is already
+    // the null terminator.
+    //
+
+    Count = strcspn(Token, Delimiters);
+
+    //
+    // If this is the end of the string, then there are no more tokens. The
+    // input string is set to NULL so the next call fails.
+    //
+
+    if (Token[Count] == '\0') {
+        *InputString = NULL;
+
+    //
+    // Otherwise, null terminate the token and save the subsequent character
+    // for the next time.
+    //
+
+    } else {
+        Token[Count] = '\0';
+        *InputString = Token + Count + 1;
+    }
+
+    return OriginalString;
 }
 
 LIBC_API

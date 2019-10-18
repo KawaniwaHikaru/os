@@ -1022,6 +1022,7 @@ Return Value:
 
     SetupFileClose(Destination);
     Destination = NULL;
+    Result = 0;
 
 UpdateBootVolumeEnd:
     if (BootConfigurationInitialized != FALSE) {
@@ -1410,7 +1411,7 @@ Return Value:
             if (BytesDone != SETUP_BLOCK_SIZE) {
                 fprintf(stderr,
                         "Read only %ld of %d bytes.\n",
-                        BytesDone,
+                        (long)BytesDone,
                         SETUP_BLOCK_SIZE);
 
                 Result = errno;
@@ -1530,7 +1531,7 @@ Return Value:
         if (BytesDone != SETUP_BLOCK_SIZE) {
             fprintf(stderr,
                     "Error: Wrote only %ld of %d bytes.\n",
-                    BytesDone,
+                    (long)BytesDone,
                     SETUP_BLOCK_SIZE);
 
             Result = errno;

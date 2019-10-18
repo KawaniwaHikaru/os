@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -26,7 +31,7 @@
 
 BINARY = acpi.drv
 
-BINARYTYPE = so
+BINARYTYPE = driver
 
 BINPLACE = bin
 
@@ -44,12 +49,15 @@ OBJS = acpidrv.o    \
        oprgnos.o    \
        proc.o       \
        resdesc.o    \
+       reset.o      \
 
 ARMV7_OBJS = armv7/procarch.o   \
 
 ARMV6_OBJS = $(ARMV7_OBJS)
 
 X86_OBJS = x86/procarch.o   \
+
+X64_OBJS = $(X86_OBJS)
 
 EXTRA_SRC_DIRS = x86 armv7
 

@@ -26,47 +26,50 @@ Environment:
 
 --*/
 
+from menv import staticApplication, uefiRuntimeFfs;
+
 function build() {
+    var elf;
+    var entries;
+    var includes;
+    var libs;
+    var linkConfig;
+    var sources;
+    var sourcesConfig;
+
     sources = [
         "reboot.c",
         "runtime.c"
     ];
 
     libs = [
-        "//uefi/core/rtlib:rtlib",
-        "//uefi/archlib:uefiarch"
+        "uefi/core/rtlib:rtlib",
+        "uefi/archlib:uefiarch"
     ];
 
     includes = [
-        "$//uefi/include"
+        "$S/uefi/include"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-fshort-wchar"],
     };
 
-    link_ldflags = [
-        "-pie",
-        "-nostdlib",
-        "-static"
-    ];
-
-    link_config = {
-        "LDFLAGS": link_ldflags
+    linkConfig = {
+        "LDFLAGS": ["-pie"]
     };
 
     elf = {
         "label": "biosrt.elf",
         "inputs": sources + libs,
-        "sources_config": sources_config,
+        "sources_config": sourcesConfig,
         "includes": includes,
         "entry": "EfiRuntimeCoreEntry",
-        "config": link_config
+        "config": linkConfig
     };
 
-    entries = executable(elf);
-    entries += uefi_runtime_ffs("biosrt");
+    entries = staticApplication(elf);
+    entries += uefiRuntimeFfs("biosrt");
     return entries;
 }
 
-return build();

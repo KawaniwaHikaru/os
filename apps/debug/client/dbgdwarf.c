@@ -233,6 +233,53 @@ Return Value:
     return Status;
 }
 
+INT
+DwarfTargetWritePc (
+    PDWARF_CONTEXT Context,
+    ULONGLONG Value
+    )
+
+/*++
+
+Routine Description:
+
+    This routine writes a the instruction pointer register, presumably with the
+    return address.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Value - Supplies the new value of the register.
+
+Return Value:
+
+    0 on success.
+
+    Returns an error number on failure.
+
+--*/
+
+{
+
+    PDEBUGGER_CONTEXT DebuggerContext;
+    PREGISTERS_UNION Registers;
+    PDEBUG_SYMBOLS Symbols;
+
+    Symbols = (((PDEBUG_SYMBOLS)Context) - 1);
+    DebuggerContext = Symbols->HostContext;
+
+    assert(DebuggerContext != NULL);
+
+    Registers = Symbols->RegistersContext;
+    if (Registers == NULL) {
+        Registers = &(DebuggerContext->FrameRegisters);
+    }
+
+    DbgSetPc(DebuggerContext, Registers, Value);
+    return 0;
+}
+
 PSTR
 DwarfGetRegisterName (
     PDWARF_CONTEXT Context,
@@ -263,6 +310,52 @@ Return Value:
 
     Symbols = (((PDEBUG_SYMBOLS)Context) - 1);
     return DbgGetRegisterName(Symbols->Machine, Register);
+}
+
+ULONG
+DwarfGetNativeSize (
+    PDWARF_CONTEXT Context
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns the native machine word size.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+Return Value:
+
+    Returns the number of bytes in a machine word: usually 4 for 32-bit
+    machines and 8 for 64-bit machines.
+
+--*/
+
+{
+
+    PDEBUG_SYMBOLS Symbols;
+
+    Symbols = (((PDEBUG_SYMBOLS)Context) - 1);
+    switch (Symbols->Machine) {
+    case ImageMachineTypeX86:
+    case ImageMachineTypeArm32:
+        return 4;
+
+    case ImageMachineTypeX64:
+    case ImageMachineTypeArm64:
+        return 8;
+
+    default:
+
+        assert(FALSE);
+
+        break;
+    }
+
+    return 0;
 }
 
 //

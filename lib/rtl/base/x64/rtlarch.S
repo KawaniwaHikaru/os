@@ -26,24 +26,24 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------ Includes
-##
+//
+// ------------------------------------------------------------------ Includes
+//
 
 #include <minoca/kernel/x64.inc>
 
-##
-## ---------------------------------------------------------------------- Code
-##
+//
+// ---------------------------------------------------------------------- Code
+//
 
 ASSEMBLY_FILE_HEADER
 
-##
-## VOID
-## RtlDebugBreak (
-##     VOID
-##     )
-##
+//
+// VOID
+// RtlDebugBreak (
+//     VOID
+//     )
+//
 
 /*++
 
@@ -61,19 +61,19 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlDebugBreak)
+PROTECTED_FUNCTION(RtlDebugBreak)
     int $3                          # Debugger break.
     ret
 
 END_FUNCTION(RtlDebugBreak)
 
-##
-## VOID
-## RtlDebugService (
-##     UINTN ServiceRequest,
-##     PVOID Parameter
-##     )
-##
+//
+// VOID
+// RtlDebugService (
+//     UINTN ServiceRequest,
+//     PVOID Parameter
+//     )
+//
 
 /*++
 
@@ -93,20 +93,20 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlDebugService)
+PROTECTED_FUNCTION(RtlDebugService)
     int     $0x21                   # Request debug service.
     ret                             #
 
 END_FUNCTION(RtlDebugService)
 
-##
-## ULONGLONG
-## RtlAtomicCompareExchange64 (
-##     volatile ULONGLONG *Address,
-##     ULONGLONG ExchangeValue,
-##     ULONGLONG CompareValue
-##     )
-##
+//
+// ULONGLONG
+// RtlAtomicCompareExchange64 (
+//     volatile ULONGLONG *Address,
+//     ULONGLONG ExchangeValue,
+//     ULONGLONG CompareValue
+//     )
+//
 
 /*++
 
@@ -131,26 +131,26 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicCompareExchange64)
+PROTECTED_FUNCTION(RtlAtomicCompareExchange64)
     movq    %rdx, %rax              # Move CompareValue into rax.
 
-    ##
-    ## Compare Address (rdi) with rax, exchange with rcx if equal. Return the
-    ## original value in rax.
-    ##
+    //
+    // Compare Address (rdi) with rax, exchange with rcx if equal. Return the
+    // original value in rax.
+    //
 
     lock cmpxchgq %rsi, (%rdi)      # Compare exchange.
     ret                             # Return value is already in the right spot.
 
 END_FUNCTION(RtlAtomicCompareExchange64)
 
-##
-## ULONG
-## RtlAtomicExchange32 (
-##     volatile ULONG *Address,
-##     ULONG ExchangeValue
-##     )
-##
+//
+// ULONG
+// RtlAtomicExchange32 (
+//     volatile ULONG *Address,
+//     ULONG ExchangeValue
+//     )
+//
 
 /*++
 
@@ -171,7 +171,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicExchange32)
+PROTECTED_FUNCTION(RtlAtomicExchange32)
     xorq    %rax, %rax              # Clear the high part of rax for safety.
     movl    %esi, %eax              # Move the exchange value to eax.
     lock xchgl %eax, (%rdi)         # Exchange what's in *edi with eax.
@@ -179,13 +179,13 @@ FUNCTION(RtlAtomicExchange32)
 
 END_FUNCTION(RtlAtomicExchange32)
 
-##
-## ULONGLONG
-## RtlAtomicExchange64 (
-##     volatile ULONGLONG *Address,
-##     ULONGLONG ExchangeValue
-##     )
-##
+//
+// ULONGLONG
+// RtlAtomicExchange64 (
+//     volatile ULONGLONG *Address,
+//     ULONGLONG ExchangeValue
+//     )
+//
 
 /*++
 
@@ -210,21 +210,21 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicExchange64)
+PROTECTED_FUNCTION(RtlAtomicExchange64)
     movq    %rsi, %rax              # Move exchange value to eax.
     lock xchgq %rax, (%rdi)         # Exchange what's in *rdi with rax.
     ret                             # Return. Result is already in rax.
 
 END_FUNCTION(RtlAtomicExchange64)
 
-##
-## ULONG
-## RtlAtomicCompareExchange32 (
-##     volatile ULONG *Address,
-##     ULONG ExchangeValue,
-##     ULONG CompareValue
-##     )
-##
+//
+// ULONG
+// RtlAtomicCompareExchange32 (
+//     volatile ULONG *Address,
+//     ULONG ExchangeValue,
+//     ULONG CompareValue
+//     )
+//
 
 /*++
 
@@ -249,27 +249,27 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicCompareExchange32)
+PROTECTED_FUNCTION(RtlAtomicCompareExchange32)
     xorq    %rax, %rax              # Zero out the high part of rax, for safety.
     movl    %edx, %eax              # Move CompareValue into eax.
 
-    ##
-    ## Compare Address (rdi) with eax, exchange with ecx if equal. Return the
-    ## original value in rax.
-    ##
+    //
+    // Compare Address (rdi) with eax, exchange with esi if equal. Return the
+    // original value in eax.
+    //
 
     lock cmpxchgl %esi, (%rdi)      # Compare exchange.
     ret                             # Return value is already in the right spot.
 
 END_FUNCTION(RtlAtomicCompareExchange32)
 
-##
-## ULONGLONG
-## RtlAtomicAdd64 (
-##     volatile ULONGLONG *Address,
-##     ULONGLONG Increment
-##     )
-##
+//
+// ULONGLONG
+// RtlAtomicAdd64 (
+//     volatile ULONGLONG *Address,
+//     ULONGLONG Increment
+//     )
+//
 
 /*++
 
@@ -289,7 +289,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicAdd64)
+PROTECTED_FUNCTION(RtlAtomicAdd64)
 RtlAtomicAdd64Loop:
     movq    (%rdi), %rcx            # Read the value.
     movq    %rcx, %rax              # Move the value to rax as compare value.
@@ -300,13 +300,13 @@ RtlAtomicAdd64Loop:
 
 END_FUNCTION(RtlAtomicAdd64)
 
-##
-## ULONG
-## RtlAtomicAdd32 (
-##     volatile ULONG *Address,
-##     ULONG Increment
-##     )
-##
+//
+// ULONG
+// RtlAtomicAdd32 (
+//     volatile ULONG *Address,
+//     ULONG Increment
+//     )
+//
 
 /*++
 
@@ -326,7 +326,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicAdd32)
+PROTECTED_FUNCTION(RtlAtomicAdd32)
 RtlAtomicAdd32Loop:
     xorq    %rcx, %rcx              # Zero out high part of rcx.
     movl    (%rdi), %ecx            # Read the value.
@@ -338,13 +338,13 @@ RtlAtomicAdd32Loop:
 
 END_FUNCTION(RtlAtomicAdd32)
 
-##
-## ULONG
-## RtlAtomicOr32 (
-##     volatile ULONG *Address,
-##     ULONG Mask
-##     )
-##
+//
+// ULONG
+// RtlAtomicOr32 (
+//     volatile ULONG *Address,
+//     ULONG Mask
+//     )
+//
 
 /*++
 
@@ -364,7 +364,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicOr32)
+PROTECTED_FUNCTION(RtlAtomicOr32)
 RtlAtomicOr32Loop:
     xorq    %rcx, %rcx              # Zero out high part of rcx.
     movl    (%rdi), %ecx            # Read the value.
@@ -376,13 +376,13 @@ RtlAtomicOr32Loop:
 
 END_FUNCTION(RtlAtomicOr32)
 
-##
-## ULONGLONG
-## RtlAtomicOr64 (
-##     volatile ULONGLONG *Address,
-##     ULONGLONG Mask
-##     )
-##
+//
+// ULONGLONG
+// RtlAtomicOr64 (
+//     volatile ULONGLONG *Address,
+//     ULONGLONG Mask
+//     )
+//
 
 /*++
 
@@ -402,7 +402,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicOr64)
+PROTECTED_FUNCTION(RtlAtomicOr64)
 RtlAtomicOr64Loop:
     movq    (%rdi), %rcx            # Read the value.
     movq    %rcx, %rax              # Move the value to rax as compare value.
@@ -413,13 +413,13 @@ RtlAtomicOr64Loop:
 
 END_FUNCTION(RtlAtomicOr64)
 
-##
-## ULONG
-## RtlAtomicAnd32 (
-##     volatile ULONG *Address,
-##     ULONG Mask
-##     )
-##
+//
+// ULONG
+// RtlAtomicAnd32 (
+//     volatile ULONG *Address,
+//     ULONG Mask
+//     )
+//
 
 /*++
 
@@ -439,7 +439,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicAnd32)
+PROTECTED_FUNCTION(RtlAtomicAnd32)
 RtlAtomicAnd32Loop:
     xorq    %rcx, %rcx              # Zero out high part of rcx.
     movl    (%rdi), %ecx            # Read the value.
@@ -451,13 +451,13 @@ RtlAtomicAnd32Loop:
 
 END_FUNCTION(RtlAtomicAnd32)
 
-##
-## ULONG
-## RtlAtomicXor32 (
-##     volatile ULONG *Address,
-##     ULONG Mask
-##     )
-##
+//
+// ULONG
+// RtlAtomicXor32 (
+//     volatile ULONG *Address,
+//     ULONG Mask
+//     )
+//
 
 /*++
 
@@ -477,7 +477,7 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlAtomicXor32)
+PROTECTED_FUNCTION(RtlAtomicXor32)
 RtlAtomicXor32Loop:
     xorq    %rcx, %rcx              # Zero out high part of rcx.
     movl    (%rdi), %ecx            # Read the value.
@@ -489,12 +489,12 @@ RtlAtomicXor32Loop:
 
 END_FUNCTION(RtlAtomicXor32)
 
-##
-## VOID
-## RtlMemoryBarrier (
-##     VOID
-##     )
-##
+//
+// VOID
+// RtlMemoryBarrier (
+//     VOID
+//     )
+//
 
 /*++
 
@@ -514,13 +514,13 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlMemoryBarrier)
-    lock orq $0, (%esp)
+PROTECTED_FUNCTION(RtlMemoryBarrier)
+    lock orq $0, (%rsp)
     ret
 
 END_FUNCTION(RtlMemoryBarrier)
 
-##
-## --------------------------------------------------------- Internal Functions
-##
+//
+// --------------------------------------------------------- Internal Functions
+//
 

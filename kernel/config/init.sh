@@ -1,5 +1,10 @@
 ##
-## Copyright (c) 2014 Minoca Corp. All Rights Reserved.
+## Copyright (c) 2014 Minoca Corp.
+##
+##    This file is licensed under the terms of the GNU General Public License
+##    version 3. Alternative licensing terms are available. Contact
+##    info@minocacorp.com for details. See the LICENSE file at the root of this
+##    project for complete licensing information..
 ##
 ## Script Name:
 ##
@@ -60,6 +65,7 @@ if ! test -c "$WORLD/dev/null"; then
     touch "$WORLD/dev/tty"
     mkdir -p "$WORLD/dev/Volume"
     mkdir -p "$WORLD/dev/Terminal"
+    mkdir -p "$WORLD/dev/Devices"
     mount --bind "/Device/null" "$WORLD/dev/null"
     mount --bind "/Device/full" "$WORLD/dev/full"
     mount --bind "/Device/zero" "$WORLD/dev/zero"
@@ -68,6 +74,9 @@ if ! test -c "$WORLD/dev/null"; then
     mount --bind "/Terminal/Slave0" "$WORLD/dev/console"
     mount --bind "/Volume" "$WORLD/dev/Volume"
     mount --bind "/Terminal" "$WORLD/dev/Terminal"
+    mount --bind "/Device" "$WORLD/dev/Devices"
+    mkdir -p "$WORLD/dev/Pipe"
+    mount --bind "/Pipe" "$WORLD/dev/Pipe"
 fi
 
 ##
@@ -83,11 +92,12 @@ export HOME="/root"
 export TERM=xterm
 
 ##
-## Clean out the tmp directory.
+## Clean out the tmp and dev directories.
 ##
 
-rm -rf "$WORLD/tmp"
-mkdir -p -m777 "$WORLD/tmp"
+rm -rf "$WORLD/tmp" "$WORLD/dev"
+mkdir -p "$WORLD/dev"
+mkdir -p -m1777 "$WORLD/tmp"
 
 ##
 ## Symlink swiss binaries.
@@ -96,12 +106,13 @@ mkdir -p -m777 "$WORLD/tmp"
 if ! test -x $WORLD/bin/chroot; then
 
     ##
-    ## If there is no swiss, link sh to swiss (hopefully that works). Pipes
-    ## don't really work at this point.
+    ## If there is no swiss, move sh to swiss, setuid on swiss, and then link
+    ## all the other binaries to swiss.
     ##
 
     if ! test -r $WORLD/bin/swiss ; then
-        ln -s sh $WORLD/bin/swiss
+        mv $WORLD/bin/sh $WORLD/bin/swiss
+        chmod u+s $WORLD/bin/swiss
     fi
 
     for app in `swiss --list`; do
@@ -109,6 +120,16 @@ if ! test -x $WORLD/bin/chroot; then
             ln -s swiss $WORLD/bin/$app
         fi
     done
+
+    ##
+    ## Also check on root's home and ssh directories, as having those set wrong
+    ## prevents logging in via SSH.
+    ##
+
+    chmod -f go-rwx $WORLD/root $WORLD/root/.ssh \
+        $WORLD/root/.ssh/authorized_keys \
+        $WORLD/root/.ssh/id_rsa
+
 fi
 
 ##

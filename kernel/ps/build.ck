@@ -27,8 +27,16 @@ Environment:
 
 --*/
 
+from menv import kernelLibrary, mconfig;
+
 function build() {
-    base_sources = [
+    var arch = mconfig.arch;
+    var archSources;
+    var baseSources;
+    var entries;
+    var lib;
+
+    baseSources = [
         "env.c",
         "info.c",
         "init.c",
@@ -39,27 +47,32 @@ function build() {
         "signals.c",
         "thread.c",
         "usrlock.c",
-        "utimer.c"
+        "utimer.c",
+        "uts.c"
     ];
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        arch_sources = [
+        archSources = [
             "armv7/psarch.c"
         ];
 
     } else if (arch == "x86") {
-        arch_sources = [
+        archSources = [
             "x86/psarch.c"
+        ];
+
+    } else if (arch == "x64") {
+        archSources = [
+            "x64/psarch.c"
         ];
     }
 
     lib = {
         "label": "ps",
-        "inputs": base_sources + arch_sources,
+        "inputs": baseSources + archSources,
     };
 
-    entries = static_library(lib);
+    entries = kernelLibrary(lib);
     return entries;
 }
 
-return build();

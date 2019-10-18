@@ -28,45 +28,55 @@ Environment:
 
 --*/
 
+from menv import staticApplication, mconfig, uefiRuntimeFfs;
+
 function build() {
+    var arch = mconfig.arch;
+    var elf;
+    var entries;
+    var includes;
+    var libs;
+    var linkConfig;
+    var sources;
+    var sourcesConfig;
+
     sources = [
-        "//uefi/core:crc32.o",
+        "uefi/core:crc32.o",
         "runtime.c",
     ];
 
     libs = [
-        "//uefi/archlib:uefiarch"
+        "uefi/archlib:uefiarch"
     ];
 
     includes = [
-        "$//uefi/include",
-        "$//uefi/core"
+        "$S/uefi/include",
+        "$S/uefi/core"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-fshort-wchar"],
     };
 
-    link_config = {
-        "LDFLAGS": ["-pie", "-nostdlib", "-static"]
+    linkConfig = {
+        "LDFLAGS": ["-pie", "-nodefaultlibs", "-nostartfiles"]
     };
 
     elf = {
         "label": "rtbase.elf",
         "inputs": sources + libs,
-        "sources_config": sources_config,
+        "sources_config": sourcesConfig,
         "includes": includes,
         "entry": "EfiRuntimeDriverEntry",
-        "config": link_config
+        "config": linkConfig
     };
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        elf["linker_script"] = "$//uefi/include/link_arm.x";
+        elf["linker_script"] = "$S/uefi/include/link_arm.x";
     }
 
-    entries = executable(elf);
-    entries += uefi_runtime_ffs("rtbase");
+    entries = staticApplication(elf);
+    entries += uefiRuntimeFfs("rtbase");
     return entries;
 }
 
-return build();

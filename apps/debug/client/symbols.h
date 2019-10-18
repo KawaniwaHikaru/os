@@ -36,6 +36,8 @@ typedef struct _STRUCTURE_MEMBER STRUCTURE_MEMBER, *PSTRUCTURE_MEMBER;
 typedef struct _ENUMERATION_MEMBER ENUMERATION_MEMBER, *PENUMERATION_MEMBER;
 typedef struct _DEBUG_SYMBOLS DEBUG_SYMBOLS, *PDEBUG_SYMBOLS;
 typedef struct _DATA_SYMBOL DATA_SYMBOL, *PDATA_SYMBOL;
+typedef struct _SOURCE_FILE_SYMBOL SOURCE_FILE_SYMBOL, *PSOURCE_FILE_SYMBOL;
+typedef struct _FUNCTION_SYMBOL FUNCTION_SYMBOL, *PFUNCTION_SYMBOL;
 
 typedef enum _DATA_TYPE_TYPE {
     DataTypeInvalid,
@@ -179,6 +181,100 @@ typedef enum _ARM_REGISTER {
     ArmRegisterD30,
     ArmRegisterD31,
 } ARM_REGISTER, *PARM_REGISTER;
+
+typedef enum _X64_REGISTER {
+    X64RegisterRax,
+    X64RegisterRdx,
+    X64RegisterRcx,
+    X64RegisterRbx,
+    X64RegisterRsi,
+    X64RegisterRdi,
+    X64RegisterRbp,
+    X64RegisterRsp,
+    X64RegisterR8,
+    X64RegisterR9,
+    X64RegisterR10,
+    X64RegisterR11,
+    X64RegisterR12,
+    X64RegisterR13,
+    X64RegisterR14,
+    X64RegisterR15,
+    X64RegisterReturnAddress,
+    X64RegisterXmm0 = 17,
+    X64RegisterXmm1,
+    X64RegisterXmm2,
+    X64RegisterXmm3,
+    X64RegisterXmm4,
+    X64RegisterXmm5,
+    X64RegisterXmm6,
+    X64RegisterXmm7,
+    X64RegisterXmm8,
+    X64RegisterXmm9,
+    X64RegisterXmm10,
+    X64RegisterXmm11,
+    X64RegisterXmm12,
+    X64RegisterXmm13,
+    X64RegisterXmm14,
+    X64RegisterXmm15,
+    X64RegisterSt0 = 33,
+    X64RegisterSt1,
+    X64RegisterSt2,
+    X64RegisterSt3,
+    X64RegisterSt4,
+    X64RegisterSt5,
+    X64RegisterSt6,
+    X64RegisterSt7,
+    X64RegisterMm0 = 41,
+    X64RegisterMm1,
+    X64RegisterMm2,
+    X64RegisterMm3,
+    X64RegisterMm4,
+    X64RegisterMm5,
+    X64RegisterMm6,
+    X64RegisterMm7,
+    X64RegisterRflags = 49,
+    X64RegisterEs = 50,
+    X64RegisterCs,
+    X64RegisterSs,
+    X64RegisterDs,
+    X64RegisterFs,
+    X64RegisterGs,
+    X64RegisterFsBase = 58,
+    X64RegisterGsBase = 59,
+    X64RegisterTr = 62,
+    X64RegisterLdtr = 63,
+    X64RegisterMxcsr = 64,
+    X64RegisterFcw = 65,
+    X64RegisterFsw = 66,
+    X64RegisterXmm16 = 67,
+    X64RegisterXmm17,
+    X64RegisterXmm18,
+    X64RegisterXmm19,
+    X64RegisterXmm20,
+    X64RegisterXmm21,
+    X64RegisterXmm22,
+    X64RegisterXmm23,
+    X64RegisterXmm24,
+    X64RegisterXmm25,
+    X64RegisterXmm26,
+    X64RegisterXmm27,
+    X64RegisterXmm28,
+    X64RegisterXmm29,
+    X64RegisterXmm30,
+    X64RegisterXmm31,
+    X64RegisterK0 = 118,
+    X64RegisterK1,
+    X64RegisterK2,
+    X64RegisterK3,
+    X64RegisterK4,
+    X64RegisterK5,
+    X64RegisterK6,
+    X64RegisterK7,
+    X64RegisterBnd0 = 126,
+    X64RegisterBnd1,
+    X64RegisterBnd2,
+    X64RegisterBnd3,
+} X64_REGISTER, *PX64_REGISTER;
 
 typedef enum _DATA_SYMBOL_LOCATION_TYPE {
     DataLocationInvalid,
@@ -384,6 +480,41 @@ Return Value:
 
 --*/
 
+typedef
+BOOL
+(*PSYMBOLS_CHECK_RANGE) (
+    PDEBUG_SYMBOLS Symbols,
+    PSOURCE_FILE_SYMBOL Source,
+    ULONGLONG Address,
+    PVOID Ranges
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines whether the given address is actually in range of
+    the given ranges. This is used for things like inline functions that have
+    several discontiguous address ranges.
+
+Arguments:
+
+    Symbols - Supplies a pointer to the debug symbols.
+
+    Source - Supplies a pointer to the compilation unit the given object is in.
+
+    Address - Supplies the address to query.
+
+    Ranges - Supplies the opaque pointer to the range list information.
+
+Return Value:
+
+    TRUE if the address is within the range list for the object.
+
+    FALSE if the address is not within the range list for the object.
+
+--*/
+
 /*++
 
 Structure Description:
@@ -406,6 +537,10 @@ Members:
     GetAddressOfDataSymbol - Stores an optional pointer to a function that
         can return the memory address of a data symbol.
 
+    CheckRange - Stores an optional pointer to a function used to determine if
+        an address is within a given discontiguous range for a function or
+        module.
+
 --*/
 
 typedef struct _DEBUG_SYMBOL_INTERFACE {
@@ -414,6 +549,7 @@ typedef struct _DEBUG_SYMBOL_INTERFACE {
     PSYMBOLS_STACK_UNWIND Unwind;
     PSYMBOLS_READ_DATA_SYMBOL ReadDataSymbol;
     PSYMBOLS_GET_ADDRESS_OF_DATA_SYMBOL GetAddressOfDataSymbol;
+    PSYMBOLS_CHECK_RANGE CheckRange;
 } DEBUG_SYMBOL_INTERFACE, *PDEBUG_SYMBOL_INTERFACE;
 
 /*++
@@ -549,7 +685,7 @@ Members:
 
 --*/
 
-typedef struct _SOURCE_FILE_SYMBOL {
+struct _SOURCE_FILE_SYMBOL {
     PSTR SourceDirectory;
     PSTR SourceFile;
     LIST_ENTRY ListEntry;
@@ -561,7 +697,7 @@ typedef struct _SOURCE_FILE_SYMBOL {
     ULONGLONG EndAddress;
     ULONG Identifier;
     PVOID SymbolContext;
-} SOURCE_FILE_SYMBOL, *PSOURCE_FILE_SYMBOL;
+};
 
 /*++
 
@@ -589,33 +725,45 @@ Members:
     LocalsHead - Stores the head of the list of the function's local variables.
         The list will be of type DATA_SYMBOL.
 
+    FunctionsHead - Stores the head of the list of the function's subfunctions
+        (often inlined functions).
+
     StartAddress - Stores the starting virtual address of the function.
 
-    EndAddress - Stores the ending virtual address of the function.
+    EndAddress - Stores the ending virtual address of the function, exclusive.
+
+    Ranges - Stores an opaque pointer that is passed in to the check range
+        function to determine if the given address is in range.
 
     ReturnTypeNumber - Stores the type number of the function's return type.
 
     ReturnTypeOwner - Stores a pointer to the source file where the function's
         return type resides.
 
-    SymbolContext - Store's a pointer's worth of additional context for the
+    SymbolContext - Stores a pointer's worth of additional context for the
         symbol library.
+
+    ParentFunction - Stores a pointer to the parent function if this is an
+        inner or inlined function.
 
 --*/
 
-typedef struct _FUNCTION_SYMBOL {
+struct _FUNCTION_SYMBOL {
     PSOURCE_FILE_SYMBOL ParentSource;
     PSTR Name;
     USHORT FunctionNumber;
     LIST_ENTRY ListEntry;
     LIST_ENTRY ParametersHead;
     LIST_ENTRY LocalsHead;
+    LIST_ENTRY FunctionsHead;
     ULONGLONG StartAddress;
     ULONGLONG EndAddress;
+    PVOID Ranges;
     LONG ReturnTypeNumber;
     PSOURCE_FILE_SYMBOL ReturnTypeOwner;
     PVOID SymbolContext;
-} FUNCTION_SYMBOL, *PFUNCTION_SYMBOL;
+    PFUNCTION_SYMBOL ParentFunction;
+};
 
 /*++
 

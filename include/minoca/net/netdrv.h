@@ -65,6 +65,13 @@ Author:
     RtlAtomicExchange32((volatile ULONG *)&((_Socket)->LastError), (_Error));
 
 //
+// This macro clears the network sockets last error state.
+//
+
+#define NET_SOCKET_CLEAR_LAST_ERROR(_Socket) \
+    NET_SOCKET_GET_AND_CLEAR_LAST_ERROR(_Socket)
+
+//
 // This macro initializes a network packet list.
 //
 
@@ -78,6 +85,14 @@ Author:
 
 #define NET_ADD_PACKET_TO_LIST(_Packet, _PacketList)                \
     INSERT_BEFORE(&((_Packet)->ListEntry), &((_PacketList)->Head)); \
+    (_PacketList)->Count += 1;
+
+//
+// This macro adds a network packet to beginning of a network packet list.
+//
+
+#define NET_ADD_PACKET_TO_LIST_HEAD(_Packet, _PacketList)          \
+    INSERT_AFTER(&((_Packet)->ListEntry), &((_PacketList)->Head)); \
     (_PacketList)->Count += 1;
 
 //
@@ -144,12 +159,7 @@ Author:
 #define NET_SPEED_10_MBPS 10000000ULL
 #define NET_SPEED_100_MBPS 100000000ULL
 #define NET_SPEED_1000_MBPS 1000000000ULL
-
-//
-// Define the size of an ethernet address.
-//
-
-#define ETHERNET_ADDRESS_SIZE 6
+#define NET_SPEED_2500_MBPS 2500000000ULL
 
 //
 // Define well-known protocol numbers.
@@ -159,6 +169,13 @@ Author:
 #define IP6_PROTOCOL_NUMBER      0x86DD
 #define ARP_PROTOCOL_NUMBER      0x0806
 #define EAPOL_PROTOCOL_NUMBER    0x888E
+
+//
+// Define an "invalid" protocol number for networks that don't actually expect
+// to receive packets from the physical layer (e.g. Netlink).
+//
+
+#define INVALID_PROTOCOL_NUMBER (ULONG)-1
 
 //
 // Define the network socket flags.
@@ -174,13 +191,14 @@ Author:
 #define NET_SOCKET_FLAG_FORKED_LISTENER         0x00000080
 #define NET_SOCKET_FLAG_NETWORK_HEADER_INCLUDED 0x00000100
 #define NET_SOCKET_FLAG_KERNEL                  0x00000200
+#define NET_SOCKET_FLAG_MULTICAST_LOOPBACK      0x00000400
 
 //
 // Define the set of network socket flags that should be carried over to a
 // copied socket after a spawned connection.
 //
 
-#define NET_SOCKET_FLAGS_INHERIT_MASK       0x0000000F
+#define NET_SOCKET_FLAGS_INHERIT_MASK           0x0000040F
 
 //
 // Define the network buffer allocation flags.
@@ -205,27 +223,41 @@ Author:
 #define NET_PACKET_FLAG_FORCE_TRANSMIT       0x00000040
 #define NET_PACKET_FLAG_UNENCRYPTED          0x00000080
 #define NET_PACKET_FLAG_MULTICAST            0x00000100
+#define NET_PACKET_FLAG_ROUTER_ALERT         0x00000200
+#define NET_PACKET_FLAG_LINK_LOCAL_HOP_LIMIT 0x00000400
+#define NET_PACKET_FLAG_MAX_HOP_LIMIT        0x00000800
+
+#define NET_PACKET_FLAG_CHECKSUM_OFFLOAD_MASK \
+    (NET_PACKET_FLAG_IP_CHECKSUM_OFFLOAD |    \
+     NET_PACKET_FLAG_UDP_CHECKSUM_OFFLOAD |   \
+     NET_PACKET_FLAG_TCP_CHECKSUM_OFFLOAD)
 
 //
-// Define the network link feature flags.
+// Define the network link capabilities.
 //
 
-#define NET_LINK_CHECKSUM_FLAG_TRANSMIT_IP_OFFLOAD  0x00000001
-#define NET_LINK_CHECKSUM_FLAG_TRANSMIT_UDP_OFFLOAD 0x00000002
-#define NET_LINK_CHECKSUM_FLAG_TRANSMIT_TCP_OFFLOAD 0x00000004
-#define NET_LINK_CHECKSUM_FLAG_RECEIVE_IP_OFFLOAD   0x00000008
-#define NET_LINK_CHECKSUM_FLAG_RECEIVE_UDP_OFFLOAD  0x00000010
-#define NET_LINK_CHECKSUM_FLAG_RECEIVE_TCP_OFFLOAD  0x00000020
+#define NET_LINK_CAPABILITY_TRANSMIT_IP_CHECKSUM_OFFLOAD  0x00000001
+#define NET_LINK_CAPABILITY_TRANSMIT_UDP_CHECKSUM_OFFLOAD 0x00000002
+#define NET_LINK_CAPABILITY_TRANSMIT_TCP_CHECKSUM_OFFLOAD 0x00000004
+#define NET_LINK_CAPABILITY_RECEIVE_IP_CHECKSUM_OFFLOAD   0x00000008
+#define NET_LINK_CAPABILITY_RECEIVE_UDP_CHECKSUM_OFFLOAD  0x00000010
+#define NET_LINK_CAPABILITY_RECEIVE_TCP_CHECKSUM_OFFLOAD  0x00000020
+#define NET_LINK_CAPABILITY_PROMISCUOUS_MODE              0x00000040
+#define NET_LINK_CAPABILITY_MULTICAST_ALL                 0x00000080
 
-#define NET_LINK_CHECKSUM_FLAG_TRANSMIT_MASK        \
-    (NET_LINK_CHECKSUM_FLAG_TRANSMIT_IP_OFFLOAD |   \
-     NET_LINK_CHECKSUM_FLAG_TRANSMIT_UDP_OFFLOAD |  \
-     NET_LINK_CHECKSUM_FLAG_TRANSMIT_TCP_OFFLOAD)
+#define NET_LINK_CAPABILITY_CHECKSUM_TRANSMIT_MASK       \
+    (NET_LINK_CAPABILITY_TRANSMIT_IP_CHECKSUM_OFFLOAD |  \
+     NET_LINK_CAPABILITY_TRANSMIT_UDP_CHECKSUM_OFFLOAD | \
+     NET_LINK_CAPABILITY_TRANSMIT_TCP_CHECKSUM_OFFLOAD)
 
-#define NET_LINK_CHECKSUM_FLAG_RECEIVE_MASK         \
-    (NET_LINK_CHECKSUM_FLAG_RECEIVE_IP_OFFLOAD |    \
-     NET_LINK_CHECKSUM_FLAG_RECEIVE_UDP_OFFLOAD |   \
-     NET_LINK_CHECKSUM_FLAG_RECEIVE_TCP_OFFLOAD)
+#define NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK       \
+    (NET_LINK_CAPABILITY_RECEIVE_IP_CHECKSUM_OFFLOAD |  \
+     NET_LINK_CAPABILITY_RECEIVE_UDP_CHECKSUM_OFFLOAD | \
+     NET_LINK_CAPABILITY_RECEIVE_TCP_CHECKSUM_OFFLOAD)
+
+#define NET_LINK_CAPABILITY_CHECKSUM_MASK         \
+    (NET_LINK_CAPABILITY_CHECKSUM_TRANSMIT_MASK | \
+     NET_LINK_CAPABILITY_CHECKSUM_RECEIVE_MASK)
 
 //
 // Define the network packet size information flags.
@@ -237,8 +269,24 @@ Author:
 // Define the socket binding flags.
 //
 
-#define NET_SOCKET_BINDING_FLAG_ACTIVATE           0x00000001
-#define NET_SOCKET_BINDING_FLAG_NO_PORT_ASSIGNMENT 0x00000002
+#define NET_SOCKET_BINDING_FLAG_ACTIVATE                0x00000001
+#define NET_SOCKET_BINDING_FLAG_NO_PORT_ASSIGNMENT      0x00000002
+#define NET_SOCKET_BINDING_FLAG_ALLOW_REBIND            0x00000004
+#define NET_SOCKET_BINDING_FLAG_ALLOW_UNBIND            0x00000008
+#define NET_SOCKET_BINDING_FLAG_OVERWRITE_LOCAL         0x00000010
+#define NET_SOCKET_BINDING_FLAG_SKIP_ADDRESS_VALIDATION 0x00000020
+
+//
+// Define the protocol entry flags.
+//
+
+#define NET_PROTOCOL_FLAG_UNICAST_ONLY        0x00000001
+#define NET_PROTOCOL_FLAG_MATCH_ANY_PROTOCOL  0x00000002
+#define NET_PROTOCOL_FLAG_FIND_ALL_SOCKETS    0x00000004
+#define NET_PROTOCOL_FLAG_NO_DEFAULT_PROTOCOL 0x00000008
+#define NET_PROTOCOL_FLAG_PORTLESS            0x00000010
+#define NET_PROTOCOL_FLAG_NO_BIND_PERMISSIONS 0x00000020
+#define NET_PROTOCOL_FLAG_CONNECTION_BASED    0x00000040
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -254,8 +302,30 @@ typedef enum _NET_SOCKET_BINDING_TYPE {
 
 typedef enum _NET_LINK_INFORMATION_TYPE {
     NetLinkInformationInvalid,
-    NetLinkInformationChecksumOffload
+    NetLinkInformationChecksumOffload,
+    NetLinkInformationPromiscuousMode,
+    NetLinkInformationMulticastAll,
 } NET_LINK_INFORMATION_TYPE, *PNET_LINK_INFORMATION_TYPE;
+
+typedef enum _NET_ADDRESS_TYPE {
+    NetAddressUnknown,
+    NetAddressAny,
+    NetAddressUnicast,
+    NetAddressBroadcast,
+    NetAddressMulticast
+} NET_ADDRESS_TYPE, *PNET_ADDRESS_TYPE;
+
+typedef enum _NET_LINK_ADDRESS_STATE {
+    NetLinkAddressNotConfigured,
+    NetLinkAddressTentative,
+    NetLinkAddressDuplicate,
+    NetLinkAddressConfigured,
+    NetLinkAddressConfiguredStatic
+} NET_LINK_ADDRESS_STATE, *PNET_LINK_ADDRESS_STATE;
+
+typedef struct _NET_PROTOCOL_ENTRY NET_PROTOCOL_ENTRY, *PNET_PROTOCOL_ENTRY;
+typedef struct _NET_NETWORK_ENTRY NET_NETWORK_ENTRY, *PNET_NETWORK_ENTRY;
+typedef struct _NET_RECEIVE_CONTEXT NET_RECEIVE_CONTEXT, *PNET_RECEIVE_CONTEXT;
 
 /*++
 
@@ -299,11 +369,11 @@ Members:
     ListEntry - Stores pointers to the next and previous addresses owned by the
         link.
 
-    Configured - Stores a boolean indicating whether or not the network link
-        address is configured.
+    Network - Stores a pointer to the network associated with the link address
+        entry. This contains an interface that can be used to drive network
+        specific link address configuration (e.g. DHCP, NDP, DHCPv6).
 
-    StaticAddress - Stores a boolean indicating whether or not the network
-        address is static (TRUE) or dynamic (FALSE).
+    State - Stores the current state of the link address entry.
 
     Address - Stores the network address of the link.
 
@@ -329,8 +399,8 @@ Members:
 
 typedef struct _NET_LINK_ADDRESS_ENTRY {
     LIST_ENTRY ListEntry;
-    BOOL Configured;
-    BOOL StaticAddress;
+    PNET_NETWORK_ENTRY Network;
+    volatile NET_LINK_ADDRESS_STATE State;
     NETWORK_ADDRESS Address;
     NETWORK_ADDRESS Subnet;
     NETWORK_ADDRESS DefaultGateway;
@@ -552,9 +622,10 @@ Members:
         the maximum number of bytes that can be sent over the physical link and
         the header and footer sizes.
 
-    ChecksumFlags - Stores a bitmask of flags indicating whether certain
-        checksum features are enabled. See NET_LINK_CHECKSUM_FLAG_* for
-        definitions.
+    Capabilities - Stores a bitmask of capabilities indicating whether or not
+        certain features are supported by the link. See NET_LINK_CAPABILITY_*
+        for definitions. This is a static field and does not describe which
+        features are currently enabled.
 
     DataLinkType - Stores the type of the data link layer used by the network
         link.
@@ -575,12 +646,39 @@ typedef struct _NET_LINK_PROPERTIES {
     PDEVICE Device;
     PVOID DeviceContext;
     NET_PACKET_SIZE_INFORMATION PacketSizeInformation;
-    ULONG ChecksumFlags;
+    ULONG Capabilities;
     NET_DOMAIN_TYPE DataLinkType;
     PHYSICAL_ADDRESS MaxPhysicalAddress;
     NETWORK_ADDRESS PhysicalAddress;
     NET_DEVICE_LINK_INTERFACE Interface;
 } NET_LINK_PROPERTIES, *PNET_LINK_PROPERTIES;
+
+/*++
+
+Structure Description:
+
+    This structure defines a multicast group for a link.
+
+Members:
+
+    ListEntry - Stores an entry into a link's list of multicast groups.
+
+    LinkAddress - Stores a pointer to the link address on which the link is
+        joined to the multicast group.
+
+    JoinCount - Stores the number of times a join request has been made for
+        this multicast group.
+
+    Address - Stores the multicast address of the group.
+
+--*/
+
+typedef struct _NET_LINK_MULTICAST_GROUP {
+    LIST_ENTRY ListEntry;
+    PNET_LINK_ADDRESS_ENTRY LinkAddress;
+    ULONG JoinCount;
+    NETWORK_ADDRESS Address;
+} NET_LINK_MULTICAST_GROUP, *PNET_LINK_MULTICAST_GROUP;
 
 typedef struct _NET_DATA_LINK_ENTRY NET_DATA_LINK_ENTRY, *PNET_DATA_LINK_ENTRY;
 
@@ -602,9 +700,10 @@ Members:
         structures in this structure. This lock must only be called at low
         level.
 
-    LinkAddressList - Stores the head of the list of link layer addresses owned
-        by this link. For example, in IPv4 this would be the list of IP
-        addresses this link responds to. These entries are of type
+    LinkAddressArray - Stores an array of link layer address lists owned by
+        this link. Each list contains addresses for each socket network type.
+        For example, the IPv4 entry contains all the IPv4 addresses the link
+        responds to (typically one). The list entries are of type
         NET_LINK_ADDRESS_ENTRY.
 
     LinkUp - Stores a boolean indicating whether the link is active (TRUE) or
@@ -626,13 +725,16 @@ Members:
     AddressTranslationTree - Stores the tree containing translations between
         network addresses and physical addresses, keyed by network address.
 
+    MulticastGroupList - Stores a list of the multicast groups to which this
+        link belongs.
+
 --*/
 
 typedef struct _NET_LINK {
     LIST_ENTRY ListEntry;
     volatile ULONG ReferenceCount;
     PQUEUED_LOCK QueuedLock;
-    LIST_ENTRY LinkAddressList;
+    LIST_ENTRY LinkAddressArray[NetDomainSocketNetworkCount];
     BOOL LinkUp;
     ULONGLONG LinkSpeed;
     PNET_DATA_LINK_ENTRY DataLinkEntry;
@@ -640,6 +742,7 @@ typedef struct _NET_LINK {
     NET_LINK_PROPERTIES Properties;
     PKEVENT AddressTranslationEvent;
     RED_BLACK_TREE AddressTranslationTree;
+    LIST_ENTRY MulticastGroupList;
 } NET_LINK, *PNET_LINK;
 
 typedef
@@ -760,25 +863,33 @@ Return Value:
 --*/
 
 typedef
-VOID
-(*PNET_DATA_LINK_GET_BROADCAST_ADDRESS) (
-    PNETWORK_ADDRESS PhysicalNetworkAddress
+KSTATUS
+(*PNET_DATA_LINK_CONVERT_TO_PHYSICAL_ADDRESS) (
+    PNETWORK_ADDRESS NetworkAddress,
+    PNETWORK_ADDRESS PhysicalAddress,
+    NET_ADDRESS_TYPE NetworkAddressType
     );
 
 /*++
 
 Routine Description:
 
-    This routine gets the data link layer's broadcast address.
+    This routine converts the given network address to a physical layer address
+    based on the provided network address type.
 
 Arguments:
 
-    PhysicalNetworkAddress - Supplies a pointer where the physical network
-        broadcast address will be returned.
+    NetworkAddress - Supplies a pointer to the network layer address to convert.
+
+    PhysicalAddress - Supplies a pointer to an address that receives the
+        converted physical layer address.
+
+    NetworkAddressType - Supplies the classified type of the given network
+        address, which aids in conversion.
 
 Return Value:
 
-    None.
+    Status code.
 
 --*/
 
@@ -871,11 +982,14 @@ Members:
     ProcessReceivedPacket - Stores a pointer to a function used to process
         received data link layer packets.
 
-    GetBroadcastAddress - Stores a pointer to a function used to retrieve the
-        data link layer's physical broadcast address.
+    ConvertToPhysicalAddress - Stores a pointer to a function used to convert a
+        network layer address into a data link layer physical address.
 
     PrintAddress - Stores a pointer to a function used to convert a data link
         address into a string representation.
+
+    GetPacketSizeInformation - Stores a pointer to a function that returns the
+        required packet size information for a link.
 
 --*/
 
@@ -884,7 +998,7 @@ typedef struct _NET_DATA_LINK_INTERFACE {
     PNET_DATA_LINK_DESTROY_LINK DestroyLink;
     PNET_DATA_LINK_SEND Send;
     PNET_DATA_LINK_PROCESS_RECEIVED_PACKET ProcessReceivedPacket;
-    PNET_DATA_LINK_GET_BROADCAST_ADDRESS GetBroadcastAddress;
+    PNET_DATA_LINK_CONVERT_TO_PHYSICAL_ADDRESS ConvertToPhysicalAddress;
     PNET_DATA_LINK_PRINT_ADDRESS PrintAddress;
     PNET_DATA_LINK_GET_PACKET_SIZE_INFORMATION GetPacketSizeInformation;
 } NET_DATA_LINK_INTERFACE, *PNET_DATA_LINK_INTERFACE;
@@ -917,6 +1031,64 @@ struct _NET_DATA_LINK_ENTRY {
 
 Structure Description:
 
+    This structure defines a translation between a network address and a
+    physical one.
+
+Members:
+
+    Node - Stores the red black tree information for this node.
+
+    ReferenceCount - Stores the reference count on the translation entry.
+
+    NetworkAddress - Stores the network address, the key for the red black
+        tree node.
+
+    PhysicalAddress - Stores the physical address that corresponds to the
+        network address.
+
+--*/
+
+typedef struct _NET_TRANSLATION_ENTRY {
+    RED_BLACK_TREE_NODE Node;
+    volatile ULONG ReferenceCount;
+    NETWORK_ADDRESS NetworkAddress;
+    NETWORK_ADDRESS PhysicalAddress;
+} NET_TRANSLATION_ENTRY, *PNET_TRANSLATION_ENTRY;
+
+/*++
+
+Structure Description:
+
+    This structure defines a request to lookup an address translation entry for
+    the given query address. The caller is responsible for releasing the
+    reference on the translation entry, if returned.
+
+Members:
+
+    Link - Stores a pointer to the link on which to lookup the query address.
+
+    LinkAddress - Stores a pointer to the link address entry over which to
+        communicate any network requests that need to be sent in order to
+        translate the address.
+
+    QueryAddress - Stores a pointer to the network address to translation.
+
+    Translation - Stores a pointer to the found translation entry on success,
+        or NULL on failure.
+
+--*/
+
+typedef struct _NET_TRANSLATION_REQUEST {
+    PNET_LINK Link;
+    PNET_LINK_ADDRESS_ENTRY LinkAddress;
+    PNETWORK_ADDRESS QueryAddress;
+    PNET_TRANSLATION_ENTRY Translation;
+} NET_TRANSLATION_REQUEST, *PNET_TRANSLATION_REQUEST;
+
+/*++
+
+Structure Description:
+
     This structure defines the link information associated with a local address.
 
 Members:
@@ -926,18 +1098,95 @@ Members:
     LinkAdress - Stores a pointer to the link address entry that owns the local
         address.
 
-    LocalAddress - Stores the local address.
+    ReceiveAddress - Stores the local address on which packets can be received.
+
+    SendAddress - Stores the local address from which packets will be sent.
 
 --*/
 
 typedef struct _NET_LINK_LOCAL_ADDRESS {
     PNET_LINK Link;
     PNET_LINK_ADDRESS_ENTRY LinkAddress;
-    NETWORK_ADDRESS LocalAddress;
+    NETWORK_ADDRESS ReceiveAddress;
+    NETWORK_ADDRESS SendAddress;
 } NET_LINK_LOCAL_ADDRESS, *PNET_LINK_LOCAL_ADDRESS;
 
-typedef struct _NET_PROTOCOL_ENTRY NET_PROTOCOL_ENTRY, *PNET_PROTOCOL_ENTRY;
-typedef struct _NET_NETWORK_ENTRY NET_NETWORK_ENTRY, *PNET_NETWORK_ENTRY;
+/*++
+
+Structure Description:
+
+    This structure defines a multicast group join/leave request.
+
+Members:
+
+    MulticastAddress - Stores the multicast address of the group to join or
+        leave.
+
+    InterfaceAddress - Stores the address of the link interface over which the
+        multicast join/leave is requested.
+
+    InterfaceId- Stores the ID of the link interface over which the multicast
+        join/leave is requested.
+
+--*/
+
+typedef struct _NET_SOCKET_MULTICAST_REQUEST {
+    NETWORK_ADDRESS MulticastAddress;
+    NETWORK_ADDRESS InterfaceAddress;
+    DEVICE_ID InterfaceId;
+} NET_SOCKET_MULTICAST_REQUEST, *PNET_SOCKET_MULTICAST_REQUEST;
+
+/*++
+
+Structure Description:
+
+    This structure defines a multicast group for a socket.
+
+Members:
+
+    ListEntry - Stores pointers to the previous and next multicast groups in
+        the socket's list.
+
+    Link - Supplies a pointer to the network link to which the multicast group
+        is attached.
+
+    LinkAddress - Supplies a pointer to the link address entry with which the
+        multicast group is associated.
+
+    MulitcastAddress - Stores the multicast address of the group.
+
+--*/
+
+typedef struct _NET_SOCKET_MULTICAST_GROUP {
+    LIST_ENTRY ListEntry;
+    PNET_LINK Link;
+    PNET_LINK_ADDRESS_ENTRY LinkAddress;
+    NETWORK_ADDRESS MulticastAddress;
+} NET_SOCKET_MULTICAST_GROUP, *PNET_SOCKET_MULTICAST_GROUP;
+
+/*++
+
+Structure Description:
+
+    This structure defines a core networking socket link override. This stores
+    all the socket and link specific information needed to send a packet. This
+    can be used to send data from a link on behalf of a socket if the socket
+    is not yet bound to a link.
+
+Members:
+
+    LinkInformation - Stores the local address and its associated link and link
+        address entry.
+
+    PacketSizeInformation - Stores the packet size information bound by the
+        protocol, network and link layers.
+
+--*/
+
+typedef struct _NET_SOCKET_LINK_OVERRIDE {
+    NET_LINK_LOCAL_ADDRESS LinkInformation;
+    NET_PACKET_SIZE_INFORMATION PacketSizeInformation;
+} NET_SOCKET_LINK_OVERRIDE, *PNET_SOCKET_LINK_OVERRIDE;
 
 /*++
 
@@ -955,18 +1204,28 @@ Members:
     Network - Stores a pointer to the network layer entry responsible for this
         socket.
 
-    LocalAddress - Stores the local address of this connection.
+    LocalReceiveAddress - Stores the local address to which the socket is bound
+        to for receiving packets. This may be the any address or broadcast
+        address.
+
+    LocalSendAddress - Stores the local address to which the socket is bound to
+        for sending packets. This must be a unicast address.
 
     RemoteAddress - Stores the remote address of this connection.
 
     RemotePhysicalAddress - Stores the remote physical address of this
         connection.
 
+    RemoteTranslation - Stores an optional pointer to the remote address
+        translation entry in use by the socket. When present, it should hold
+        the same remote address and remote physical address as stored in the
+        socket. The remote addresses are still stored separately because
+        multicast and broadcast addresses aren't in the translation cache. It
+        does not make sense to cache them as it's a constant-time converstion
+        between a multicast/broadcast network address and its physical address.
+
     TreeEntry - Stores the information about this socket in the tree of
         sockets (which is either on the link itself or global).
-
-    ListEntry - Stores the information about this socket in the list of sockets.
-        This is only used for raw sockets; they do not get inserted in a tree.
 
     BindingType - Stores the type of binding for this socket (unbound, locally
         bound, or fully bound).
@@ -994,8 +1253,25 @@ Members:
         accepted connections that are allowed to accumulate before connections
         are refused. In the sockets API this is known as the backlog count.
 
-    HopLimit - Stores the hop limit / time-to-live that is to be set in the
-        network layer's header of every packet sent by this socket.
+    HopLimit - Stores the hop limit (a.k.a. time-to-live) that is to be set in
+        the IP headers of every packet sent by this socket.
+
+    DifferentiatedServicesCodePoint - Stores the differentiated services code
+        point that is to be set in the IP header of every packet sent by this
+        socket.
+
+    MulticastHopLimit - Stores the hop limit (a.k.a. time-to-live) that is to
+        be set in the IP header of every multicast packet sent by this socket.
+
+    MulticastInterface - Stores the interface over which to send all multicast
+        packets. If this is not initialized, then a default interface is chosen
+        just as it would be for unicast packets.
+
+    MulticastLock - Supplies a pointer to the queued lock that protects access
+        to the multicast information.
+
+    MulticastGroupList - Stores the head of the list of multicast groups to
+        which the socket belongs.
 
 --*/
 
@@ -1003,14 +1279,12 @@ typedef struct _NET_SOCKET {
     SOCKET KernelSocket;
     PNET_PROTOCOL_ENTRY Protocol;
     PNET_NETWORK_ENTRY Network;
-    NETWORK_ADDRESS LocalAddress;
+    NETWORK_ADDRESS LocalReceiveAddress;
+    NETWORK_ADDRESS LocalSendAddress;
     NETWORK_ADDRESS RemoteAddress;
     NETWORK_ADDRESS RemotePhysicalAddress;
-    union {
-        RED_BLACK_TREE_NODE TreeEntry;
-        LIST_ENTRY ListEntry;
-    } U;
-
+    PNET_TRANSLATION_ENTRY RemoteTranslation;
+    RED_BLACK_TREE_NODE TreeEntry;
     NET_SOCKET_BINDING_TYPE BindingType;
     volatile ULONG Flags;
     NET_PACKET_SIZE_INFORMATION PacketSizeInformation;
@@ -1021,31 +1295,12 @@ typedef struct _NET_SOCKET {
     ULONG SendPacketCount;
     ULONG MaxIncomingConnections;
     UCHAR HopLimit;
+    UCHAR DifferentiatedServicesCodePoint;
+    UCHAR MulticastHopLimit;
+    NET_SOCKET_LINK_OVERRIDE MulticastInterface;
+    volatile PQUEUED_LOCK MulticastLock;
+    LIST_ENTRY MulticastGroupList;
 } NET_SOCKET, *PNET_SOCKET;
-
-/*++
-
-Structure Description:
-
-    This structure defines a core networking socket link override. This stores
-    all the socket and link specific information needed to send a packet. This
-    can be used to send data from a link on behalf of a socket if the socket
-    is not yet bound to a link.
-
-Members:
-
-    LinkInformation - Stores the local address and its associated link and link
-        address entry.
-
-    PacketSizeInformation - Stores the packet size information bound by the
-        protocol, network and link layers.
-
---*/
-
-typedef struct _NET_SOCKET_LINK_OVERRIDE {
-    NET_LINK_LOCAL_ADDRESS LinkInformation;
-    NET_PACKET_SIZE_INFORMATION PacketSizeInformation;
-} NET_SOCKET_LINK_OVERRIDE, *PNET_SOCKET_LINK_OVERRIDE;
 
 typedef
 KSTATUS
@@ -1053,7 +1308,8 @@ KSTATUS
     PNET_PROTOCOL_ENTRY ProtocolEntry,
     PNET_NETWORK_ENTRY NetworkEntry,
     ULONG NetworkProtocol,
-    PNET_SOCKET *NewSocket
+    PNET_SOCKET *NewSocket,
+    ULONG Phase
     );
 
 /*++
@@ -1078,7 +1334,13 @@ Arguments:
         socket structure will be returned. The caller is responsible for
         allocating the socket (and potentially a larger structure for its own
         context). The core network library will fill in the standard socket
-        structure after this routine returns.
+        structure after this routine returns. In phase 1, this will contain
+        a pointer to the socket allocated during phase 0.
+
+    Phase - Supplies the socket creation phase. Phase 0 is the allocation phase
+        and phase 1 is the advanced initialization phase, which is invoked
+        after net core is done filling out common portions of the socket
+        structure.
 
 Return Value:
 
@@ -1310,11 +1572,7 @@ Return Value:
 typedef
 VOID
 (*PNET_PROTOCOL_PROCESS_RECEIVED_DATA) (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    PNET_PROTOCOL_ENTRY ProtocolEntry
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 /*++
@@ -1325,22 +1583,8 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space while this routine
-        executes and the packet travels up the stack, but will not be accessed
-        after this routine returns.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
-
-    ProtocolEntry - Supplies a pointer to this protocol entry.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1352,11 +1596,8 @@ Return Value:
 typedef
 KSTATUS
 (*PNET_PROTOCOL_PROCESS_RECEIVED_SOCKET_DATA) (
-    PNET_LINK Link,
     PNET_SOCKET Socket,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 /*++
@@ -1368,22 +1609,10 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the network link that received the packet.
-
     Socket - Supplies a pointer to the socket that received the packet.
 
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        Use of this structure depends on its flags. If it is a multicast
-        packet, then it cannot be modified by this routine. Otherwise it can
-        be used as scratch space and modified.
-
-    SourceAddress - Supplies a pointer to the source (remote) address that the
-        packet originated from. This memory will not be referenced once the
-        function returns, it can be stack allocated.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        that the packet is heading to. This memory will not be referenced once
-        the function returns, it can be stack allocated.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link, packet, network, protocol, and source and destination addresses.
 
 Return Value:
 
@@ -1607,6 +1836,9 @@ Members:
     ParentProtocolNumber - Stores the protocol number in the parent layer's
         protocol.
 
+    Flags - Stores a bitmask of protocol flags. See NET_PROTOCOL_FLAG_* for
+        definitions.
+
     LastSocket - Stores a pointer to the last socket that received a packet.
 
     SocketLock - Stores a pointer to a shared exclusive lock that protects the
@@ -1624,11 +1856,40 @@ struct _NET_PROTOCOL_ENTRY {
     LIST_ENTRY ListEntry;
     NET_SOCKET_TYPE Type;
     ULONG ParentProtocolNumber;
+    ULONG Flags;
     volatile PNET_SOCKET LastSocket;
     PSHARED_EXCLUSIVE_LOCK SocketLock;
     RED_BLACK_TREE SocketTree[SocketBindingTypeCount];
     NET_PROTOCOL_INTERFACE Interface;
 };
+
+/*++
+
+Structure Description:
+
+    This structure defines a request to join or leave a multicast group. It is
+    supplies to the network layer, as most networks have a specific protocol
+    used to join or leave a multicast group.
+
+Members:
+
+    Link - Stores a pointer to the link on which to join the multicast group or
+        the link to leave the multicast group.
+
+    LinkAddress - Stores a pointer to the link address entry on which to join
+        the multicast group or the link address entry to leave the multicast
+        group.
+
+    MulticastAddress - Stores a pointer to the address of the multicast group
+        to join or leave.
+
+--*/
+
+typedef struct _NET_NETWORK_MULTICAST_REQUEST {
+    PNET_LINK Link;
+    PNET_LINK_ADDRESS_ENTRY LinkAddress;
+    PNETWORK_ADDRESS MulticastAddress;
+} NET_NETWORK_MULTICAST_REQUEST, *PNET_NETWORK_MULTICAST_REQUEST;
 
 typedef
 KSTATUS
@@ -1712,11 +1973,35 @@ Return Value:
 --*/
 
 typedef
+VOID
+(*PNET_NETWORK_DESTROY_SOCKET) (
+    PNET_SOCKET Socket
+    );
+
+/*++
+
+Routine Description:
+
+    This routine destroys any pieces allocated by the network layer for the
+    socket.
+
+Arguments:
+
+    Socket - Supplies a pointer to the socket to destroy.
+
+Return Value:
+
+    None.
+
+--*/
+
+typedef
 KSTATUS
 (*PNET_NETWORK_BIND_TO_ADDRESS) (
     PNET_SOCKET Socket,
     PNET_LINK Link,
-    PNETWORK_ADDRESS Address
+    PNETWORK_ADDRESS Address,
+    ULONG Flags
     );
 
 /*++
@@ -1732,6 +2017,9 @@ Arguments:
     Link - Supplies an optional pointer to a link to bind to.
 
     Address - Supplies a pointer to the address to bind the socket to.
+
+    Flags - Supplies a bitmask of binding flags. See NET_SOCKET_BINDING_FLAG_*
+        for definitions.
 
 Return Value:
 
@@ -1872,8 +2160,7 @@ Return Value:
 typedef
 VOID
 (*PNET_NETWORK_PROCESS_RECEIVED_DATA) (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet
+    PNET_RECEIVE_CONTEXT ReceiveContext
     );
 
 /*++
@@ -1884,12 +2171,8 @@ Routine Description:
 
 Arguments:
 
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to a structure describing the incoming packet.
-        This structure may be used as a scratch space while this routine
-        executes and the packet travels up the stack, but will not be accessed
-        after this routine returns.
+    ReceiveContext - Supplies a pointer to the receive context that stores the
+        link and packet information.
 
 Return Value:
 
@@ -1985,6 +2268,127 @@ Return Value:
 
 --*/
 
+typedef
+NET_ADDRESS_TYPE
+(*PNET_NETWORK_GET_ADDRESS_TYPE) (
+    PNET_LINK Link,
+    PNET_LINK_ADDRESS_ENTRY LinkAddressEntry,
+    PNETWORK_ADDRESS Address
+    );
+
+/*++
+
+Routine Description:
+
+    This routine gets the type of the given address, categorizing it as unicast,
+    broadcast, or multicast.
+
+Arguments:
+
+    Link - Supplies an optional pointer to the network link to which the
+        address is bound.
+
+    LinkAddressEntry - Supplies an optional pointer to a network link address
+        entry to use while classifying the address.
+
+    Address - Supplies a pointer to the network address to categorize.
+
+Return Value:
+
+    Returns the type of the specified address.
+
+--*/
+
+typedef
+ULONG
+(*PNET_NETWORK_CHECKSUM_PSEUDO_HEADER) (
+    PNETWORK_ADDRESS Source,
+    PNETWORK_ADDRESS Destination,
+    ULONG PacketLength,
+    UCHAR Protocol
+    );
+
+/*++
+
+Routine Description:
+
+    This routine computes the network's pseudo-header checksum as the one's
+    complement sum of all 32-bit words in the header. The pseudo-header is
+    folded into a 16-bit checksum by the caller.
+
+Arguments:
+
+    Source - Supplies a pointer to the source address.
+
+    Destination - Supplies a pointer to the destination address.
+
+    PacketLength - Supplies the packet length to include in the pseudo-header.
+
+    Protocol - Supplies the protocol value used in the pseudo header.
+
+Return Value:
+
+    Returns the checksum of the pseudo-header.
+
+--*/
+
+typedef
+KSTATUS
+(*PNET_NETWORK_CONFIGURE_LINK_ADDRESS) (
+    PNET_LINK Link,
+    PNET_LINK_ADDRESS_ENTRY LinkAddress,
+    BOOL Configure
+    );
+
+/*++
+
+Routine Description:
+
+    This routine configures or dismantles the given link address for use over
+    the network on the given link.
+
+Arguments:
+
+    Link - Supplies a pointer to the link to which the address entry belongs.
+
+    LinkAddress - Supplies a pointer to the link address entry to configure.
+
+    Configure - Supplies a boolean indicating whether or not the link address
+        should be configured for use (TRUE) or taken out of service (FALSE).
+
+Return Value:
+
+    Status code.
+
+--*/
+
+typedef
+KSTATUS
+(*PNET_NETWORK_JOIN_LEAVE_MULTICAST_GROUP) (
+    PNET_NETWORK_MULTICAST_REQUEST Request,
+    BOOL Join
+    );
+
+/*++
+
+Routine Description:
+
+    This routine joins or leaves a multicast group using a network-specific
+    protocol.
+
+Arguments:
+
+    Request - Supplies a pointer to the multicast group join/leave request.
+
+    Join - Supplies a boolean indicating whether to join (TRUE) or leave
+        (FALSE) the multicast group.
+
+Return Value:
+
+    Status code.
+
+--*/
+
 /*++
 
 Structure Description:
@@ -2002,6 +2406,10 @@ Members:
 
     InitializeSocket - Stores a pointer to a function that initializes a newly
         created socket.
+
+    DestroySocket - Stores a pointer to a function that destroys network
+        specific socket structures allocated during initialize. This function
+        is optional if the initialize routine made no allocations.
 
     BindToAddress - Stores a pointer to a function that binds an open but
         unbound socket to a particular network address.
@@ -2025,12 +2433,35 @@ Members:
     GetSetInformation - Stores a pointer to a function used to get or set
         socket information.
 
+    CopyInformation - Stores a pointer to a function used to copy socket option
+        information from one socket to another. This function is optional if
+        there are no network specific socket options.
+
+    GetAddressType - Stores a pointer to a function used to categorize a given
+        network address into one of many types (e.g. unicast, broadcast,
+        mulitcast). This function is optional if unicast is the only supported
+        address type.
+
+    ChecksumPseudoHeader - Stores a pointer to a function used to compute the
+        one's complement sum of all 32-bit values in the network's
+        pseudo-header that is prepended to protocol checksums (e.g. TCP, UDP).
+
+    ConfigureLinkAddress - Stores a pointer to a function used to configure a
+        link address entry for use on this network. This involves invoking a
+        network-specific protocol to validate or assign an address for the link
+        address entry (e.g. DHCP, NDP, DHCPv6).
+
+    JoinLeaveMulticastGroup - Stores a pointer to a function used to join
+        or leave a multicast group using a network-specific protocol (e.g.
+        IGMP, MLD).
+
 --*/
 
 typedef struct _NET_NETWORK_INTERFACE {
     PNET_NETWORK_INITIALIZE_LINK InitializeLink;
     PNET_NETWORK_DESTROY_LINK DestroyLink;
     PNET_NETWORK_INITIALIZE_SOCKET InitializeSocket;
+    PNET_NETWORK_DESTROY_SOCKET DestroySocket;
     PNET_NETWORK_BIND_TO_ADDRESS BindToAddress;
     PNET_NETWORK_LISTEN Listen;
     PNET_NETWORK_CONNECT Connect;
@@ -2040,6 +2471,10 @@ typedef struct _NET_NETWORK_INTERFACE {
     PNET_NETWORK_PROCESS_RECEIVED_DATA ProcessReceivedData;
     PNET_NETWORK_PRINT_ADDRESS PrintAddress;
     PNET_NETWORK_GET_SET_INFORMATION GetSetInformation;
+    PNET_NETWORK_GET_ADDRESS_TYPE GetAddressType;
+    PNET_NETWORK_CHECKSUM_PSEUDO_HEADER ChecksumPseudoHeader;
+    PNET_NETWORK_CONFIGURE_LINK_ADDRESS ConfigureLinkAddress;
+    PNET_NETWORK_JOIN_LEAVE_MULTICAST_GROUP JoinLeaveMulticastGroup;
 } NET_NETWORK_INTERFACE, *PNET_NETWORK_INTERFACE;
 
 /*++
@@ -2068,6 +2503,49 @@ struct _NET_NETWORK_ENTRY {
     NET_DOMAIN_TYPE Domain;
     ULONG ParentProtocolNumber;
     NET_NETWORK_INTERFACE Interface;
+};
+
+/*++
+
+Structure Description:
+
+    This structure defines the context for receiving a network packet. Each
+    layer will fill in the portions of the context it owns and pass it up the
+    stack. This structure and even the address pointers can be stack allocated
+    as it will not be referenced after the network layers have completed the
+    receive.
+
+Members:
+
+    Packet - Supplies a pointer to the packet that came in over the network.
+        This structure may not be used as a scratch space while the packet
+        travels up the stack as it may be sent out to multiple sockets (e.g.
+        multicast or broadcast packets).
+
+    Link - Supplies a pointer to the network link that received the packet.
+
+    Network - Supplies a pointer to the network to which the packet belongs.
+
+    Protocol - Supplies a pointer to the protocol to which the packet belongs.
+
+    Source - Supplies a pointer to the source (remote) address of the packet.
+
+    Destination - Supplies a pointer to the destination (local) address of the
+        packet.
+
+    ParentProtocolNumber - Stores the protocol number in the parent layer's
+        protocol. This will always be set after the network layer executes.
+
+--*/
+
+struct _NET_RECEIVE_CONTEXT {
+    PNET_PACKET_BUFFER Packet;
+    PNET_LINK Link;
+    PNET_NETWORK_ENTRY Network;
+    PNET_PROTOCOL_ENTRY Protocol;
+    PNETWORK_ADDRESS Source;
+    PNETWORK_ADDRESS Destination;
+    ULONG ParentProtocolNumber;
 };
 
 //
@@ -2591,7 +3069,6 @@ NET_API
 KSTATUS
 NetFindLinkForLocalAddress (
     PNETWORK_ADDRESS LocalAddress,
-    BOOL AnyAddress,
     PNET_LINK Link,
     PNET_LINK_LOCAL_ADDRESS LinkResult
     );
@@ -2608,9 +3085,6 @@ Routine Description:
 Arguments:
 
     LocalAddress - Supplies a pointer to the local address to test against.
-
-    AnyAddress - Supplies a boolean indicating whether or not the local address
-        is the network's any address.
 
     Link - Supplies an optional pointer to a link that the local address must
         be from.
@@ -2707,8 +3181,8 @@ Arguments:
     Link - Supplies a pointer to the physical link that has the new network
         address.
 
-    Address - Supplies an optional pointer to the address to assign to the link
-        address entry.
+    Address - Supplies a pointer to the address to assign to the link address
+        entry. At least the network domain needs to be filled in.
 
     Subnet - Supplies an optional pointer to the subnet mask to assign to the
         link address entry.
@@ -2757,41 +3231,36 @@ Return Value:
 --*/
 
 NET_API
-KSTATUS
-NetTranslateNetworkAddress (
-    PNETWORK_ADDRESS NetworkAddress,
+PNET_TRANSLATION_ENTRY
+NetLookupAddressTranslation (
     PNET_LINK Link,
-    PNET_LINK_ADDRESS_ENTRY LinkAddress,
-    PNETWORK_ADDRESS PhysicalAddress
+    PNETWORK_ADDRESS NetworkAddress
     );
 
 /*++
 
 Routine Description:
 
-    This routine translates a network level address to a physical address.
+    This routine performs a lookup for an address translation entry given the
+    network address. The caller is responsible for releasing the reference
+    taken on success.
 
 Arguments:
 
-    NetworkAddress - Supplies a pointer to the network address to translate.
+    Link - Supplies a pointer to the link that supposedly owns the network
+        address.
 
-    Link - Supplies a pointer to the link to use.
-
-    LinkAddress - Supplies a pointer to the link address entry to use for this
-        request.
-
-    PhysicalAddress - Supplies a pointer where the corresponding physical
-        address for this network address will be returned.
+    NetworkAddress - Supplies a pointer to the network address to look up.
 
 Return Value:
 
-    Status code.
+    Returns a pointer to a translation entry on success, or NULL on failure.
 
 --*/
 
 NET_API
 KSTATUS
-NetAddNetworkAddressTranslation (
+NetAddAddressTranslation (
     PNET_LINK Link,
     PNETWORK_ADDRESS NetworkAddress,
     PNETWORK_ADDRESS PhysicalAddress
@@ -2822,10 +3291,81 @@ Return Value:
 
 NET_API
 KSTATUS
+NetRemoveAddressTranslation (
+    PNET_LINK Link,
+    PNETWORK_ADDRESS NetworkAddress
+    );
+
+/*++
+
+Routine Description:
+
+    This routine attempts to remove an network address translation from the
+    link's translation cache.
+
+Arguments:
+
+    Link - Supplies a pointer to the link that supposedly owns the network
+        address.
+
+    NetworkAddress - Supplies a pointer to the network address whose
+        translation is to be removed.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+VOID
+NetTranslationEntryAddReference (
+    PNET_TRANSLATION_ENTRY TranslationEntry
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds a reference to the given address translation entry.
+
+Arguments:
+
+    TranslationEntry - Supplies a pointer to an address translation entry.
+
+Return Value:
+
+    None.
+
+--*/
+
+NET_API
+VOID
+NetTranslationEntryReleaseReference (
+    PNET_TRANSLATION_ENTRY TranslationEntry
+    );
+
+/*++
+
+Routine Description:
+
+    This routine release a reference on the given address translation entry.
+
+Arguments:
+
+    TranslationEntry - Supplies a pointer to an address translation entry.
+
+Return Value:
+
+    None.
+
+--*/
+
+NET_API
+KSTATUS
 NetFindEntryForAddress (
     PNET_LINK Link,
     PNETWORK_ADDRESS Address,
-    BOOL AnyAddress,
     PNET_LINK_ADDRESS_ENTRY *AddressEntry
     );
 
@@ -2841,9 +3381,6 @@ Arguments:
     Link - Supplies the link whose address entries should be searched.
 
     Address - Supplies the address to search for.
-
-    AnyAddress - Supplies a boolean indicating whether or not the given address
-        is the owning network's any address.
 
     AddressEntry - Supplies a pointer where the address entry will be returned
         on success.
@@ -2923,9 +3460,7 @@ Routine Description:
     This routine officially binds a socket to a local address, local port,
     remote address and remote port tuple by adding it to the appropriate socket
     tree. It can also re-bind a socket in the case where it has already been
-    bound to a different tree. Raw sockets are handled specially as ports do
-    not make sense for raw sockets; they are put in a list that contains all
-    raw sockets.
+    bound to a different tree.
 
 Arguments:
 
@@ -2973,7 +3508,7 @@ Return Value:
 --*/
 
 NET_API
-KSTATUS
+VOID
 NetInitializeSocketLinkOverride (
     PNET_SOCKET Socket,
     PNET_LINK_LOCAL_ADDRESS LinkInformation,
@@ -2985,8 +3520,7 @@ NetInitializeSocketLinkOverride (
 Routine Description:
 
     This routine initializes the given socket link override structure with the
-    appropriate mix of socket and link information. The routine will fail if it
-    determines that the socket is already bound to a link.
+    appropriate mix of socket and link information.
 
 Arguments:
 
@@ -2999,42 +3533,47 @@ Arguments:
 
 Return Value:
 
-    STATUS_SUCCESS if the link override was successfully filled in.
-
-    STATUS_CONNECTION_EXISTS if the socket is already bound to a link.
+    None.
 
 --*/
 
 NET_API
-PNET_SOCKET
+KSTATUS
 NetFindSocket (
-    PNET_PROTOCOL_ENTRY ProtocolEntry,
-    PNETWORK_ADDRESS LocalAddress,
-    PNETWORK_ADDRESS RemoteAddress
+    PNET_RECEIVE_CONTEXT ReceiveContext,
+    PNET_SOCKET *Socket
     );
 
 /*++
 
 Routine Description:
 
-    This routine attempts to find a socket that matches the given parameters.
-    If the socket is found and returned, the reference count will be increased
-    on it. It is the caller's responsiblity to release that reference.
+    This routine attempts to find a socket on the receiving end of the given
+    context based on matching the addresses and protocol. If the socket is
+    found and returned, the reference count will be increased on it. It is the
+    caller's responsiblity to release that reference. If this routine returns
+    that more processing is required, then subsequent calls should pass the
+    previously found socket back to the routine and the search will pick up
+    where it left off.
 
 Arguments:
 
-    ProtocolEntry - Supplies the protocol the socket must be on.
+    ReceiveContext - Supplies a pointer to the receive context used to find
+        the socket. This contains the remote address, local address, protocol,
+        and network to match on.
 
-    LocalAddress - Supplies a pointer to the local address of the socket.
-
-    RemoteAddress - Supplies a pointer to the remote address of the socket.
+    Socket - Supplies a pointer that receives a pointer to the found socket on
+        output. On input, it can optionally contain a pointer to the socket
+        from which the search for a new socket should start.
 
 Return Value:
 
-    Returns a pointer to a socket matching the given parameters, with an
-    increased reference count.
+    STATUS_SUCCESS if a socket was found.
 
-    NULL if no socket matches.
+    STATUS_MORE_PROCESSING_REQUIRED if a socket was found, but more sockets
+    may match the given address tuple.
+
+    Error status code otherwise.
 
 --*/
 
@@ -3076,45 +3615,6 @@ Return Value:
 --*/
 
 NET_API
-VOID
-NetRawSocketsProcessReceivedData (
-    PNET_LINK Link,
-    PNET_PACKET_BUFFER Packet,
-    PNETWORK_ADDRESS SourceAddress,
-    PNETWORK_ADDRESS DestinationAddress,
-    ULONG NetworkProtocol
-    );
-
-/*++
-
-Routine Description:
-
-    This routine processes a received packet and sends it to any raw sockets
-    that should be receiving it based on the protocol, source address, and
-    destination address.
-
-Arguments:
-
-    Link - Supplies a pointer to the link that received the packet.
-
-    Packet - Supplies a pointer to the network packet. It is only guaranteed to
-        include network layer headers, not physical layer headers.
-
-    SourceAddress - Supplies a pointer to the source (remote) address of the
-        packet.
-
-    DestinationAddress - Supplies a pointer to the destination (local) address
-        of the packet.
-
-    NetworkProtocol - Supplies the network protocol of the packet.
-
-Return Value:
-
-    None.
-
---*/
-
-NET_API
 COMPARISON_RESULT
 NetCompareNetworkAddresses (
     PNETWORK_ADDRESS FirstAddress,
@@ -3140,6 +3640,75 @@ Return Value:
     Ascending if the first node is less than the second node.
 
     Descending if the second node is less than the first node.
+
+--*/
+
+NET_API
+USHORT
+NetChecksumData (
+    PVOID Data,
+    ULONG DataLength
+    );
+
+/*++
+
+Routine Description:
+
+    This routine computes the given data's checksum as the one's complement of
+    the one's complement sum of all 16-bit words in the data.
+
+Arguments:
+
+    Data - Supplies a pointer to the beginning of the data to checksum.
+
+    DataLength - Supplies the length of the data to checksum.
+
+Return Value:
+
+    Returns the checksum for the given data.
+
+--*/
+
+NET_API
+USHORT
+NetChecksumPseudoHeaderAndData (
+    PNET_NETWORK_ENTRY Network,
+    PVOID Data,
+    ULONG DataLength,
+    PNETWORK_ADDRESS SourceAddress,
+    PNETWORK_ADDRESS DestinationAddress,
+    UCHAR Protocol
+    );
+
+/*++
+
+Routine Description:
+
+    This routine computes the given data's checksum as the one's complement of
+    the one's complement sum of all 16-bit words in the data and a network
+    specific pseudo-header generated from the given addresses, protocol and
+    data length.
+
+Arguments:
+
+    Network - Supplies a pointer to the network to which the data and addresses
+        belong.
+
+    Data - Supplies a pointer to the beginning of the data to checksum.
+
+    DataLength - Supplies the length of the data to checksum.
+
+    SourceAddress - Supplies a pointer to the source address of the data, used
+        to compute the pseudo-header.
+
+    DestinationAddress - Supplies a pointer to the destination address of the
+        data, used to compute the pseudo-header.
+
+    Protocol - Supplies a protocol value used in the pseudo-header.
+
+Return Value:
+
+    Returns the checksum for the given data and generated pseudo-header.
 
 --*/
 
@@ -3229,6 +3798,249 @@ Routine Description:
 Arguments:
 
     BufferList - Supplies a pointer to the buffer list to be destroyed.
+
+Return Value:
+
+    None.
+
+--*/
+
+NET_API
+KSTATUS
+NetInitializeMulticastSocket (
+    PNET_SOCKET Socket
+    );
+
+/*++
+
+Routine Description:
+
+    This routine initializes a network socket's multicast information.
+
+Arguments:
+
+    Socket - Supplies a pointer to the network socket to initialize.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+VOID
+NetDestroyMulticastSocket (
+    PNET_SOCKET Socket
+    );
+
+/*++
+
+Routine Description:
+
+    This routine destroys all the multicast state associated with the given
+    socket.
+
+Arguments:
+
+    Socket - Supplies a pointer to the socket whose multicast state is to be
+        destroyed.
+
+Return Value:
+
+    None.
+
+--*/
+
+NET_API
+KSTATUS
+NetJoinSocketMulticastGroup (
+    PNET_SOCKET Socket,
+    PNET_SOCKET_MULTICAST_REQUEST Request
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds the given socket to a multicast group.
+
+Arguments:
+
+    Socket - Supplies a pointer to a socket.
+
+    Request - Supplies a pointer to the multicast join request. This stores
+        the address of the multicast group to join along with interface
+        information to indicate which link should join the group.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+KSTATUS
+NetLeaveSocketMulticastGroup (
+    PNET_SOCKET Socket,
+    PNET_SOCKET_MULTICAST_REQUEST Request
+    );
+
+/*++
+
+Routine Description:
+
+    This routine removes the given socket from a multicast group.
+
+Arguments:
+
+    Socket - Supplies a pointer to a socket.
+
+    Request - Supplies a pointer to the multicast leave request. This stores
+        the multicast group address to leave and the address of the interface
+        on which the socket joined the group.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+KSTATUS
+NetSetSocketMulticastInterface (
+    PNET_SOCKET Socket,
+    PNET_SOCKET_MULTICAST_REQUEST Request
+    );
+
+/*++
+
+Routine Description:
+
+    This routine sets a socket's default multicast interface.
+
+Arguments:
+
+    Socket - Supplies a pointer a socket.
+
+    Request - Supplies a pointer to the request which dictates the default
+        interface.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+KSTATUS
+NetGetSocketMulticastInterface (
+    PNET_SOCKET Socket,
+    PNET_SOCKET_MULTICAST_REQUEST Request
+    );
+
+/*++
+
+Routine Description:
+
+    This routine gets a socket's default multicast interface.
+
+Arguments:
+
+    Socket - Supplies a pointer a socket.
+
+    Request - Supplies a pointer that receives the current interface.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+KSTATUS
+NetJoinLinkMulticastGroup (
+    PNET_LINK Link,
+    PNET_LINK_ADDRESS_ENTRY LinkAddress,
+    PNETWORK_ADDRESS MulticastAddress
+    );
+
+/*++
+
+Routine Description:
+
+    This routine joins the multicast group on a link. If this is the first
+    request to join the supplied multicast group on the link, then the hardware
+    is reprogrammed to include messages to the multicast group's physical layer
+    address and the network is invoked to announce the join via a
+    network-specific protocol.
+
+Arguments:
+
+    Link - Supplies a pointer to the network link joining the multicast group.
+
+    LinkAddress - Supplies a pointer to the link address entry via which the
+        link will join the group.
+
+    MulticastAddress - Supplies a pointer to the multicast address of the group
+        to join.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+KSTATUS
+NetLeaveLinkMulticastGroup (
+    PNET_LINK Link,
+    PNET_LINK_ADDRESS_ENTRY LinkAddress,
+    PNETWORK_ADDRESS MulticastAddress
+    );
+
+/*++
+
+Routine Description:
+
+    This routine removes a link from a multicast. If this is the last request
+    to leave a multicast group on the link, then the hardware is reprogrammed
+    to filter out messages to the multicast group and a network-specific
+    protocol is invoked to announce the link is leaving the group.
+
+Arguments:
+
+    Link - Supplies a pointer to the network link leaving the multicast group.
+
+    LinkAddress - Supplies a pointer to the link address entry via which the
+        link will leave the group.
+
+    MulticastAddress - Supplies a pointer to the multicast address of the group
+        to leave.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+NET_API
+VOID
+NetDestroyLinkMulticastGroups (
+    PNET_LINK Link
+    );
+
+/*++
+
+Routine Description:
+
+    This routine destroys the links remaining multicast groups. It is meant to
+    be called during link destruction and does not attempt to update the MAC
+    address filters or notify the network. The link should have no references.
+
+Arguments:
+
+    Link - Supplies a pointer to the link whose multicast groups are being
+        destroyed.
 
 Return Value:
 

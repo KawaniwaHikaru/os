@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2015 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -24,13 +29,14 @@ include $(SRCDIR)/../common
 
 BINARY = bcm2709.a
 
-BINARYTYPE = library
+BINARYTYPE = klibrary
 
 OBJS = gpio.o     \
        init.o     \
        intr.o     \
        mailbox.o  \
        memmap.o   \
+       pwm.o      \
        sd.o       \
        serial.o   \
        timer.o    \

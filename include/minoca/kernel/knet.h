@@ -212,11 +212,25 @@ Author:
 // Define common internet protocol numbers, as defined by the IANA.
 //
 
+#define SOCKET_INTERNET_PROTOCOL_HOPOPT 0
 #define SOCKET_INTERNET_PROTOCOL_ICMP 1
+#define SOCKET_INTERNET_PROTOCOL_IGMP 2
 #define SOCKET_INTERNET_PROTOCOL_IPV4 4
 #define SOCKET_INTERNET_PROTOCOL_TCP 6
 #define SOCKET_INTERNET_PROTOCOL_UDP 17
 #define SOCKET_INTERNET_PROTOCOL_IPV6 41
+#define SOCKET_INTERNET_PROTOCOL_IPV6_ROUTING 43
+#define SOCKET_INTERNET_PROTOCOL_IPV6_FRAGMENT 44
+#define SOCKET_INTERNET_PROTOCOL_ESP 50
+#define SOCKET_INTERNET_PROTOCOL_AH 51
+#define SOCKET_INTERNET_PROTOCOL_ICMP6 58
+#define SOCKET_INTERNET_PROTOCOL_IPV6_NO_NEXT 59
+#define SOCKET_INTERNET_PROTOCOL_IPV6_DESTINATION 60
+#define SOCKET_INTERNET_PROTOCOL_IPV6_MOBILITY 135
+#define SOCKET_INTERNET_PROTOCOL_HIP 139
+#define SOCKET_INTERNET_PROTOCOL_SHIM6 140
+#define SOCKET_INTERNET_PROTOCOL_TEST1 253
+#define SOCKET_INTERNET_PROTOCOL_TEST2 254
 
 //
 // Define non-IANA protocol numbers starting with the raw protocol at 255, the
@@ -226,6 +240,7 @@ Author:
 #define SOCKET_INTERNET_PROTOCOL_RAW 255
 #define SOCKET_INTERNET_PROTOCOL_NETLINK 256
 #define SOCKET_INTERNET_PROTOCOL_NETLINK_GENERIC 257
+#define SOCKET_INTERNET_PROTOCL_ARP 258
 
 //
 // Define the socket level of control messages.
@@ -277,6 +292,12 @@ Author:
 #define SOCKET_FLAG_RECEIVE_TIMEOUT_SET 0x00000002
 
 //
+// Define the size of an ethernet address.
+//
+
+#define ETHERNET_ADDRESS_SIZE 6
+
+//
 // ------------------------------------------------------ Data Type Definitions
 //
 
@@ -286,6 +307,7 @@ typedef enum _NET_DOMAIN_TYPE {
     NetDomainIp4,
     NetDomainIp6,
     NetDomainNetlink,
+    NetDomainSocketNetworkCount,
     NetDomainArp = NET_DOMAIN_LOW_LEVEL_NETWORK_BASE,
     NetDomainEapol,
     NetDomainEthernet = NET_DOMAIN_PHYSICAL_BASE,
@@ -326,13 +348,16 @@ typedef struct _NETWORK_ADDRESS {
 
 typedef enum _SOCKET_INFORMATION_TYPE {
     SocketInformationBasic = 0xFFFF,
+    SocketInformationIgmp = SOCKET_INTERNET_PROTOCOL_IGMP,
     SocketInformationIp4 = SOCKET_INTERNET_PROTOCOL_IPV4,
     SocketInformationIp6 = SOCKET_INTERNET_PROTOCOL_IPV6,
     SocketInformationTcp = SOCKET_INTERNET_PROTOCOL_TCP,
     SocketInformationUdp = SOCKET_INTERNET_PROTOCOL_UDP,
+    SocketInformationIcmp6 = SOCKET_INTERNET_PROTOCOL_ICMP6,
     SocketInformationRaw = SOCKET_INTERNET_PROTOCOL_RAW,
     SocketInformationNetlink = SOCKET_INTERNET_PROTOCOL_NETLINK,
-    SocketInformationNetlinkGeneric = SOCKET_INTERNET_PROTOCOL_NETLINK_GENERIC
+    SocketInformationNetlinkGeneric = SOCKET_INTERNET_PROTOCOL_NETLINK_GENERIC,
+    SocketInformationArp = SOCKET_INTERNET_PROTOCL_ARP,
 } SOCKET_INFORMATION_TYPE, *PSOCKET_INFORMATION_TYPE;
 
 /*++
@@ -543,7 +568,8 @@ Values:
         group. This option takes a SOCKET_IP4_MULTICAST_REQUEST structure.
 
     SocketIp4OptionLeaveMulticastGroup - Indicates a request to leave a
-        multicast group. This option takes a SOCKET_MULTICAST_REQUEST structure.
+        multicast group. This option takes a SOCKET_IP4_MULTICAST_REQUEST
+        structure.
 
     SocketIp4OptionMulticastInterface - Indicates the network interface to use
         for multicast messages. This option takes a ULONG.
@@ -558,6 +584,10 @@ Values:
     SocketIp4OptionTimeToLive - Indicates the time-to-live value for all
         unicast packets sent from the socket. This option takes a ULONG.
 
+    SocketIp4DifferentiatedServicesCodePoint - Indicates the differentiated
+        services code point (DSCP) for all packets set from the socket. This
+        option takes a ULONG.
+
 --*/
 
 typedef enum _SOCKET_IP4_OPTION {
@@ -568,7 +598,8 @@ typedef enum _SOCKET_IP4_OPTION {
     SocketIp4OptionMulticastInterface,
     SocketIp4OptionMulticastTimeToLive,
     SocketIp4OptionMulticastLoopback,
-    SocketIp4OptionTimeToLive
+    SocketIp4OptionTimeToLive,
+    SocketIp4DifferentiatedServicesCodePoint
 } SOCKET_IP4_OPTION, *PSOCKET_IP4_OPTION;
 
 /*++
@@ -583,8 +614,8 @@ Members:
 
     Address - Stores the address of the multicast group to join or leave.
 
-    Interface - Stores the index of the network interfaces that is to join or
-        leave the multicast group.
+    Interface - Stores the IPv4 address of the network interface that is to
+        join or leave the multicast group.
 
 --*/
 
@@ -657,7 +688,7 @@ Members:
 --*/
 
 typedef struct _SOCKET_IP6_MULTICAST_REQUEST {
-    UINTN Address[16 / sizeof(UINTN)];
+    ULONG Address[16 / sizeof(ULONG)];
     ULONG Interface;
 } SOCKET_IP6_MULTICAST_REQUEST, *PSOCKET_IP6_MULTICAST_REQUEST;
 
@@ -734,7 +765,7 @@ typedef struct _SOCKET {
     NET_DOMAIN_TYPE Domain;
     NET_SOCKET_TYPE Type;
     ULONG Protocol;
-    UINTN ReferenceCount;
+    ULONG ReferenceCount;
     PIO_OBJECT_STATE IoState;
     PIO_HANDLE IoHandle;
     ULONG Flags;
@@ -1422,7 +1453,7 @@ IoSocketBindToAddress (
     PIO_HANDLE Handle,
     PVOID Link,
     PNETWORK_ADDRESS Address,
-    PSTR Path,
+    PCSTR Path,
     UINTN PathSize
     );
 
@@ -1490,7 +1521,7 @@ IoSocketAccept (
     PIO_HANDLE Handle,
     PIO_HANDLE *NewConnectionSocket,
     PNETWORK_ADDRESS RemoteAddress,
-    PSTR *RemotePath,
+    PCSTR *RemotePath,
     PUINTN RemotePathSize
     );
 
@@ -1532,7 +1563,7 @@ IoSocketConnect (
     BOOL FromKernelMode,
     PIO_HANDLE Handle,
     PNETWORK_ADDRESS Address,
-    PSTR RemotePath,
+    PCSTR RemotePath,
     UINTN RemotePathSize
     );
 

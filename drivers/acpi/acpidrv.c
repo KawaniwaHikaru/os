@@ -130,6 +130,7 @@ KSPIN_LOCK AcpiDeviceListLock;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 KSTATUS
 DriverEntry (
     PDRIVER Driver
@@ -205,6 +206,18 @@ Return Value:
     Status = AcpipInitializeAmlInterpreter();
     if (!KSUCCESS(Status)) {
         goto DriverEntryEnd;
+    }
+
+    //
+    // Add shutdown, reboot, and system state transition support.
+    //
+
+    Status = AcpipInitializeSystemStateTransitions();
+    if (!KSUCCESS(Status)) {
+        RtlDebugPrint("ACPI: Warning: InitSystemStateTransitions: %d\n",
+                      Status);
+
+        Status = STATUS_SUCCESS;
     }
 
 DriverEntryEnd:

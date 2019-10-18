@@ -377,10 +377,12 @@ Author:
 #define FLOAT_SIGN_BIT_SHIFT 31
 #define FLOAT_NAN 0x7F800000
 #define FLOAT_NAN_EXPONENT 0xFF
-#define FLOAT_EXPONENT_SHIFT 23
 #define FLOAT_VALUE_MASK 0x007FFFFFUL
 #define FLOAT_EXPONENT_MASK 0x7F800000UL
 #define FLOAT_EXPONENT_SHIFT 23
+#define FLOAT_EXPONENT_BIAS 0x7F
+#define FLOAT_ONE_WORD 0x3F800000
+#define FLOAT_TRUNCATE_VALUE_MASK 0xFFFFF000
 
 //
 // Define some constants used for manipulating double floating point types.
@@ -425,10 +427,19 @@ Author:
 
 #else
 
-#define RtlAtomicExchange RtlAtomicExchange32
-#define RtlAtomicCompareExchange RtlAtomicCompareExchange32
-#define RtlAtomicAdd RtlAtomicAdd32
-#define RtlAtomicOr RtlAtomicAdd32
+#define RtlAtomicExchange(_Pointer, _Value) \
+    RtlAtomicExchange32((PULONG)(_Pointer), (_Value))
+
+#define RtlAtomicCompareExchange(_Pointer, _Exchange, _Compare) \
+    RtlAtomicCompareExchange32((PULONG)(_Pointer), \
+                               (_Exchange), \
+                               (_Compare))
+
+#define RtlAtomicAdd(_Pointer, _Value) \
+    RtlAtomicAdd32((PULONG)(_Pointer), (_Value))
+
+#define RtlAtomicOr(_Pointer, _Value) \
+    RtlAtomicAdd32((PULONG)(_Pointer), (_Value))
 
 #define RtlCountLeadingZeros RtlCountLeadingZeros32
 #define RtlCountTrailingZeros RtlCountTrailingZeros32
@@ -697,7 +708,7 @@ typedef struct _PRINT_FORMAT_CONTEXT
 typedef
 BOOL
 (*PPRINT_FORMAT_WRITE_CHARACTER) (
-    CHAR Character,
+    INT Character,
     PPRINT_FORMAT_CONTEXT Context
     );
 
@@ -706,34 +717,6 @@ BOOL
 Routine Description:
 
     This routine writes a character to the output during a printf-style
-    formatting operation.
-
-Arguments:
-
-    Character - Supplies the character to be written.
-
-    Context - Supplies a pointer to the printf-context.
-
-Return Value:
-
-    TRUE on success.
-
-    FALSE on failure.
-
---*/
-
-typedef
-BOOL
-(*PPRINT_FORMAT_WRITE_WIDE_CHARACTER) (
-    WCHAR Character,
-    PPRINT_FORMAT_CONTEXT Context
-    );
-
-/*++
-
-Routine Description:
-
-    This routine writes a wide character to the output during a printf-style
     formatting operation.
 
 Arguments:
@@ -762,9 +745,6 @@ Members:
         character to the destination of the formatted string operation. Usually
         this is a file or string.
 
-    WriteWideCharacter - Stores a pointer to a function used to write a wide
-        character to the destination of the formatted string operation.
-
     Context - Stores a pointer's worth of additional context. This pointer is
         not touched by the format string function, it's generally used inside
         the write character routine.
@@ -782,11 +762,7 @@ Members:
 --*/
 
 struct _PRINT_FORMAT_CONTEXT {
-    union {
-        PPRINT_FORMAT_WRITE_CHARACTER WriteCharacter;
-        PPRINT_FORMAT_WRITE_WIDE_CHARACTER WriteWideCharacter;
-    } U;
-
+    PPRINT_FORMAT_WRITE_CHARACTER WriteCharacter;
     PVOID Context;
     ULONG Limit;
     ULONG CharactersWritten;
@@ -1636,7 +1612,7 @@ Return Value:
 RTL_API
 VOID
 RtlDebugPrint (
-    PSTR Format,
+    PCSTR Format,
     ...
     );
 
@@ -1931,7 +1907,7 @@ RtlPrintToString (
     PSTR Destination,
     ULONG DestinationSize,
     CHARACTER_ENCODING Encoding,
-    PSTR Format,
+    PCSTR Format,
     ...
     );
 
@@ -1970,7 +1946,7 @@ RtlFormatString (
     PSTR Destination,
     ULONG DestinationSize,
     CHARACTER_ENCODING Encoding,
-    PSTR Format,
+    PCSTR Format,
     va_list ArgumentList
     );
 
@@ -2011,7 +1987,7 @@ RTL_API
 BOOL
 RtlFormat (
     PPRINT_FORMAT_CONTEXT Context,
-    PSTR Format,
+    PCSTR Format,
     va_list ArgumentList
     );
 
@@ -2044,7 +2020,7 @@ RtlPrintToStringWide (
     PWSTR Destination,
     ULONG DestinationSize,
     CHARACTER_ENCODING Encoding,
-    PWSTR Format,
+    PCWSTR Format,
     ...
     );
 
@@ -2083,7 +2059,7 @@ RtlFormatStringWide (
     PWSTR Destination,
     ULONG DestinationSize,
     CHARACTER_ENCODING Encoding,
-    PWSTR Format,
+    PCWSTR Format,
     va_list ArgumentList
     );
 
@@ -2125,7 +2101,7 @@ RTL_API
 BOOL
 RtlFormatWide (
     PPRINT_FORMAT_CONTEXT Context,
-    PWSTR Format,
+    PCWSTR Format,
     va_list ArgumentList
     );
 
@@ -2158,7 +2134,7 @@ ULONG
 RtlStringCopy (
     PSTR Destination,
     PCSTR Source,
-    ULONG BufferSize
+    UINTN BufferSize
     );
 
 /*++
@@ -2269,8 +2245,8 @@ Return Value:
 RTL_API
 BOOL
 RtlAreStringsEqualIgnoringCase (
-    PSTR String1,
-    PSTR String2,
+    PCSTR String1,
+    PCSTR String2,
     ULONG MaxLength
     );
 
@@ -2379,6 +2355,43 @@ Routine Description:
 
     This routine searches a string for the first instance of the given string
     within it.
+
+Arguments:
+
+    InputString - Supplies a pointer to the string to search.
+
+    InputStringLength - Supplies the length of the string, in bytes, including
+        the NULL terminator.
+
+    QueryString - Supplies a pointer to the null terminated string to search
+        for.
+
+    QueryStringLength - Supplies the length of the query string in bytes
+        including the null terminator.
+
+Return Value:
+
+    Returns a pointer to the first instance of the string on success.
+
+    NULL if the character could not be found in the string.
+
+--*/
+
+RTL_API
+PSTR
+RtlStringSearchIgnoringCase (
+    PSTR InputString,
+    UINTN InputStringLength,
+    PSTR QueryString,
+    UINTN QueryStringLength
+    );
+
+/*++
+
+Routine Description:
+
+    This routine searches a string for the first instance of the given string
+    within it. This routine is case insensitive.
 
 Arguments:
 
@@ -3276,6 +3289,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 ULONGLONG
 RtlDivideUnsigned64 (
@@ -3305,6 +3319,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 LONGLONG
 RtlDivide64 (
@@ -3330,6 +3345,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 LONGLONG
 RtlDivideModulo64 (
@@ -3358,6 +3374,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 ULONG
 RtlDivideUnsigned32 (
@@ -3387,6 +3404,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 LONG
 RtlDivide32 (
@@ -3412,6 +3430,7 @@ Return Value:
 
 --*/
 
+__USED
 RTL_API
 LONG
 RtlDivideModulo32 (
@@ -3439,6 +3458,7 @@ Return Value:
     Returns the quotient.
 
 --*/
+
 RTL_API
 ULONGLONG
 RtlByteSwapUlonglong (
@@ -3647,6 +3667,557 @@ Arguments:
 Return Value:
 
     Returns the number of bits set to one.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsNan (
+    float Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given value is Not a Number.
+
+Arguments:
+
+    Value - Supplies the floating point value to query.
+
+Return Value:
+
+    TRUE if the given value is Not a Number.
+
+    FALSE otherwise.
+
+--*/
+
+RTL_API
+double
+RtlFloatConvertToDouble (
+    float Float
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given float into a double.
+
+Arguments:
+
+    Float - Supplies the float to convert.
+
+Return Value:
+
+    Returns the double equivalent.
+
+--*/
+
+RTL_API
+float
+RtlFloatAdd (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds two floats together.
+
+Arguments:
+
+    Value1 - Supplies the first value.
+
+    Value2 - Supplies the second value.
+
+Return Value:
+
+    Returns the sum of the two values.
+
+--*/
+
+RTL_API
+float
+RtlFloatSubtract (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine subtracts two floats from each other.
+
+Arguments:
+
+    Value1 - Supplies the first value.
+
+    Value2 - Supplies the second value, the value to subtract.
+
+Return Value:
+
+    Returns the difference of the two values.
+
+--*/
+
+RTL_API
+float
+RtlFloatMultiply (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine multiplies two floats together.
+
+Arguments:
+
+    Value1 - Supplies the first value.
+
+    Value2 - Supplies the second value.
+
+Return Value:
+
+    Returns the product of the two values.
+
+--*/
+
+RTL_API
+float
+RtlFloatDivide (
+    float Dividend,
+    float Divisor
+    );
+
+/*++
+
+Routine Description:
+
+    This routine divides one float into another.
+
+Arguments:
+
+    Dividend - Supplies the numerator.
+
+    Divisor - Supplies the denominator.
+
+Return Value:
+
+    Returns the quotient of the two values.
+
+--*/
+
+RTL_API
+float
+RtlFloatModulo (
+    float Dividend,
+    float Divisor
+    );
+
+/*++
+
+Routine Description:
+
+    This routine divides one float into another, and returns the remainder.
+
+Arguments:
+
+    Dividend - Supplies the numerator.
+
+    Divisor - Supplies the denominator.
+
+Return Value:
+
+    Returns the modulo of the two values.
+
+--*/
+
+RTL_API
+float
+RtlFloatSquareRoot (
+    float Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns the square root of the given float.
+
+Arguments:
+
+    Value - Supplies the value to take the square root of.
+
+Return Value:
+
+    Returns the square root of the given value.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsEqual (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given floats are equal.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare.
+
+    Value2 - Supplies the second value to compare.
+
+Return Value:
+
+    TRUE if the values are equal.
+
+    FALSE if the values are not equal. Note that NaN is not equal to anything,
+    including itself.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsLessThanOrEqual (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given value is less than or equal to the
+    second value.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare, the left hand side of the
+        comparison.
+
+    Value2 - Supplies the second value to compare, the right hand side of the
+        comparison.
+
+Return Value:
+
+    TRUE if the first value is less than or equal to the first.
+
+    FALSE if the first value is greater than the second.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsLessThan (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given value is strictly less than the
+    second value.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare, the left hand side of the
+        comparison.
+
+    Value2 - Supplies the second value to compare, the right hand side of the
+        comparison.
+
+Return Value:
+
+    TRUE if the first value is strictly less than to the first.
+
+    FALSE if the first value is greater than or equal to the second.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatSignalingIsEqual (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given values are equal, generating an
+    invalid floating point exception if either is NaN.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare, the left hand side of the
+        comparison.
+
+    Value2 - Supplies the second value to compare, the right hand side of the
+        comparison.
+
+Return Value:
+
+    TRUE if the first value is strictly less than to the first.
+
+    FALSE if the first value is greater than or equal to the second.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsLessThanOrEqualQuiet (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given value is less than or equal to the
+    second value. Quiet NaNs do not generate floating point exceptions.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare, the left hand side of the
+        comparison.
+
+    Value2 - Supplies the second value to compare, the right hand side of the
+        comparison.
+
+Return Value:
+
+    TRUE if the first value is less than or equal to the first.
+
+    FALSE if the first value is greater than the second.
+
+--*/
+
+RTL_API
+BOOL
+RtlFloatIsLessThanQuiet (
+    float Value1,
+    float Value2
+    );
+
+/*++
+
+Routine Description:
+
+    This routine determines if the given value is strictly less than the
+    second value. Quiet NaNs do not cause float point exceptions to be raised.
+
+Arguments:
+
+    Value1 - Supplies the first value to compare, the left hand side of the
+        comparison.
+
+    Value2 - Supplies the second value to compare, the right hand side of the
+        comparison.
+
+Return Value:
+
+    TRUE if the first value is strictly less than to the first.
+
+    FALSE if the first value is greater than or equal to the second.
+
+--*/
+
+RTL_API
+float
+RtlFloatConvertFromInteger32 (
+    LONG Integer
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given signed 32-bit integer into a float.
+
+Arguments:
+
+    Integer - Supplies the integer to convert to a float.
+
+Return Value:
+
+    Returns the float equivalent to the given integer.
+
+--*/
+
+RTL_API
+float
+RtlFloatConvertFromUnsignedInteger32 (
+    ULONG Integer
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given unsigned 32-bit integer into a float.
+
+Arguments:
+
+    Integer - Supplies the integer to convert to a float.
+
+Return Value:
+
+    Returns the float equivalent to the given integer.
+
+--*/
+
+RTL_API
+float
+RtlFloatConvertFromInteger64 (
+    LONGLONG Integer
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given signed 64-bit integer into a float.
+
+Arguments:
+
+    Integer - Supplies the integer to convert to a float.
+
+Return Value:
+
+    Returns the float equivalent to the given integer.
+
+--*/
+
+RTL_API
+float
+RtlFloatConvertFromUnsignedInteger64 (
+    ULONGLONG Integer
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given unsigned 64-bit integer into a float.
+
+Arguments:
+
+    Integer - Supplies the unsigned integer to convert to a float.
+
+Return Value:
+
+    Returns the float equivalent to the given integer.
+
+--*/
+
+RTL_API
+LONG
+RtlFloatConvertToInteger32 (
+    float Float
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given float into a signed 32 bit integer.
+
+Arguments:
+
+    Float - Supplies the float to convert.
+
+Return Value:
+
+    Returns the integer, rounded according to the current rounding mode.
+
+--*/
+
+RTL_API
+LONG
+RtlFloatConvertToInteger32RoundToZero (
+    float Float
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given float into a signed 32 bit integer. It
+    always rounds towards zero.
+
+Arguments:
+
+    Float - Supplies the float to convert.
+
+Return Value:
+
+    Returns the integer, rounded towards zero.
+
+--*/
+
+RTL_API
+LONGLONG
+RtlFloatConvertToInteger64 (
+    float Float
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given float into a signed 64 bit integer. If the
+    value is NaN, then the largest positive integer is returned.
+
+Arguments:
+
+    Float - Supplies the float to convert.
+
+Return Value:
+
+    Returns the integer, rounded according to the current rounding mode.
+
+--*/
+
+RTL_API
+LONGLONG
+RtlFloatConvertToInteger64RoundToZero (
+    float Float
+    );
+
+/*++
+
+Routine Description:
+
+    This routine converts the given float into a signed 64 bit integer. If the
+    value is NaN, then the largest positive integer is returned. This routine
+    always rounds towards zero.
+
+Arguments:
+
+    Float - Supplies the float to convert.
+
+Return Value:
+
+    Returns the integer, rounded towards zero.
 
 --*/
 
@@ -4199,28 +4770,6 @@ Return Value:
     TRUE if the first value is strictly less than to the first.
 
     FALSE if the first value is greater than or equal to the second.
-
---*/
-
-RTL_API
-double
-RtlFloatConvertToDouble (
-    float Float
-    );
-
-/*++
-
-Routine Description:
-
-    This routine converts the given float into a double.
-
-Arguments:
-
-    Float - Supplies the float to convert.
-
-Return Value:
-
-    Returns the double equivalent.
 
 --*/
 
@@ -5080,8 +5629,8 @@ Arguments:
 
 Return Value:
 
-    Returns the number of characters written to the output buffer, including
-    the null terminator.
+    Returns the number of characters written to the output buffer, not
+    including the null terminator.
 
 --*/
 
@@ -5198,7 +5747,7 @@ KSTATUS
 RtlFilterTimeZoneData (
     PVOID TimeZoneData,
     ULONG TimeZoneDataSize,
-    PSTR TimeZoneName,
+    PCSTR TimeZoneName,
     PVOID FilteredData,
     PULONG FilteredDataSize
     );
@@ -5275,7 +5824,7 @@ KSTATUS
 RtlSetTimeZoneData (
     PVOID Data,
     ULONG DataSize,
-    PSTR ZoneName,
+    PCSTR ZoneName,
     PVOID *OldData,
     PULONG OldDataSize,
     PSTR OriginalZoneBuffer,
@@ -5371,8 +5920,8 @@ Return Value:
 RTL_API
 VOID
 RtlGetTimeZoneNames (
-    PSTR *StandardName,
-    PSTR *DaylightName,
+    PCSTR *StandardName,
+    PCSTR *DaylightName,
     PLONG StandardGmtOffset,
     PLONG DaylightGmtOffset
     );

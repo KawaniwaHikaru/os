@@ -107,6 +107,12 @@ DwarfpGetHasChildrenName (
     DWARF_CHILDREN_VALUE Value
     );
 
+PDWARF_DIE
+DwarfpFindDie (
+    PDWARF_COMPILATION_UNIT Unit,
+    PUCHAR DieStart
+    );
+
 //
 // -------------------------------------------------------------------- Globals
 //
@@ -644,6 +650,7 @@ Return Value:
 
 PSTR
 DwarfpGetStringAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute
     )
@@ -655,6 +662,8 @@ Routine Description:
     This routine returns the given attribute with type string.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -672,7 +681,7 @@ Return Value:
 
     PDWARF_ATTRIBUTE_VALUE Value;
 
-    Value = DwarfpGetAttribute(Die, Attribute);
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
     if ((Value != NULL) &&
         ((Value->Form == DwarfFormString) ||
          (Value->Form == DwarfFormStringPointer))) {
@@ -685,6 +694,7 @@ Return Value:
 
 BOOL
 DwarfpGetAddressAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Address
@@ -697,6 +707,8 @@ Routine Description:
     This routine returns the given attribute, ensuring it is of type address.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -716,7 +728,7 @@ Return Value:
 
     PDWARF_ATTRIBUTE_VALUE Value;
 
-    Value = DwarfpGetAttribute(Die, Attribute);
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
     if ((Value != NULL) && (Value->Form == DwarfFormAddress)) {
         *Address = Value->Value.Address;
         return TRUE;
@@ -727,6 +739,7 @@ Return Value:
 
 BOOL
 DwarfpGetIntegerAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Integer
@@ -740,6 +753,8 @@ Routine Description:
     (data or flag).
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -761,7 +776,7 @@ Return Value:
     PDWARF_ATTRIBUTE_VALUE Value;
 
     Result = FALSE;
-    Value = DwarfpGetAttribute(Die, Attribute);
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
     if (Value != NULL) {
         Result = TRUE;
         switch (Value->Form) {
@@ -836,7 +851,11 @@ Return Value:
 
     assert(LoadingContext != NULL);
 
-    Result = DwarfpGetLocalReferenceAttribute(Die, Attribute, &TypeOffset);
+    Result = DwarfpGetLocalReferenceAttribute(Context,
+                                              Die,
+                                              Attribute,
+                                              &TypeOffset);
+
     if (Result != FALSE) {
 
         assert(LoadingContext->CurrentFile != NULL);
@@ -854,7 +873,8 @@ Return Value:
         *Identifier = TypeOffset;
 
     } else {
-        Result = DwarfpGetGlobalReferenceAttribute(Die,
+        Result = DwarfpGetGlobalReferenceAttribute(Context,
+                                                   Die,
                                                    DwarfAtType,
                                                    &TypeOffset);
 
@@ -883,8 +903,61 @@ Return Value:
     return TRUE;
 }
 
+PDWARF_DIE
+DwarfpGetDieReferenceAttribute (
+    PDWARF_CONTEXT Context,
+    PDWARF_DIE Die,
+    DWARF_ATTRIBUTE Attribute
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns a pointer to the DIE referred to by the given
+    attribute.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Die - Supplies a pointer to the DIE to get the attribute from.
+
+    Attribute - Supplies the attribute to retrieve.
+
+Return Value:
+
+    Returns a pointer to the DIE on success.
+
+    NULL on failure.
+
+--*/
+
+{
+
+    PDWARF_LOADING_CONTEXT LoadingContext;
+    ULONGLONG Offset;
+    BOOL Result;
+    PDWARF_DIE ResultDie;
+
+    ResultDie = NULL;
+    Result = DwarfpGetLocalReferenceAttribute(Context,
+                                              Die,
+                                              Attribute,
+                                              &Offset);
+
+    if (Result != FALSE) {
+        LoadingContext = Context->LoadingContext;
+        ResultDie = DwarfpFindDie(LoadingContext->CurrentUnit,
+                                  LoadingContext->CurrentUnit->Start + Offset);
+    }
+
+    return ResultDie;
+}
+
 BOOL
 DwarfpGetLocalReferenceAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Offset
@@ -897,6 +970,8 @@ Routine Description:
     This routine returns the given attribute, ensuring it is of type reference.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -918,7 +993,7 @@ Return Value:
     PDWARF_ATTRIBUTE_VALUE Value;
 
     Result = FALSE;
-    Value = DwarfpGetAttribute(Die, Attribute);
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
     if (Value != NULL) {
         Result = TRUE;
         switch (Value->Form) {
@@ -946,6 +1021,7 @@ Return Value:
 
 BOOL
 DwarfpGetGlobalReferenceAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Offset
@@ -959,6 +1035,8 @@ Routine Description:
     address.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -978,7 +1056,7 @@ Return Value:
 
     PDWARF_ATTRIBUTE_VALUE Value;
 
-    Value = DwarfpGetAttribute(Die, Attribute);
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
     if ((Value != NULL) && (Value->Form == DwarfFormRefAddress)) {
         *Offset = Value->Value.Offset;
         return TRUE;
@@ -987,8 +1065,9 @@ Return Value:
     return FALSE;
 }
 
-PDWARF_ATTRIBUTE_VALUE
-DwarfpGetAttribute (
+PVOID
+DwarfpGetRangeList (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute
     )
@@ -997,9 +1076,62 @@ DwarfpGetAttribute (
 
 Routine Description:
 
-    This routine returns the requested attribute from a DIE.
+    This routine looks up the given attribute as a range list pointer.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Die - Supplies a pointer to the DIE to get the attribute from.
+
+    Attribute - Supplies the attribute to retrieve.
+
+Return Value:
+
+    Returns a pointer within the .debug_ranges structure on success.
+
+    NULL if there was no attribute, the attribute was not of the right type, or
+    there is no .debug_ranges section.
+
+--*/
+
+{
+
+    PDWARF_LOADING_CONTEXT LoadingContext;
+    PDWARF_ATTRIBUTE_VALUE Value;
+
+    LoadingContext = Context->LoadingContext;
+    Value = DwarfpGetAttribute(Context, Die, Attribute);
+    if ((Value == NULL) ||
+        (Value->Value.Offset >= Context->Sections.Ranges.Size)) {
+
+        return NULL;
+    }
+
+    if (!DWARF_SECTION_OFFSET_FORM(Value->Form, LoadingContext->CurrentUnit)) {
+        return NULL;
+    }
+
+    return Context->Sections.Ranges.Data + Value->Value.Offset;
+}
+
+PDWARF_ATTRIBUTE_VALUE
+DwarfpGetAttribute (
+    PDWARF_CONTEXT Context,
+    PDWARF_DIE Die,
+    DWARF_ATTRIBUTE Attribute
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns the requested attribute from a DIE. This will follow
+    a Specification attribute if needed.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -1016,11 +1148,49 @@ Return Value:
 {
 
     UINTN Index;
+    PDWARF_DIE Specification;
 
     for (Index = 0; Index < Die->Count; Index += 1) {
         if (Die->Attributes[Index].Name == Attribute) {
             return &(Die->Attributes[Index]);
         }
+    }
+
+    //
+    // Avoid infinite recursion.
+    //
+
+    if (Attribute == DwarfAtSpecification) {
+        return NULL;
+    }
+
+    //
+    // Try to find a specification attribute. It's currently expensive to find
+    // one, so the result is cached.
+    //
+
+    Specification = Die->Specification;
+    if (Specification == NULL) {
+
+        //
+        // See if there's a specification attribute, and go search that DIE if
+        // so.
+        //
+
+        Specification = DwarfpGetDieReferenceAttribute(Context,
+                                                       Die,
+                                                       DwarfAtSpecification);
+
+        Die->Specification = Specification;
+    }
+
+    //
+    // If there's a specification attribute, return all its attributes as if
+    // they were present here.
+    //
+
+    if (Specification != NULL) {
+        return DwarfpGetAttribute(Context, Specification, Attribute);
     }
 
     return NULL;
@@ -1139,6 +1309,90 @@ Return Value:
     return ENOENT;
 }
 
+VOID
+DwarfpGetRangeSpan (
+    PDWARF_CONTEXT Context,
+    PVOID Ranges,
+    PDWARF_COMPILATION_UNIT Unit,
+    PULONGLONG Start,
+    PULONGLONG End
+    )
+
+/*++
+
+Routine Description:
+
+    This routine runs through a range list to figure out the maximum and
+    minimum values.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+    Ranges - Supplies the range list pointer.
+
+    Unit - Supplies the current compilation unit.
+
+    Start - Supplies a pointer where the lowest address in the range will be
+        returned.
+
+    End - Supplies a pointer where the first address just beyond the range will
+        be returned.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    ULONGLONG Base;
+    PUCHAR Bytes;
+    BOOL Is64Bit;
+    ULONGLONG Max;
+    ULONGLONG Min;
+    ULONGLONG RangeEnd;
+    ULONGLONG RangeStart;
+
+    Bytes = Ranges;
+    Min = MAX_ULONGLONG;
+    Max = 0;
+    Is64Bit = Unit->Is64Bit;
+    Base = Unit->LowPc;
+    while (TRUE) {
+        RangeStart = DWARF_READN(&Bytes, Is64Bit);
+        RangeEnd = DWARF_READN(&Bytes, Is64Bit);
+        if ((RangeStart == 0) && (RangeEnd == 0)) {
+            break;
+        }
+
+        //
+        // If the first value is the max address, then the second value is a
+        // new base.
+        //
+
+        if (((Is64Bit != FALSE) && (RangeStart == MAX_ULONGLONG)) ||
+            ((Is64Bit == FALSE) && (RangeStart == MAX_ULONG))) {
+
+            Base = RangeEnd;
+            continue;
+        }
+
+        if (Min > RangeStart + Base) {
+            Min = RangeStart + Base;
+        }
+
+        if (Max < RangeEnd + Base) {
+            Max = RangeEnd + Base;
+        }
+    }
+
+    *Start = Min;
+    *End = Max;
+    return;
+}
+
 DWARF_LEB128
 DwarfpReadLeb128 (
     PUCHAR *Data
@@ -1185,10 +1439,11 @@ Return Value:
 
     //
     // Anything larger than a 64-bit integer would overflow the current
-    // data representation.
+    // data representation. 64 doesn't divide by 7, so move to the next integer
+    // that does.
     //
 
-    assert(Shift <= 64);
+    assert(Shift <= 70);
 
     return Result;
 }
@@ -1250,10 +1505,11 @@ Return Value:
 
     //
     // Anything larger than a 64-bit integer would overflow the current
-    // data representation.
+    // data representation. 64 doesn't divide by 7, so move to the next integer
+    // that does.
     //
 
-    assert(Shift <= 64);
+    assert(Shift <= 70);
 
     return Result;
 }
@@ -2201,5 +2457,98 @@ Return Value:
     }
 
     return "DwarfChildrenINVALID";
+}
+
+PDWARF_DIE
+DwarfpFindDie (
+    PDWARF_COMPILATION_UNIT Unit,
+    PUCHAR DieStart
+    )
+
+/*++
+
+Routine Description:
+
+    This routine finds a pointer to the DIE that starts at the given offset.
+
+Arguments:
+
+    Unit - Supplies a pointer to the compilation unit to search through.
+
+    DieStart - Supplies the start of raw DIE.
+
+Return Value:
+
+    Returns a pointer to the read DIE on success.
+
+    NULL on failure.
+
+--*/
+
+{
+
+    PLIST_ENTRY CurrentEntry;
+    PDWARF_DIE Die;
+    PLIST_ENTRY ListHead;
+
+    if ((DieStart < Unit->Dies) || (DieStart >= Unit->DiesEnd)) {
+        return NULL;
+    }
+
+    //
+    // Search backwards through the list. The tree is sorted by offset, so the
+    // DIE is going to be in the first element of each list whose start is not
+    // greater than the pointer. This search is linear in the worst case where
+    // the tree is one long chain of elements, and log(n) in the best case
+    // where the tree is nicely balanced with evenly thick branches.
+    //
+
+    ListHead = &(Unit->DieList);
+    while (!LIST_EMPTY(ListHead)) {
+
+        //
+        // Find the element with the largest start that is less than or equal
+        // to the DIE being searched for.
+        //
+
+        CurrentEntry = ListHead->Previous;
+        while (CurrentEntry != ListHead) {
+            Die = LIST_VALUE(CurrentEntry, DWARF_DIE, ListEntry);
+            if (Die->Start <= DieStart) {
+
+                //
+                // Return if this is the DIE being searched for.
+                //
+
+                if (Die->Start == DieStart) {
+                    return Die;
+                }
+
+                break;
+            }
+
+            CurrentEntry = CurrentEntry->Previous;
+        }
+
+        //
+        // In the unexpected case where all DIEs are greater than the one
+        // being searched for (which shouldn't happen), bail.
+        //
+
+        if (CurrentEntry == ListHead) {
+
+            assert(FALSE);
+
+            break;
+        }
+
+        //
+        // Now search in all the children of this DIE.
+        //
+
+        ListHead = &(Die->ChildList);
+    }
+
+    return NULL;
 }
 

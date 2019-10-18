@@ -186,8 +186,8 @@ KERNEL_API
 PKERNEL_ARGUMENT
 KeGetKernelArgument (
     PKERNEL_ARGUMENT Start,
-    PSTR Component,
-    PSTR Name
+    PCSTR Component,
+    PCSTR Name
     )
 
 /*++
@@ -566,6 +566,10 @@ Return Value:
 
     case KeInformationKernelCommandLine:
         Status = KepGetKernelCommandLine(Data, DataSize, Set);
+        break;
+
+    case KeInformationBannerThread:
+        Status = KepSetBannerThread(Data, DataSize, Set);
         break;
 
     default:

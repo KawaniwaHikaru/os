@@ -484,7 +484,8 @@ CkInterpret (
     PCSTR Path,
     PCSTR Source,
     UINTN Length,
-    LONG Line
+    LONG Line,
+    BOOL Interactive
     )
 
 /*++
@@ -510,6 +511,10 @@ Arguments:
     Line - Supplies the line number this code starts on. Supply 1 to start at
         the beginning.
 
+    Interactive - Supplies a boolean indicating whether this is an interactive
+        session or not. For interactive sessions, expression statements will be
+        printed.
+
 Return Value:
 
     Chalk status.
@@ -518,7 +523,16 @@ Return Value:
 
 {
 
-    return CkpInterpret(Vm, "__main", Path, Source, Length, Line);
+    ULONG Flags;
+    CK_ERROR_TYPE Result;
+
+    Flags = 0;
+    if (Interactive != FALSE) {
+        Flags |= CK_COMPILE_PRINT_EXPRESSIONS;
+    }
+
+    Result = CkpInterpret(Vm, "__main", Path, Source, Length, Line, Flags);
+    return Result;
 }
 
 CK_SYMBOL_INDEX
@@ -745,7 +759,8 @@ CkpInterpret (
     PCSTR ModulePath,
     PCSTR Source,
     UINTN Length,
-    LONG Line
+    LONG Line,
+    ULONG CompilerFlags
     )
 
 /*++
@@ -771,6 +786,9 @@ Arguments:
 
     Line - Supplies the line number this code starts on. Supply 1 to start at
         the beginning.
+
+    CompilerFlags - Supplies the bitfield of compiler flags to pass along.
+        See CK_COMPILER_* definitions.
 
 Return Value:
 
@@ -807,6 +825,7 @@ Return Value:
                                  Source,
                                  Length,
                                  Line,
+                                 CompilerFlags | CK_COMPILE_PRINT_ERRORS,
                                  NULL);
 
     if (!CK_IS_NULL(PathValue)) {
@@ -1521,9 +1540,11 @@ Return Value:
     CHAR Name[CK_MAX_METHOD_SIGNATURE];
     CK_VALUE NameValue;
     CK_FUNCTION_SIGNATURE Signature;
+    UINTN TryCount;
 
     Fiber = Vm->Fiber;
     FrameCount = Fiber->FrameCount;
+    TryCount = Fiber->TryCount;
     Arguments = Fiber->StackTop - Arity;
 
     //
@@ -1531,7 +1552,7 @@ Return Value:
     //
 
     Arguments[0] = CkpCreateInstance(Vm, Class);
-    if (CK_EXCEPTION_RAISED(Vm, Fiber, FrameCount)) {
+    if (CK_EXCEPTION_RAISED(Vm, Fiber, TryCount, FrameCount)) {
         return FALSE;
     }
 
@@ -1654,7 +1675,9 @@ Return Value:
     CK_ARITY FunctionArity;
     PCK_STRING Name;
     UINTN RequiredStackSize;
+    UINTN ReturnStackIndex;
     UINTN StackSize;
+    UINTN TryCount;
 
     Fiber = Vm->Fiber;
     FramePushed = FALSE;
@@ -1699,20 +1722,28 @@ Return Value:
         FramePushed = TRUE;
 
     } else if (Closure->Type == CkClosureForeign) {
-        FrameCount = Fiber->FrameCount;
+        TryCount = Fiber->TryCount;
         CkpAppendCallFrame(Vm, Fiber, Closure, Fiber->StackTop - Arity);
+        FrameCount = Fiber->FrameCount;
         CkpEnsureStack(Vm,
                        Fiber,
                        (Fiber->StackTop - Fiber->Stack) + CK_MIN_FOREIGN_STACK);
 
-        if (CK_EXCEPTION_RAISED(Vm, Fiber, FrameCount)) {
+        if (CK_EXCEPTION_RAISED(Vm, Fiber, TryCount, FrameCount)) {
             return FALSE;
         }
 
         //
+        // Get the stack index to return to. Add one to account for the return
+        // value. The stack get reallocated during the foreign function, which
+        // is why this must be in the form of an index.
+        //
+
+        ReturnStackIndex = (Fiber->StackTop - Arity) + 1 - Fiber->Stack;
+
+        //
         // Increment the foreign call count to prevent fiber switches from
-        // happening while the VM call stack is somewhat linked with the C
-        // stack.
+        // happening while the VM call stack is linked with the C stack.
         //
 
         Fiber->ForeignCalls += 1;
@@ -1724,12 +1755,14 @@ Return Value:
         // the frame count or mess with the stack.
         //
 
-        if (CK_EXCEPTION_RAISED(Vm, Fiber, FrameCount)) {
+        if (CK_EXCEPTION_RAISED(Vm, Fiber, TryCount, FrameCount)) {
             return FALSE;
         }
 
-        Fiber->FrameCount = FrameCount;
-        Fiber->StackTop -= Arity - 1;
+        CK_ASSERT(Fiber->FrameCount != 0);
+
+        Fiber->FrameCount -= 1;
+        Fiber->StackTop = Fiber->Stack + ReturnStackIndex;
 
     } else {
 

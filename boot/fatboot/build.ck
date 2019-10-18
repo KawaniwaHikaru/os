@@ -28,40 +28,63 @@ Environment:
 
 --*/
 
+from menv import staticApplication, flattenedBinary, mconfig;
+
 function build() {
+    var arch = mconfig.arch;
+    var config;
+    var entries;
+    var flattened;
+    var image;
+    var includes;
+    var sources;
+    var sourcesConfig = {};
+
     sources = [
         "vbr.S",
         "fatboot.c",
         "prochw.c",
-        "//boot/lib:x86/archsup.o",
-        "//boot/lib:pcat/realmode.o",
-        "//boot/lib:pcat/realmexe.o"
     ];
+
+    if (arch == "x86") {
+        sources += [
+            "boot/lib:x86/archsup.o",
+            "boot/lib:pcat/realmode.o",
+            "boot/lib:pcat/x86/realmexe.o"
+        ];
+
+    } else if (arch == "x64") {
+        sources += [
+            "boot/lib:x6432/x86/archsup.o",
+            "boot/lib:x6432/pcat/realmode.o",
+            "boot/lib:x6432/pcat/x86/realmexe.o"
+        ];
+    }
 
     includes = [
-        "$//boot/lib/include",
-        "$//boot/lib/pcat"
+        "$S/boot/lib/include",
+        "$S/boot/lib/pcat"
     ];
 
-    link_ldflags = [
-        "-nostdlib",
-        "-Wl,-zmax-page-size=1",
-        "-static"
-    ];
-
-    link_config = {
-        "LDFLAGS": link_ldflags
+    config = {
+        "LDFLAGS": ["-Wl,-zmax-page-size=1"],
     };
+
+    if (arch == "x64") {
+        config["LDFLAGS"] += ["-m32"];
+        sourcesConfig["CPPFLAGS"] = ["-m32"];
+    }
 
     image = {
         "label": "fatboot.elf",
         "inputs": sources,
         "includes": includes,
-        "config": link_config,
+        "config": config,
+        "sources_config": sourcesConfig,
         "text_address": "0x7C00",
     };
 
-    entries = executable(image);
+    entries = staticApplication(image);
 
     //
     // Flatten the binary so it can be written directly to disk and loaded by
@@ -71,13 +94,12 @@ function build() {
     flattened = {
         "label": "fatboot.bin",
         "inputs": [":fatboot.elf"],
-        "binplace": TRUE,
-        "nostrip": TRUE
+        "binplace": "bin",
+        "nostrip": true
     };
 
-    flattened = flattened_binary(flattened);
+    flattened = flattenedBinary(flattened);
     entries += flattened;
     return entries;
 }
 
-return build();

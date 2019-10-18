@@ -196,6 +196,12 @@ CkpCoreWrite (
     );
 
 BOOL
+CkpCoreGetModules (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
 CkpCoreGetModulePath (
     PCK_VM Vm,
     PCK_VALUE Arguments
@@ -209,6 +215,12 @@ CkpCoreSetModulePath (
 
 BOOL
 CkpCoreRaise (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    );
+
+BOOL
+CkpCoreImportAllSymbols (
     PCK_VM Vm,
     PCK_VALUE Arguments
     );
@@ -265,9 +277,11 @@ CK_PRIMITIVE_DESCRIPTION CkCorePrimitives[] = {
     {"gc@0", 0, CkpCoreGarbageCollect},
     {"importModule@1", 1, CkpCoreImportModule},
     {"_write@1", 1, CkpCoreWrite},
+    {"modules@0", 0, CkpCoreGetModules},
     {"modulePath@0", 0, CkpCoreGetModulePath},
     {"setModulePath@1", 1, CkpCoreSetModulePath},
     {"raise@1", 1, CkpCoreRaise},
+    {"importAllSymbols@1", 1, CkpCoreImportAllSymbols},
     {NULL, 0, NULL}
 };
 
@@ -371,7 +385,8 @@ Return Value:
                          NULL,
                          (PSTR)&_binary_ckcore_ck_start,
                          Size,
-                         1);
+                         1,
+                         0);
 
     if (Error != CkSuccess) {
         return Error;
@@ -1081,13 +1096,16 @@ Return Value:
 
 {
 
+    PCK_CLASS Class;
     PCK_DICT Dict;
     PCK_INSTANCE Instance;
 
     if (!CK_IS_INSTANCE(Arguments[0])) {
+        Class = CkpGetClass(Vm, Arguments[0]);
         CkpRuntimeError(Vm,
                         "TypeError",
-                        "Builtin type does not implement __get");
+                        "%s does not implement __get",
+                        Class->Name->Value);
 
         return FALSE;
     }
@@ -1137,13 +1155,16 @@ Return Value:
 
 {
 
+    PCK_CLASS Class;
     PCK_DICT Dict;
     PCK_INSTANCE Instance;
 
     if (!CK_IS_INSTANCE(Arguments[0])) {
+        Class = CkpGetClass(Vm, Arguments[0]);
         CkpRuntimeError(Vm,
                         "TypeError",
-                        "Builtin type does not implement __set");
+                        "%s does not implement __set",
+                        Class->Name->Value);
 
         return FALSE;
     }
@@ -1653,16 +1674,26 @@ Return Value:
 
 {
 
+    CK_VALUE Result;
+    UINTN StackIndex;
+
+    StackIndex = Arguments - Vm->Fiber->Stack;
     if (!CK_IS_STRING(Arguments[1])) {
         CkpRuntimeError(Vm, "TypeError", "Expected a string");
         return FALSE;
     }
 
-    Arguments[0] = CkpModuleLoad(Vm, Arguments[1], NULL);
-    if (CK_IS_NULL(Arguments[0])) {
+    //
+    // Don't save the return value directly on the stack yet, as the stack
+    // might get reallocated during the module load.
+    //
+
+    Result = CkpModuleLoad(Vm, Arguments[1], NULL);
+    if (CK_IS_NULL(Result)) {
         return FALSE;
     }
 
+    Vm->Fiber->Stack[StackIndex] = Result;
     return TRUE;
 }
 
@@ -1707,6 +1738,38 @@ Return Value:
         Vm->Configuration.Write(Vm, String->Value);
     }
 
+    return TRUE;
+}
+
+BOOL
+CkpCoreGetModules (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns the modules dictionary.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    CK_OBJECT_VALUE(Arguments[0], Vm->Modules);
     return TRUE;
 }
 
@@ -1823,5 +1886,76 @@ Return Value:
     }
 
     return FALSE;
+}
+
+BOOL
+CkpCoreImportAllSymbols (
+    PCK_VM Vm,
+    PCK_VALUE Arguments
+    )
+
+/*++
+
+Routine Description:
+
+    This routine imports all module level symbols from the given module.
+
+Arguments:
+
+    Vm - Supplies a pointer to the virtual machine.
+
+    Arguments - Supplies the function arguments.
+
+Return Value:
+
+    TRUE on success.
+
+    FALSE if execution caused a runtime error.
+
+--*/
+
+{
+
+    PCK_CLOSURE Closure;
+    PCK_MODULE CurrentModule;
+    PCK_FIBER Fiber;
+    PCK_CALL_FRAME Frame;
+    CK_SYMBOL_INDEX Index;
+    PCK_MODULE Module;
+    PCK_STRING String;
+
+    if (!CK_IS_MODULE(Arguments[1])) {
+        CkpRuntimeError(Vm, "TypeError", "Expected a module");
+        return FALSE;
+    }
+
+    Fiber = Vm->Fiber;
+
+    CK_ASSERT(Fiber->FrameCount != 0);
+
+    Frame = &(Fiber->Frames[Fiber->FrameCount - 1]);
+    Closure = Frame->Closure;
+
+    CK_ASSERT(Closure->Type == CkClosureBlock);
+
+    CurrentModule = Closure->U.Block.Function->Module;
+    Module = CK_AS_MODULE(Arguments[1]);
+    for (Index = 0; Index < Module->Variables.Count; Index += 1) {
+        String = CK_AS_STRING(Module->VariableNames.List.Data[Index]);
+
+        //
+        // Import everything that does not start with an underscore.
+        //
+
+        if ((String->Length >= 1) && (String->Value[0] != '_')) {
+            CkpDefineModuleVariable(Vm,
+                                    CurrentModule,
+                                    String->Value,
+                                    String->Length,
+                                    Module->Variables.Data[Index]);
+        }
+    }
+
+    return TRUE;
 }
 

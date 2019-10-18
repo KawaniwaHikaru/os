@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2015 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -27,13 +32,13 @@ BINARYTYPE = so
 
 BINPLACE = bin
 
-ENTRY := 0
-
 INCLUDES += $(SRCROOT)/os/apps/libc/include;
 
 OBJS = crypt.o          \
 
 DYNLIBS = $(BINROOT)/libc.so.1           \
+
+EXTRA_LDFLAGS += -nostdlib
 
 include $(SRCROOT)/os/minoca.mk
 

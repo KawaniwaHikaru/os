@@ -37,8 +37,19 @@ Author:
 //
 
 #define BITS_PER_BYTE     (8)
-#define MAX_CHAR          (127)
-#define MIN_CHAR          (-128)
+
+#ifdef __CHAR_UNSIGNED__
+
+#define MIN_CHAR          0U
+#define MAX_CHAR          (__SCHAR_MAX__ * 2U + 1U)
+
+#else
+
+#define MIN_CHAR          (-__SCHAR_MAX__ - 1)
+#define MAX_CHAR          (__SCHAR_MAX__)
+
+#endif
+
 #define MAX_WCHAR         (__WCHAR_MAX__)
 #define MIN_WCHAR         (-MAX_WCHAR - 1)
 #define MAX_UCHAR         (0xFF)
@@ -68,11 +79,14 @@ Author:
 #define _128KB (128 * _1KB)
 #define _512KB (512 * _1KB)
 #define _1MB (1024 * _1KB)
+#define _2MB (2 * _1MB)
 #define _1GB (1024 * _1MB)
 #define _1TB (1024ULL * _1GB)
 
 #define PACKED __attribute__((__packed__))
 #define NO_RETURN __attribute__((__noreturn__))
+#define __USED __attribute__((used))
+#define __NOINLINE __attribute__((noinline))
 #define ALIGNED(_Alignment) __attribute__((aligned(_Alignment)))
 #define ALIGNED16 ALIGNED(16)
 #define ALIGNED32 ALIGNED(32)
@@ -138,6 +152,7 @@ typedef unsigned int DWORD, *PDWORD;
 typedef char CHAR, *PCHAR;
 typedef signed char SCHAR, *PSCHAR;
 typedef unsigned char UCHAR, *PUCHAR;
+typedef const unsigned char CUCHAR, *PCUCHAR;
 typedef __WCHAR_TYPE__ WCHAR, *PWCHAR;
 typedef short SHORT, *PSHORT;
 typedef unsigned short USHORT, *PUSHORT;
@@ -149,8 +164,12 @@ typedef unsigned int ULONG, *PULONG;
 typedef long long LONGLONG, *PLONGLONG;
 typedef unsigned long long ULONGLONG, *PULONGLONG;
 
-typedef __INTPTR_TYPE__ INTN, *PINTN;
-typedef __UINTPTR_TYPE__ UINTN, *PUINTN;
+#if __SIZEOF_LONG__ != __SIZEOF_POINTER__
+#error INTN and UINTN definitions are wrong.
+#endif
+
+typedef long INTN, *PINTN;
+typedef unsigned long UINTN, *PUINTN;
 
 typedef unsigned long long PHYSICAL_ADDRESS, *PPHYSICAL_ADDRESS;
 
@@ -330,7 +349,7 @@ typedef struct _KSPIN_LOCK {
     (ALIGN_RANGE_DOWN((_Value), (_Size)) == (_Value))
 
 //
-// The REMAINDER macro returns remainder of the Value when aligned down
+// The REMAINDER macro returns the remainder of the Value when aligned down
 // to the granularity of the given Size.
 //
 

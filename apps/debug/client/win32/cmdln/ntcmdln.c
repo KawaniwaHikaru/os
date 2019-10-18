@@ -35,6 +35,11 @@ Environment:
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifndef PACKED
+#define PACKED __attribute__((__packed__))
+#endif
+
 #include <minoca/debug/spproto.h>
 #include <minoca/debug/dbgext.h>
 #include "dbgrprof.h"
@@ -58,7 +63,7 @@ ConsoleControlHandler (
     DWORD ControlType
     );
 
-VOID
+PVOID
 DbgrpWin32InputThread (
     PVOID Parameter
     );
@@ -586,7 +591,7 @@ Return Value:
     return FALSE;
 }
 
-VOID
+PVOID
 DbgrpWin32InputThread (
     PVOID Parameter
     )
@@ -606,7 +611,7 @@ Arguments:
 
 Return Value:
 
-    None.
+    NULL always.
 
 --*/
 
@@ -650,6 +655,6 @@ Return Value:
         close(DbgStandardInPipe[1]);
     }
 
-    return;
+    return NULL;
 }
 

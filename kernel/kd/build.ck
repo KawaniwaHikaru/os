@@ -27,55 +27,94 @@ Environment:
 
 --*/
 
+from menv import kernelLibrary, mconfig;
+
 function build() {
-    base_sources = [
+    var arch = mconfig.arch;
+    var archSources;
+    var baseSources;
+    var boot32Lib;
+    var boot32Sources;
+    var bootArchSources;
+    var bootLib;
+    var bootSources;
+    var entries;
+    var lib;
+
+    baseSources = [
         "kdebug.c"
     ];
 
-    boot_sources = [
+    bootSources = [
         ":kdebug.o",
     ];
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        arch_sources = [
+        archSources = [
             "armv7/kdarch.c",
             "armv7/kdatomic.S",
             "armv7/kdsup.S",
             "armv7/kdsupc.c"
         ];
 
-        boot_arch_sources = [
+        bootArchSources = [
             ":armv7/kdarch.o",
             "boot/armv7/kdatomic.S",
             ":armv7/kdsup.o",
             ":armv7/kdsupc.o"
         ];
 
-    } else if ((arch == "x86") || (arch == "x64")) {
-        arch_sources = [
+    } else if (arch == "x86") {
+        archSources = [
             "x86/kdarch.c",
             "x86/kdsup.S"
         ];
 
-        boot_arch_sources = [
+        bootArchSources = [
             ":x86/kdarch.o",
             ":x86/kdsup.o"
+        ];
+
+    } else if (arch == "x64") {
+        archSources = [
+            "x64/kdarch.c",
+            "x64/kdsup.S"
+        ];
+
+        bootArchSources = [
+            ":x64/kdarch.o",
+            ":x64/kdsup.o"
+        ];
+
+        boot32Sources = baseSources + [
+            "x86/kdarch.c",
+            "x86/kdsup.S"
         ];
     }
 
     lib = {
         "label": "kd",
-        "inputs": base_sources + arch_sources,
+        "inputs": baseSources + archSources,
     };
 
-    boot_lib = {
+    bootLib = {
         "label": "kdboot",
-        "inputs": boot_sources + boot_arch_sources,
+        "inputs": bootSources + bootArchSources,
     };
 
-    entries = static_library(lib);
-    entries += static_library(boot_lib);
+    entries = kernelLibrary(lib);
+    entries += kernelLibrary(bootLib);
+    if (arch == "x64") {
+        boot32Lib = {
+            "label": "kdboot32",
+            "inputs": boot32Sources,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]},
+        };
+
+        entries += kernelLibrary(boot32Lib);
+    }
+
     return entries;
 }
 
-return build();

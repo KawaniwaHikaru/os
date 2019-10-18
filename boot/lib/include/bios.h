@@ -119,6 +119,8 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _INT13_DISK_ACCESS_PACKET {
     UCHAR PacketSize;
     UCHAR Reserved;
@@ -170,6 +172,8 @@ typedef struct _INT13_EXTENDED_DRIVE_PARAMETERS {
     ULONG EnhancedDiskInformation;
 } PACKED INT13_EXTENDED_DRIVE_PARAMETERS, *PINT13_EXTENDED_DRIVE_PARAMETERS;
 
+#pragma pack(pop)
+
 //
 // -------------------------------------------------------------------- Globals
 //
@@ -183,6 +187,9 @@ extern PHYSICAL_ADDRESS FwFrameBufferPhysical;
 extern ULONG FwFrameBufferWidth;
 extern ULONG FwFrameBufferHeight;
 extern ULONG FwFrameBufferBitsPerPixel;
+extern ULONG FwFrameBufferRedMask;
+extern ULONG FwFrameBufferGreenMask;
+extern ULONG FwFrameBufferBlueMask;
 
 //
 // -------------------------------------------------------- Function Prototypes

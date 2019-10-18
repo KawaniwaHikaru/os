@@ -119,7 +119,7 @@ Return Value:
 
     PSTR AddressSymbol;
 
-    AddressSymbol = DbgGetAddressSymbol(Context, Address);
+    AddressSymbol = DbgGetAddressSymbol(Context, Address, NULL);
     if (AddressSymbol == NULL) {
         return ENOENT;
     }
@@ -132,7 +132,8 @@ Return Value:
 PSTR
 DbgGetAddressSymbol (
     PDEBUGGER_CONTEXT Context,
-    ULONGLONG Address
+    ULONGLONG Address,
+    PFUNCTION_SYMBOL *Function
     )
 
 /*++
@@ -149,6 +150,9 @@ Arguments:
 
     Address - Supplies the virtual address of the target to get information
         about.
+
+    Function - Supplies an optional pointer where the function symbol will be
+        returned if this turned out to be a function.
 
 Return Value:
 
@@ -168,6 +172,10 @@ Return Value:
     PSTR Symbol;
     ULONG SymbolSize;
 
+    if (Function != NULL) {
+        *Function = NULL;
+    }
+
     Line = NULL;
 
     //
@@ -183,7 +191,7 @@ Return Value:
             return NULL;
         }
 
-        sprintf(Symbol, "0x%08I64x", Address);
+        snprintf(Symbol, SymbolSize, "0x%08llx", Address);
         return Symbol;
     }
 
@@ -204,6 +212,10 @@ Return Value:
 
     if (ResultValid != NULL) {
         if (SearchResult.Variety == SymbolResultFunction) {
+            if (Function != NULL) {
+                *Function = SearchResult.U.FunctionResult;
+            }
+
             LineNumber = 0;
             if ((Context->Flags & DEBUGGER_FLAG_PRINT_LINE_NUMBERS) != 0) {
                 Line = DbgLookupSourceLine(Module->Symbols, Address);
@@ -259,7 +271,7 @@ Return Value:
                 if (Line != NULL) {
                     snprintf(Symbol,
                              SymbolSize,
-                             "%s!%s+0x%I64x [%s:%d]",
+                             "%s!%s+0x%llx [%s:%d]",
                              Module->ModuleName,
                              SearchResult.U.FunctionResult->Name,
                              Offset,
@@ -269,7 +281,7 @@ Return Value:
                 } else {
                     snprintf(Symbol,
                              SymbolSize,
-                             "%s!%s+0x%I64x",
+                             "%s!%s+0x%llx",
                              Module->ModuleName,
                              SearchResult.U.FunctionResult->Name,
                              Offset);
@@ -313,10 +325,11 @@ Return Value:
                 return NULL;
             }
 
-            sprintf(Symbol,
-                    "%s!%s",
-                    Module->ModuleName,
-                    SearchResult.U.DataResult->Name);
+            snprintf(Symbol,
+                     SymbolSize,
+                     "%s!%s",
+                     Module->ModuleName,
+                     SearchResult.U.DataResult->Name);
 
             return Symbol;
 
@@ -343,11 +356,11 @@ Return Value:
     Address += Module->BaseDifference;
     if (Address >= Module->LowestAddress) {
         Offset = Address - Module->LowestAddress;
-        sprintf(Symbol, "%s+0x%I64x", Module->ModuleName, Offset);
+        sprintf(Symbol, "%s+0x%llx", Module->ModuleName, Offset);
 
     } else {
         Offset = Module->LowestAddress - Address;
-        sprintf(Symbol, "%s-0x%I64x", Module->ModuleName, Offset);
+        sprintf(Symbol, "%s-0x%llx", Module->ModuleName, Offset);
     }
 
     return Symbol;
@@ -357,7 +370,7 @@ BOOL
 DbgGetDataSymbolTypeInformation (
     PDATA_SYMBOL DataSymbol,
     PTYPE_SYMBOL *TypeSymbol,
-    PULONG TypeSize
+    PUINTN TypeSize
     )
 
 /*++
@@ -642,6 +655,19 @@ Return Value:
 
             break;
 
+        case MACHINE_TYPE_X64:
+            DbgGetRegister(Context,
+                           &(Context->FrameRegisters),
+                           Register,
+                           &Value);
+
+            if (DataStreamSize > sizeof(ULONGLONG)) {
+                DataStreamSize = sizeof(ULONGLONG);
+            }
+
+            memcpy(DataStream, &Value, DataStreamSize);
+            break;
+
         //
         // Unknown machine type.
         //
@@ -680,7 +706,7 @@ Return Value:
                 Printed = snprintf(
                                Location,
                                LocationSize,
-                               "[@%s+0x%I64x]",
+                               "[@%s+0x%llx]",
                                DbgGetRegisterName(Symbols->Machine, Register),
                                Offset);
 
@@ -688,7 +714,7 @@ Return Value:
                 Printed = snprintf(
                                Location,
                                LocationSize,
-                               "[@%s-0x%I64x]",
+                               "[@%s-0x%llx]",
                                DbgGetRegisterName(Symbols->Machine, Register),
                                -Offset);
             }
@@ -726,7 +752,7 @@ Return Value:
         if (LocationSize != 0) {
             Printed = snprintf(Location,
                                LocationSize,
-                               "[%+I64x]",
+                               "[%llx]",
                                TargetAddress);
 
             if (Printed > 0) {
@@ -852,7 +878,7 @@ Return Value:
     CHAR Location[64];
     INT Result;
     PTYPE_SYMBOL Type;
-    ULONG TypeSize;
+    UINTN TypeSize;
 
     DataStream = NULL;
 
@@ -1051,8 +1077,11 @@ Return Value:
         if ((RegisterNumber >= ArmRegisterR0) &&
             (RegisterNumber <= ArmRegisterR15)) {
 
-            Registers32 = &(Registers->Arm.R0);
-            Value = Registers32[RegisterNumber];
+            Value = 0;
+            Registers32 = (PVOID)&(Registers->Arm.R0) +
+                          (RegisterNumber * sizeof(ULONG));
+
+            memcpy(&Value, Registers32, sizeof(ULONG));
 
         } else if ((RegisterNumber >= ArmRegisterD0) &&
                    (RegisterNumber <= ArmRegisterD31)) {
@@ -1069,6 +1098,108 @@ Return Value:
             assert(FALSE);
 
             Status = EINVAL;
+        }
+
+        break;
+
+    case MACHINE_TYPE_X64:
+        switch (RegisterNumber) {
+        case X64RegisterRax:
+            Value = Registers->X64.Rax;
+            break;
+
+        case X64RegisterRdx:
+            Value = Registers->X64.Rdx;
+            break;
+
+        case X64RegisterRcx:
+            Value = Registers->X64.Rcx;
+            break;
+
+        case X64RegisterRbx:
+            Value = Registers->X64.Rbx;
+            break;
+
+        case X64RegisterRsi:
+            Value = Registers->X64.Rsi;
+            break;
+
+        case X64RegisterRdi:
+            Value = Registers->X64.Rdi;
+            break;
+
+        case X64RegisterRbp:
+            Value = Registers->X64.Rbp;
+            break;
+
+        case X64RegisterRsp:
+            Value = Registers->X64.Rsp;
+            break;
+
+        case X64RegisterR8:
+            Value = Registers->X64.R8;
+            break;
+
+        case X64RegisterR9:
+            Value = Registers->X64.R9;
+            break;
+
+        case X64RegisterR10:
+            Value = Registers->X64.R10;
+            break;
+
+        case X64RegisterR11:
+            Value = Registers->X64.R11;
+            break;
+
+        case X64RegisterR12:
+            Value = Registers->X64.R12;
+            break;
+
+        case X64RegisterR13:
+            Value = Registers->X64.R13;
+            break;
+
+        case X64RegisterR14:
+            Value = Registers->X64.R14;
+            break;
+
+        case X64RegisterR15:
+            Value = Registers->X64.R15;
+            break;
+
+        case X64RegisterReturnAddress:
+            Value = Registers->X64.Rip;
+            break;
+
+        case X64RegisterRflags:
+            Value = Registers->X64.Rflags;
+            break;
+
+        case X64RegisterCs:
+            Value = Registers->X64.Cs;
+            break;
+
+        case X64RegisterDs:
+            Value = Registers->X64.Ds;
+            break;
+
+        case X64RegisterEs:
+            Value = Registers->X64.Es;
+            break;
+
+        case X64RegisterFs:
+            Value = Registers->X64.Fs;
+            break;
+
+        case X64RegisterGs:
+            Value = Registers->X64.Gs;
+            break;
+
+        default:
+            DbgOut("TODO: Fetch x64 register %d\n", RegisterNumber);
+            Value = 0;
+            break;
         }
 
         break;
@@ -1218,8 +1349,10 @@ Return Value:
         if ((RegisterNumber >= ArmRegisterR0) &&
             (RegisterNumber <= ArmRegisterR15)) {
 
-            Registers32 = &(Registers->Arm.R0);
-            Registers32[RegisterNumber] = Value;
+            Registers32 = (PVOID)&(Registers->Arm.R0) +
+                          (RegisterNumber * sizeof(ULONG));
+
+            memcpy(Registers32, &Value, sizeof(ULONG));
 
         } else if ((RegisterNumber >= ArmRegisterD0) &&
                    (RegisterNumber <= ArmRegisterD31)) {
@@ -1235,6 +1368,107 @@ Return Value:
             assert(FALSE);
 
             Status = EINVAL;
+        }
+
+        break;
+
+    case MACHINE_TYPE_X64:
+        switch (RegisterNumber) {
+        case X64RegisterRax:
+            Registers->X64.Rax = Value;
+            break;
+
+        case X64RegisterRdx:
+            Registers->X64.Rdx = Value;
+            break;
+
+        case X64RegisterRcx:
+            Registers->X64.Rcx = Value;
+            break;
+
+        case X64RegisterRbx:
+            Registers->X64.Rbx = Value;
+            break;
+
+        case X64RegisterRsi:
+            Registers->X64.Rsi = Value;
+            break;
+
+        case X64RegisterRdi:
+            Registers->X64.Rdi = Value;
+            break;
+
+        case X64RegisterRbp:
+            Registers->X64.Rbp = Value;
+            break;
+
+        case X64RegisterRsp:
+            Registers->X64.Rsp = Value;
+            break;
+
+        case X64RegisterR8:
+            Registers->X64.R8 = Value;
+            break;
+
+        case X64RegisterR9:
+            Registers->X64.R9 = Value;
+            break;
+
+        case X64RegisterR10:
+            Registers->X64.R10 = Value;
+            break;
+
+        case X64RegisterR11:
+            Registers->X64.R11 = Value;
+            break;
+
+        case X64RegisterR12:
+            Registers->X64.R12 = Value;
+            break;
+
+        case X64RegisterR13:
+            Registers->X64.R13 = Value;
+            break;
+
+        case X64RegisterR14:
+            Registers->X64.R14 = Value;
+            break;
+
+        case X64RegisterR15:
+            Registers->X64.R15 = Value;
+            break;
+
+        case X64RegisterReturnAddress:
+            Registers->X64.Rip = Value;
+            break;
+
+        case X64RegisterRflags:
+            Registers->X64.Rflags = Value;
+            break;
+
+        case X64RegisterCs:
+            Registers->X64.Cs = Value;
+            break;
+
+        case X64RegisterDs:
+            Registers->X64.Ds = Value;
+            break;
+
+        case X64RegisterEs:
+            Registers->X64.Es = Value;
+            break;
+
+        case X64RegisterFs:
+            Registers->X64.Fs = Value;
+            break;
+
+        case X64RegisterGs:
+            Registers->X64.Gs = Value;
+            break;
+
+        default:
+            DbgOut("TODO: Set x64 register %d\n", RegisterNumber);
+            break;
         }
 
         break;
@@ -1645,7 +1879,7 @@ Return Value:
 {
 
     PVOID Data;
-    UINTN DataSize;
+    ULONG DataSize;
     INT Status;
     PTYPE_SYMBOL Type;
 
@@ -1859,7 +2093,7 @@ Return Value:
 
             NumericValue.Uint64 = 0;
             memcpy(&NumericValue, Data, TypeSize);
-            DbgOut("0x%08I64x", NumericValue.Uint64);
+            DbgOut("0x%08llx", NumericValue.Uint64);
             break;
         }
 
@@ -1903,7 +2137,7 @@ Return Value:
                 }
 
                 DbgOut("\n%*s", SpaceLevel, "");
-                DbgOut("[%I64d] --------------------------------------"
+                DbgOut("[%lld] --------------------------------------"
                        "-------", ArrayIndex);
 
                 DbgOut("\n%*s", SpaceLevel + 2, "");
@@ -1958,7 +2192,7 @@ Return Value:
             return EINVAL;
         }
 
-        DbgOut("%I64d", NumericValue.Int64);
+        DbgOut("%lld", NumericValue.Int64);
         EnumerationMember = Enumeration->FirstMember;
         while (EnumerationMember != NULL) {
             if (EnumerationMember->Value == NumericValue.Int64) {
@@ -2081,7 +2315,7 @@ Return Value:
 
         NumericValue.Uint64 = 0;
         memcpy(&NumericValue, Data, TypeSize);
-        DbgOut("(*0x%08I64x)()", NumericValue.Uint64);
+        DbgOut("(*0x%08llx)()", NumericValue.Uint64);
         break;
 
     default:
@@ -2882,7 +3116,9 @@ Return Value:
         // Check if the name matches.
         //
 
-        if (strcasecmp(LocalName, CurrentLocal->Name) != 0) {
+        if ((CurrentLocal->Name == NULL) ||
+            (strcasecmp(LocalName, CurrentLocal->Name) != 0)) {
+
             continue;
         }
 
@@ -3060,7 +3296,7 @@ Return Value:
             break;
 
         default:
-            DbgOut("%I64x", NumericValue.Uint64);
+            DbgOut("%llx", NumericValue.Uint64);
             break;
         }
 
@@ -3080,12 +3316,12 @@ Return Value:
 
         case 8:
         default:
-            DbgOut("%I64d", NumericValue.Int64);
+            DbgOut("%lld", NumericValue.Int64);
             break;
         }
 
     } else {
-        DbgOut("0x%I64x", NumericValue.Uint64);
+        DbgOut("0x%llx", NumericValue.Uint64);
     }
 
     return 0;

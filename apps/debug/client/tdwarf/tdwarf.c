@@ -107,6 +107,17 @@ DwarfpReadCieOrFde (
     );
 
 INT
+TdwarfProcessFunction (
+    PDWARF_CONTEXT Context,
+    PDEBUG_SYMBOLS Symbols,
+    ULONG Options,
+    ULONG PrintMask,
+    ULONG SpaceCount,
+    ULONG FunctionIndex,
+    PFUNCTION_SYMBOL Function
+    );
+
+INT
 TdwarfTestDwarf (
     ULONG Options,
     PSTR FilePath
@@ -370,17 +381,14 @@ Return Value:
     PSOURCE_LINE_SYMBOL Line;
     ULONG LineCount;
     PLIST_ENTRY LineEntry;
-    ULONG LocalCount;
     PSTRUCTURE_MEMBER Member;
     ULONG MemberCount;
     PTYPE_SYMBOL MemberType;
     PDATA_TYPE_NUMERIC Numeric;
-    ULONG ParameterCount;
     PSTR Pointer;
     PDATA_TYPE_RELATION Relation;
     PSTR RelationFile;
     PTYPE_SYMBOL RelativeType;
-    PSTR ReturnTypeSource;
     INT Status;
     PDATA_TYPE_STRUCTURE Structure;
     PDEBUG_SYMBOLS Symbols;
@@ -698,93 +706,17 @@ Return Value:
         FunctionEntry = File->FunctionsHead.Next;
         while (FunctionEntry != &(File->FunctionsHead)) {
             Function = LIST_VALUE(FunctionEntry, FUNCTION_SYMBOL, ListEntry);
+            Status = TdwarfProcessFunction(Context,
+                                           Symbols,
+                                           Options,
+                                           TDWARF_OPTION_PRINT_FUNCTIONS,
+                                           3,
+                                           FunctionCount,
+                                           Function);
 
-            assert(Function->ParentSource != NULL);
-
-            if ((Options & TDWARF_OPTION_PRINT_FUNCTIONS) != 0) {
-                if (Function->ReturnTypeOwner != NULL) {
-                    ReturnTypeSource = Function->ReturnTypeOwner->SourceFile;
-
-                } else {
-                    ReturnTypeSource = "NONE";
-                }
-
-                printf("   Function %d: (%s, %d) %s: 0x%08llx - "
-                       "0x%08llx\n",
-                       FunctionCount,
-                       ReturnTypeSource,
-                       Function->ReturnTypeNumber,
-                       Function->Name,
-                       Function->StartAddress,
-                       Function->EndAddress);
-            }
-
-            //
-            // Print function parameters.
-            //
-
-            ParameterCount = 0;
-            DataEntry = Function->ParametersHead.Next;
-            while (DataEntry != &(Function->ParametersHead)) {
-                DataSymbol = LIST_VALUE(DataEntry, DATA_SYMBOL, ListEntry);
-                Status = TdwarfProcessVariable(Context,
-                                               Symbols,
-                                               Options,
-                                               TDWARF_OPTION_PRINT_PARAMETERS,
-                                               5,
-                                               ParameterCount,
-                                               DataSymbol);
-
-                if (Status != 0) {
-                    goto TestDwarfEnd;
-                }
-
-                if (DataSymbol->ParentFunction != Function) {
-                    fprintf(stderr,
-                            "Error: Parameter parent is not function.\n");
-
-                    Status = EINVAL;
-                    goto TestDwarfEnd;
-                }
-
-                ParameterCount += 1;
-                DataEntry = DataEntry->Next;
-            }
-
-            if ((Options & TDWARF_OPTION_PRINT_PARAMETERS) != 0) {
-                printf("\n");
-            }
-
-            //
-            // Print local variables.
-            //
-
-            LocalCount = 0;
-            DataEntry = Function->LocalsHead.Next;
-            while (DataEntry != &(Function->LocalsHead)) {
-                DataSymbol = LIST_VALUE(DataEntry, DATA_SYMBOL, ListEntry);
-                Status = TdwarfProcessVariable(Context,
-                                               Symbols,
-                                               Options,
-                                               TDWARF_OPTION_PRINT_LOCALS,
-                                               5,
-                                               LocalCount,
-                                               DataSymbol);
-
-                if (Status != 0) {
-                    goto TestDwarfEnd;
-                }
-
-                if (DataSymbol->ParentFunction != Function) {
-                    fprintf(stderr,
-                            "Error: Parameter parent is not function.\n");
-
-                    Status = EINVAL;
-                    goto TestDwarfEnd;
-                }
-
-                LocalCount += 1;
-                DataEntry = DataEntry->Next;
+            if (Status != 0) {
+                printf("Failed to print function.\n");
+                goto TestDwarfEnd;
             }
 
             FunctionCount += 1;
@@ -856,6 +788,180 @@ TestDwarfEnd:
         DbgUnloadSymbols(Symbols);
     }
 
+    return Status;
+}
+
+INT
+TdwarfProcessFunction (
+    PDWARF_CONTEXT Context,
+    PDEBUG_SYMBOLS Symbols,
+    ULONG Options,
+    ULONG PrintMask,
+    ULONG SpaceCount,
+    ULONG FunctionIndex,
+    PFUNCTION_SYMBOL Function
+    )
+
+/*++
+
+Routine Description:
+
+    This routine processes and potentially prints a function.
+
+Arguments:
+
+    Context - Supplies a pointer to the symbol context.
+
+    Symbols - Supplies a pointer to the debug symbols.
+
+    Options - Supplies the bitfield of application options. See TDWARF_OPTION_*
+        definitions.
+
+    PrintMask - Supplies the mask to apply to the options to determine whether
+        or not to print the function.
+
+    SpaceCount - Supplies the depth to print at.
+
+    FunctionIndex - Supplies the number of the function, for printing purposes.
+
+    Function - Supplies a pointer to the function to process.
+
+Return Value:
+
+    0 on success.
+
+    Returns an error code on failure.
+
+--*/
+
+{
+
+    PLIST_ENTRY DataEntry;
+    PDATA_SYMBOL DataSymbol;
+    ULONG FunctionCount;
+    PLIST_ENTRY FunctionEntry;
+    ULONG LocalCount;
+    ULONG ParameterCount;
+    PSTR ReturnTypeSource;
+    INT Status;
+    PFUNCTION_SYMBOL Subfunction;
+
+    assert(Function->ParentSource != NULL);
+
+    if ((Options & TDWARF_OPTION_PRINT_FUNCTIONS) != 0) {
+        if (Function->ReturnTypeOwner != NULL) {
+            ReturnTypeSource = Function->ReturnTypeOwner->SourceFile;
+
+        } else {
+            ReturnTypeSource = "NONE";
+        }
+
+        printf("%*sFunction %d: (%s, %d) %s: 0x%08llx - 0x%08llx\n",
+               SpaceCount,
+               "",
+               FunctionIndex,
+               ReturnTypeSource,
+               Function->ReturnTypeNumber,
+               Function->Name,
+               Function->StartAddress,
+               Function->EndAddress);
+    }
+
+    //
+    // Print function parameters.
+    //
+
+    ParameterCount = 0;
+    DataEntry = Function->ParametersHead.Next;
+    while (DataEntry != &(Function->ParametersHead)) {
+        DataSymbol = LIST_VALUE(DataEntry, DATA_SYMBOL, ListEntry);
+        Status = TdwarfProcessVariable(Context,
+                                       Symbols,
+                                       Options,
+                                       TDWARF_OPTION_PRINT_PARAMETERS,
+                                       5,
+                                       ParameterCount,
+                                       DataSymbol);
+
+        if (Status != 0) {
+            goto ProcessFunctionEnd;
+        }
+
+        if (DataSymbol->ParentFunction != Function) {
+            fprintf(stderr,
+                    "Error: Parameter parent is not function.\n");
+
+            Status = EINVAL;
+            goto ProcessFunctionEnd;
+        }
+
+        ParameterCount += 1;
+        DataEntry = DataEntry->Next;
+    }
+
+    if ((Options & TDWARF_OPTION_PRINT_PARAMETERS) != 0) {
+        printf("\n");
+    }
+
+    //
+    // Print local variables.
+    //
+
+    LocalCount = 0;
+    DataEntry = Function->LocalsHead.Next;
+    while (DataEntry != &(Function->LocalsHead)) {
+        DataSymbol = LIST_VALUE(DataEntry, DATA_SYMBOL, ListEntry);
+        Status = TdwarfProcessVariable(Context,
+                                       Symbols,
+                                       Options,
+                                       TDWARF_OPTION_PRINT_LOCALS,
+                                       5,
+                                       LocalCount,
+                                       DataSymbol);
+
+        if (Status != 0) {
+            goto ProcessFunctionEnd;
+        }
+
+        if (DataSymbol->ParentFunction != Function) {
+            fprintf(stderr,
+                    "Error: Parameter parent is not function.\n");
+
+            Status = EINVAL;
+            goto ProcessFunctionEnd;
+        }
+
+        LocalCount += 1;
+        DataEntry = DataEntry->Next;
+    }
+
+    //
+    // Print out sub-functions (eg inlines).
+    //
+
+    FunctionCount = 0;
+    FunctionEntry = Function->FunctionsHead.Next;
+    while (FunctionEntry != &(Function->FunctionsHead)) {
+        Subfunction = LIST_VALUE(FunctionEntry, FUNCTION_SYMBOL, ListEntry);
+        FunctionEntry = FunctionEntry->Next;
+        Status = TdwarfProcessFunction(Context,
+                                       Symbols,
+                                       Options,
+                                       PrintMask,
+                                       SpaceCount + 3,
+                                       FunctionCount,
+                                       Subfunction);
+
+        if (Status != 0) {
+            goto ProcessFunctionEnd;
+        }
+
+        FunctionCount += 1;
+    }
+
+    Status = 0;
+
+ProcessFunctionEnd:
     return Status;
 }
 
@@ -999,13 +1105,12 @@ Return Value:
             LocationList = Context->Sections.Locations.Data +
                            AttributeValue->Value.Offset;
 
-            Base = Complex->Unit->LowPc;
-
             //
             // Loop over all the location entries.
             //
 
             while (TRUE) {
+                Base = LocationContext.Unit->LowPc;
                 if (Complex->Unit->AddressSize == 8) {
                     LocationStart = DwarfpRead8(&LocationList);
                     LocationEnd = DwarfpRead8(&LocationList);
@@ -1180,7 +1285,7 @@ Return Value:
         Table = Context->Sections.Frame.Data;
         End = Table + Context->Sections.Frame.Size;
         if ((Options & TDWARF_OPTION_PRINT_UNWIND) != 0) {
-            printf(".debug_frame section, %ld bytes\n", End - Table);
+            printf(".debug_frame section, %ld bytes\n", (long)(End - Table));
         }
 
         EhFrame = FALSE;
@@ -1189,7 +1294,7 @@ Return Value:
         Table = Context->Sections.EhFrame.Data;
         End = Table + Context->Sections.EhFrame.Size;
         if ((Options & TDWARF_OPTION_PRINT_UNWIND) != 0) {
-            printf(".eh_frame section, %ld bytes\n", End - Table);
+            printf(".eh_frame section, %ld bytes\n", (long)(End - Table));
         }
 
         EhFrame = TRUE;
@@ -1221,7 +1326,7 @@ Return Value:
             if (Status == EAGAIN) {
                 if ((Options & TDWARF_OPTION_PRINT_UNWIND) != 0) {
                     printf(" Zero terminator Offset %lx.\n\n",
-                           ObjectStart - Start);
+                           (long)(ObjectStart - Start));
                 }
 
                 continue;
@@ -1242,7 +1347,7 @@ Return Value:
                        "  Return Address Register: %llu\n"
                        "  Augmentation Length: %llu\n"
                        "  Language Encoding: ",
-                       ObjectStart - Start,
+                       (long)(ObjectStart - Start),
                        Cie.UnitLength,
                        Cie.Version,
                        Cie.Augmentation,
@@ -1267,7 +1372,7 @@ Return Value:
             if ((Options & TDWARF_OPTION_PRINT_UNWIND) != 0) {
                 printf("  FDE Offset %lx Length %llx CIE %lld "
                        "PC %llx - %llx\n",
-                       ObjectStart - Start,
+                       (long)(ObjectStart - Start),
                        Fde.Length,
                        Fde.CiePointer,
                        Fde.InitialLocation,
@@ -1607,6 +1712,38 @@ Return Value:
     return 0;
 }
 
+INT
+DwarfTargetWritePc (
+    PDWARF_CONTEXT Context,
+    ULONGLONG Value
+    )
+
+/*++
+
+Routine Description:
+
+    This routine writes a the instruction pointer register, presumably with the
+    return address.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Value - Supplies the new value of the register.
+
+Return Value:
+
+    0 on success.
+
+    Returns an error number on failure.
+
+--*/
+
+{
+
+    return 0;
+}
+
 PSTR
 DwarfGetRegisterName (
     PDWARF_CONTEXT Context,
@@ -1637,6 +1774,51 @@ Return Value:
 
     Symbols = (((PDEBUG_SYMBOLS)Context) - 1);
     return DbgGetRegisterName(Symbols->Machine, Register);
+}
+
+ULONG
+DwarfGetNativeSize (
+    PDWARF_CONTEXT Context
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns the native machine word size.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+Return Value:
+
+    Returns the number of bytes in a machine word: usually 4 for 32-bit
+    machines and 8 for 64-bit machines.
+
+--*/
+
+{
+
+    PDEBUG_SYMBOLS Symbols;
+
+    Symbols = (((PDEBUG_SYMBOLS)Context) - 1);
+    switch (Symbols->Machine) {
+    case MACHINE_TYPE_X86:
+    case MACHINE_TYPE_ARM:
+        return 4;
+
+    case MACHINE_TYPE_X64:
+        return 8;
+
+    default:
+
+        assert(FALSE);
+
+        break;
+    }
+
+    return 0;
 }
 
 INT

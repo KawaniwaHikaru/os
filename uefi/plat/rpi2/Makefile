@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2015 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2015 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -47,7 +52,7 @@ ARMV7_OBJS = armv7/entry.o  \
              armv7/smpa.o   \
              armv7/timera.o \
 
-TEXT_ADDRESS = 0x00008000
+TEXT_ADDRESS := 0x00008000
 
 TARGETLIBS += $(OBJROOT)/os/uefi/dev/pl11/pl11.a       \
               $(OBJROOT)/os/uefi/dev/sd/core/sd.a      \

@@ -275,6 +275,43 @@ typedef enum _ELF_386_RELOCATION_TYPE {
     Elf386RelocationTlsTpOff32  = 37,
 } ELF_386_RELOCATION_TYPE, *PELF_386_RELOCATION_TYPE;
 
+typedef enum _ELF_X86_64_RELOCATION_TYPE {
+    ElfX64RelocationNone = 0,
+    ElfX64Relocation64 = 1,
+    ElfX64RelocationPc32 = 2,
+    ElfX64RelocationGot32 = 3,
+    ElfX64RelocationPlt32 = 4,
+    ElfX64RelocationCopy = 5,
+    ElfX64RelocationGlobalData = 6,
+    ElfX64RelocationJumpSlot = 7,
+    ElfX64RelocationRelative = 8,
+    ElfX64RelocationGotPcRelative = 9,
+    ElfX64Relocation32 = 10,
+    ElfX64Relocation32S = 11,
+    ElfX64Relocation16 = 12,
+    ElfX64RelocationPc16 = 13,
+    ElfX64Relocation8 = 14,
+    ElfX64RelocationPc8 = 15,
+    ElfX64RelocationDtpMod64 = 16,
+    ElfX64RelocationDtpOff64 = 17,
+    ElfX64RelocationTpOff64 = 18,
+    ElfX64RelocationTlsGd = 19,
+    ElfX64RelocationTlsLd = 20,
+    ElfX64RelocationDtpOff32 = 21,
+    ElfX64RelocationGotTpOff = 22,
+    ElfX64RelocationTpOff32 = 23,
+    ElfX64RelocationPc64 = 24,
+    ElfX64RelocationGotOff64 = 25,
+    ElfX64RelocationGotPc32 = 26,
+    ElfX64RelocationSize32 = 32,
+    ElfX64RelocationSize64 = 33,
+    ElfX64RelocationGotPc32TlsDesc = 34,
+    ElfX64RelocationTlsDescCall = 35,
+    ElfX64RelocationTlsDesc = 36,
+    ElfX64RelocationIRelative = 37,
+    ElfX64RelocationRelative64 = 38,
+} ELF_X86_64_RELOCATION_TYPE, *PELF_X86_64_RELOCATION_TYPE;
+
 typedef enum _ELF_ARM_RELOCATION_TYPE {
     ElfArmRelocationNone        = 0,
     ElfArmRelocationAbsolute32  = 2,
@@ -340,6 +377,8 @@ Members:
         associated with the section name string table.
 
 --*/
+
+#pragma pack(push, 1)
 
 typedef struct _ELF32_HEADER {
     UCHAR Identification[ELF32_IDENTIFICATION_LENGTH];
@@ -837,6 +876,8 @@ typedef struct _ELF64_DYNAMIC_ENTRY {
     ELF64_XWORD Value;
 } PACKED ELF64_DYNAMIC_ENTRY, *PELF64_DYNAMIC_ENTRY;
 
+#pragma pack(pop)
+
 //
 // -------------------------------------------------------------------- Globals
 //
@@ -1147,6 +1188,7 @@ KSTATUS
 ImpElf32GetSymbolByName (
     PLOADED_IMAGE Image,
     PSTR SymbolName,
+    PLOADED_IMAGE Skip,
     PIMAGE_SYMBOL Symbol
     );
 
@@ -1163,6 +1205,8 @@ Arguments:
 
     SymbolName - Supplies a pointer to the string containing the name of the
         symbol to search for.
+
+    Skip - Supplies an optional pointer to an image to skip when searching.
 
     Symbol - Supplies a pointer to a structure that receives the symbol's
         information on success.
@@ -1204,7 +1248,6 @@ Return Value:
 
 PVOID
 ImpElf32ResolvePltEntry (
-    PLIST_ENTRY ListHead,
     PLOADED_IMAGE Image,
     ULONG RelocationOffset
     );
@@ -1220,9 +1263,6 @@ Routine Description:
     relocation and returns a pointer to the function to jump to.
 
 Arguments:
-
-    ListHead - Supplies a pointer to the head of the list of images to use for
-        symbol resolution.
 
     Image - Supplies a pointer to the loaded image whose PLT needs resolution.
         This is really whatever pointer is in GOT + 4.
@@ -1540,6 +1580,7 @@ KSTATUS
 ImpElf64GetSymbolByName (
     PLOADED_IMAGE Image,
     PSTR SymbolName,
+    PLOADED_IMAGE Skip,
     PIMAGE_SYMBOL Symbol
     );
 
@@ -1556,6 +1597,8 @@ Arguments:
 
     SymbolName - Supplies a pointer to the string containing the name of the
         symbol to search for.
+
+    Skip - Supplies an optional pointer to an image to skip when searching.
 
     Symbol - Supplies a pointer to a structure that receives the symbol's
         information on success.
@@ -1597,7 +1640,6 @@ Return Value:
 
 PVOID
 ImpElf64ResolvePltEntry (
-    PLIST_ENTRY ListHead,
     PLOADED_IMAGE Image,
     ULONG RelocationOffset
     );
@@ -1613,9 +1655,6 @@ Routine Description:
     relocation and returns a pointer to the function to jump to.
 
 Arguments:
-
-    ListHead - Supplies a pointer to the head of the list of images to use for
-        symbol resolution.
 
     Image - Supplies a pointer to the loaded image whose PLT needs resolution.
         This is really whatever pointer is in GOT + 4.

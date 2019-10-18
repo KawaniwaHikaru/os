@@ -123,7 +123,7 @@ ClpOpen (
 
 BOOL
 ClpAsPrintWriteCharacter (
-    CHAR Character,
+    INT Character,
     PPRINT_FORMAT_CONTEXT Context
     );
 
@@ -765,10 +765,6 @@ Return Value:
                          &BytesCompleted);
 
     if (Status == STATUS_TIMEOUT) {
-        if (BytesCompleted != 0) {
-            return (ssize_t)BytesCompleted;
-        }
-
         errno = EAGAIN;
         return -1;
 
@@ -845,10 +841,6 @@ Return Value:
                          &BytesCompleted);
 
     if (Status == STATUS_TIMEOUT) {
-        if (BytesCompleted != 0) {
-            return (ssize_t)BytesCompleted;
-        }
-
         errno = EAGAIN;
         return -1;
 
@@ -1035,10 +1027,6 @@ Return Value:
                          &BytesCompleted);
 
     if (Status == STATUS_TIMEOUT) {
-        if (BytesCompleted != 0) {
-            return (ssize_t)BytesCompleted;
-        }
-
         errno = EAGAIN;
         return -1;
 
@@ -1113,10 +1101,6 @@ Return Value:
                          &BytesCompleted);
 
     if (Status == STATUS_TIMEOUT) {
-        if (BytesCompleted != 0) {
-            return (ssize_t)BytesCompleted;
-        }
-
         errno = EAGAIN;
         return -1;
 
@@ -1358,12 +1342,12 @@ Return Value:
 {
 
     FILE_CONTROL_PARAMETERS_UNION Parameters;
+    FILE_PROPERTIES Properties;
     KSTATUS Status;
 
+    Properties.Size = NewSize;
     Parameters.SetFileInformation.FieldsToSet = FILE_PROPERTY_FIELD_FILE_SIZE;
-    WRITE_INT64_SYNC(&(Parameters.SetFileInformation.FileProperties.FileSize),
-                     NewSize);
-
+    Parameters.SetFileInformation.FileProperties = &Properties;
     Status = OsFileControl((HANDLE)(UINTN)FileDescriptor,
                            FileControlCommandSetFileInformation,
                            &Parameters);
@@ -1409,11 +1393,13 @@ Return Value:
 
 {
 
+    FILE_PROPERTIES Properties;
     SET_FILE_INFORMATION Request;
     KSTATUS Status;
 
+    Properties.Size = NewSize;
     Request.FieldsToSet = FILE_PROPERTY_FIELD_FILE_SIZE;
-    WRITE_INT64_SYNC(&(Request.FileProperties.FileSize), NewSize);
+    Request.FileProperties = &Properties;
     Status = OsSetFileInformation(INVALID_HANDLE,
                                   (PSTR)Path,
                                   strlen(Path) + 1,
@@ -1966,6 +1952,11 @@ Return Value:
         OsFlags |= SYS_DELETE_FLAG_DIRECTORY;
     }
 
+    if (Path == NULL) {
+        errno = EFAULT;
+        return -1;
+    }
+
     Status = OsDelete((HANDLE)(UINTN)Directory,
                       (PSTR)Path,
                       strlen(Path) + 1,
@@ -2168,7 +2159,7 @@ Arguments:
         The section to be locked or unlocked starts at the current offset in
         the file and extends forward for a positve size or backwards for a
         negative size (the preceding bytes up to but not including the current
-        offset). If size is 0, the section from teh current offset through the
+        offset). If size is 0, the section from the current offset through the
         largest possible offset shall be locked. Locks may exist past the
         current end of file.
 
@@ -2605,7 +2596,7 @@ Return Value:
     *OutputString = NULL;
     memset(&PrintContext, 0, sizeof(PRINT_FORMAT_CONTEXT));
     PrintContext.Context = &AsContext;
-    PrintContext.U.WriteCharacter = ClpAsPrintWriteCharacter;
+    PrintContext.WriteCharacter = ClpAsPrintWriteCharacter;
     RtlInitializeMultibyteState(&(PrintContext.State),
                                 CharacterEncodingDefault);
 
@@ -2915,6 +2906,7 @@ Return Value:
 {
 
     ULONG ArrayIndex;
+    INT BitCount;
     PPOLL_DESCRIPTOR Descriptor;
     ULONG DescriptorIndex;
     PPOLL_DESCRIPTOR Descriptors;
@@ -2924,6 +2916,11 @@ Return Value:
     INT Result;
     KSTATUS Status;
     ULONG TimeoutInMilliseconds;
+
+    if (DescriptorCount < 0) {
+        errno = EINVAL;
+        return -1;
+    }
 
     Result = ClpConvertSpecificTimeoutToSystemTimeout(Timeout,
                                                       &TimeoutInMilliseconds);
@@ -3017,10 +3014,11 @@ Return Value:
     // over the poll events this time to skip the empty regions of the bitmasks.
     //
 
+    BitCount = 0;
     Descriptor = &(Descriptors[0]);
     for (PollIndex = 0; PollIndex < ArrayIndex; PollIndex += 1) {
         Events = Descriptor->ReturnedEvents;
-        DescriptorIndex = (INT)(Descriptor->Handle);
+        DescriptorIndex = (UINTN)(Descriptor->Handle);
 
         ASSERT(DescriptorIndex < DescriptorCount);
 
@@ -3038,6 +3036,9 @@ Return Value:
 
             if ((Events & POLL_EVENT_IN) == 0) {
                 FD_CLR(DescriptorIndex, ReadDescriptors);
+
+            } else {
+                BitCount += 1;
             }
         }
 
@@ -3046,6 +3047,9 @@ Return Value:
 
             if ((Events & POLL_EVENT_OUT) == 0) {
                 FD_CLR(DescriptorIndex, WriteDescriptors);
+
+            } else {
+                BitCount += 1;
             }
         }
 
@@ -3057,6 +3061,7 @@ Return Value:
         if (ErrorDescriptors != NULL) {
             if ((Events & POLL_NONMASKABLE_EVENTS) != 0) {
                 FD_SET(DescriptorIndex, ErrorDescriptors);
+                BitCount += 1;
 
             } else {
                 FD_CLR(DescriptorIndex, ErrorDescriptors);
@@ -3074,7 +3079,7 @@ pselectEnd:
         }
     }
 
-    return (int)DescriptorsSelected;
+    return BitCount;
 }
 
 LIBC_API
@@ -3526,7 +3531,7 @@ Return Value:
 
 BOOL
 ClpAsPrintWriteCharacter (
-    CHAR Character,
+    INT Character,
     PPRINT_FORMAT_CONTEXT Context
     )
 

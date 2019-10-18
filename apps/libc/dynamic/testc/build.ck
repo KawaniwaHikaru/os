@@ -25,36 +25,49 @@ Environment:
 
 --*/
 
+from menv import application;
+
 function build() {
+    var buildApp;
+    var buildLibs;
+    var config;
+    var entries;
+    var includes;
+    var sources;
+
     sources = [
         "bsrchtst.c",
         "getoptst.c",
         "mathtst.c",
+        "mathftst.c",
         "qsorttst.c",
         "regextst.c",
         "testc.c"
     ];
 
-    build_libs = [
-        "//apps/libc/dynamic:build_libc",
+    buildLibs = [
+        "apps/libc/dynamic:build_libc",
     ];
 
     includes = [
-        "$//apps/libc/include"
+        "$S/apps/libc/include"
     ];
 
-    build_app = {
-        "label": "build_testc",
-        "output": "testc",
-        "inputs": sources + build_libs,
-        "includes": includes,
-        "build": TRUE,
-        "prefix": "build"
+    config = {
+        "CFLAGS": ["-ffreestanding"]
     };
 
-    entries = application(build_app);
+    buildApp = {
+        "label": "build_testc",
+        "output": "testc",
+        "inputs": sources + buildLibs,
+        "includes": includes,
+        "build": true,
+        "prefix": "build",
+        "sources_config": config
+    };
+
+    entries = application(buildApp);
     return entries;
 }
-
-return build();
 

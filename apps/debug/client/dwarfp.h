@@ -133,6 +133,9 @@ Members:
 
     HighPc - Stores the high PC value from the compile unit DIE.
 
+    Ranges - Stores the ranges for the compilation unit if the compilation
+        unit convers a non-contiguous region.
+
 --*/
 
 struct _DWARF_COMPILATION_UNIT {
@@ -148,6 +151,7 @@ struct _DWARF_COMPILATION_UNIT {
     PUCHAR DiesEnd;
     ULONGLONG LowPc;
     ULONGLONG HighPc;
+    PVOID Ranges;
 };
 
 /*++
@@ -289,6 +293,9 @@ Members:
     Capacity - Stores the number of possible attributes in the array before
         the array needs to be resized.
 
+    Specification - Stores a pointer to the cached specification DIE, if this
+        DIE is "backed" by another DIE.
+
 --*/
 
 struct _DWARF_DIE {
@@ -303,6 +310,7 @@ struct _DWARF_DIE {
     PDWARF_ATTRIBUTE_VALUE Attributes;
     UINTN Count;
     UINTN Capacity;
+    PDWARF_DIE Specification;
 };
 
 /*++
@@ -619,6 +627,7 @@ Return Value:
 
 PSTR
 DwarfpGetStringAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute
     );
@@ -630,6 +639,8 @@ Routine Description:
     This routine returns the given attribute with type string.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -645,6 +656,7 @@ Return Value:
 
 BOOL
 DwarfpGetAddressAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Address
@@ -657,6 +669,8 @@ Routine Description:
     This routine returns the given attribute, ensuring it is of type address.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -674,6 +688,7 @@ Return Value:
 
 BOOL
 DwarfpGetIntegerAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Integer
@@ -687,6 +702,8 @@ Routine Description:
     (data or flag).
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -740,8 +757,39 @@ Return Value:
 
 --*/
 
+PDWARF_DIE
+DwarfpGetDieReferenceAttribute (
+    PDWARF_CONTEXT Context,
+    PDWARF_DIE Die,
+    DWARF_ATTRIBUTE Attribute
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns a pointer to the DIE referred to by the given
+    attribute.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Die - Supplies a pointer to the DIE to get the attribute from.
+
+    Attribute - Supplies the attribute to retrieve.
+
+Return Value:
+
+    Returns a pointer to the DIE on success.
+
+    NULL on failure.
+
+--*/
+
 BOOL
 DwarfpGetLocalReferenceAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Offset
@@ -754,6 +802,8 @@ Routine Description:
     This routine returns the given attribute, ensuring it is of type reference.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -771,6 +821,7 @@ Return Value:
 
 BOOL
 DwarfpGetGlobalReferenceAttribute (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute,
     PULONGLONG Offset
@@ -784,6 +835,8 @@ Routine Description:
     address.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -799,8 +852,9 @@ Return Value:
 
 --*/
 
-PDWARF_ATTRIBUTE_VALUE
-DwarfpGetAttribute (
+PVOID
+DwarfpGetRangeList (
+    PDWARF_CONTEXT Context,
     PDWARF_DIE Die,
     DWARF_ATTRIBUTE Attribute
     );
@@ -809,9 +863,42 @@ DwarfpGetAttribute (
 
 Routine Description:
 
-    This routine returns the requested attribute from a DIE.
+    This routine looks up the given attribute as a range list pointer.
 
 Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Die - Supplies a pointer to the DIE to get the attribute from.
+
+    Attribute - Supplies the attribute to retrieve.
+
+Return Value:
+
+    Returns a pointer within the .debug_ranges structure on success.
+
+    NULL if there was no attribute, the attribute was not of the right type, or
+    there is no .debug_ranges section.
+
+--*/
+
+PDWARF_ATTRIBUTE_VALUE
+DwarfpGetAttribute (
+    PDWARF_CONTEXT Context,
+    PDWARF_DIE Die,
+    DWARF_ATTRIBUTE Attribute
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns the requested attribute from a DIE. This will follow
+    a Specification attribute if needed.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
 
     Die - Supplies a pointer to the DIE to get the attribute from.
 
@@ -866,6 +953,42 @@ Return Value:
     EAGAIN if the locations section is missing.
 
     ENOENT if none of the entries matched the current PC value.
+
+--*/
+
+VOID
+DwarfpGetRangeSpan (
+    PDWARF_CONTEXT Context,
+    PVOID Ranges,
+    PDWARF_COMPILATION_UNIT Unit,
+    PULONGLONG Start,
+    PULONGLONG End
+    );
+
+/*++
+
+Routine Description:
+
+    This routine runs through a range list to figure out the maximum and
+    minimum values.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+    Ranges - Supplies the range list pointer.
+
+    Unit - Supplies the current compilation unit.
+
+    Start - Supplies a pointer where the lowest address in the range will be
+        returned.
+
+    End - Supplies a pointer where the first address just beyond the range will
+        be returned.
+
+Return Value:
+
+    None.
 
 --*/
 
@@ -1354,6 +1477,33 @@ Return Value:
 
 --*/
 
+INT
+DwarfTargetWritePc (
+    PDWARF_CONTEXT Context,
+    ULONGLONG Value
+    );
+
+/*++
+
+Routine Description:
+
+    This routine writes a the instruction pointer register, presumably with the
+    return address.
+
+Arguments:
+
+    Context - Supplies a pointer to the DWARF context.
+
+    Value - Supplies the new value of the register.
+
+Return Value:
+
+    0 on success.
+
+    Returns an error number on failure.
+
+--*/
+
 PSTR
 DwarfGetRegisterName (
     PDWARF_CONTEXT Context,
@@ -1375,6 +1525,28 @@ Arguments:
 Return Value:
 
     Returns a pointer to a constant string containing the name of the register.
+
+--*/
+
+ULONG
+DwarfGetNativeSize (
+    PDWARF_CONTEXT Context
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns the native machine word size.
+
+Arguments:
+
+    Context - Supplies a pointer to the application context.
+
+Return Value:
+
+    Returns the number of bytes in a machine word: usually 4 for 32-bit
+    machines and 8 for 64-bit machines.
 
 --*/
 

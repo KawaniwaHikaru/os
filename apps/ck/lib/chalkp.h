@@ -33,11 +33,10 @@ Author:
 #define CK_API __DLLEXPORT
 
 //
-// The parser and Rtl libraries are statically linked in.
+// The parser library is statically linked in.
 //
 
 #define YY_API
-#define RTL_API
 
 #include <minoca/lib/types.h>
 #include <minoca/lib/chalk.h>
@@ -150,6 +149,12 @@ Author:
 #define CK_INITIAL_CALL_FRAMES 8
 
 //
+// Define the initial size of the stack, in elements.
+//
+
+#define CK_INITIAL_STACK 8
+
+//
 // Define the minimum number of try frames to allocate. These are allocated
 // upon executing the first try block.
 //
@@ -161,12 +166,6 @@ Author:
 //
 
 #define CK_MAX_METHOD_SIGNATURE (CK_MAX_NAME + 8)
-
-//
-// Define the maximum UTF-8 value that can be encoded.
-//
-
-#define CK_MAX_UTF8 0x10FFFF
 
 //
 // Define the maximum value for an integer.

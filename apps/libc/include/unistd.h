@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -2140,6 +2139,41 @@ Return Value:
 
 LIBC_API
 int
+dup3 (
+    int FileDescriptor,
+    int CopyDescriptor,
+    int Flags
+    );
+
+/*++
+
+Routine Description:
+
+    This routine duplicates the given file descriptor to the destination
+    descriptor, closing the original destination descriptor file along the way.
+
+Arguments:
+
+    FileDescriptor - Supplies the file descriptor to duplicate.
+
+    CopyDescriptor - Supplies the descriptor number of returned copy. If this
+        is equal to the original file descriptor, then the call fails with
+        EINVAL.
+
+    Flags - Supplies O_* open flags governing the new descriptor. Only
+        O_CLOEXEC is permitted.
+
+Return Value:
+
+    Returns the new file descriptor which represents a copy of the original,
+    which is also equal to the input copy descriptor parameter.
+
+    -1 on failure, and errno will be set to contain more information.
+
+--*/
+
+LIBC_API
+int
 lockf (
     int FileDescriptor,
     int Function,
@@ -2170,7 +2204,7 @@ Arguments:
         The section to be locked or unlocked starts at the current offset in
         the file and extends forward for a positve size or backwards for a
         negative size (the preceding bytes up to but not including the current
-        offset). If size is 0, the section from teh current offset through the
+        offset). If size is 0, the section from the current offset through the
         largest possible offset shall be locked. Locks may exist past the
         current end of file.
 
@@ -3751,6 +3785,60 @@ Return Value:
 --*/
 
 LIBC_API
+int
+sethostname (
+    const char *Name,
+    size_t Size
+    );
+
+/*++
+
+Routine Description:
+
+    This routine sets the network host name for the current machine.
+
+Arguments:
+
+    Name - Supplies a pointer to the new name to set.
+
+    Size - Supplies the size of the name, not including a null terminator.
+
+Return Value:
+
+    0 on success.
+
+    -1 on failure, and errno will be set to indicate the error.
+
+--*/
+
+LIBC_API
+int
+setdomainname (
+    const char *Name,
+    size_t Size
+    );
+
+/*++
+
+Routine Description:
+
+    This routine sets the network domain name for the current machine.
+
+Arguments:
+
+    Name - Supplies a pointer to the new name to set.
+
+    Size - Supplies the size of the name, not including a null terminator.
+
+Return Value:
+
+    0 on success.
+
+    -1 on failure, and errno will be set to indicate the error.
+
+--*/
+
+LIBC_API
 void
 swab (
     const void *Source,
@@ -3961,6 +4049,37 @@ Return Value:
 
     -1 if a non-option was encountered. In this case the optind global variable
     will be set to the first non-option argument.
+
+--*/
+
+LIBC_API
+int
+nice (
+    int Increment
+    );
+
+/*++
+
+Routine Description:
+
+    This routine adds the given value to the current process' nice value. A
+    process' nice value is a non-negative number for which a more positive
+    value results in less favorable scheduling. Valid nice values are between
+    0 and 2 * NZERO - 1.
+
+Arguments:
+
+    Increment - Supplies the increment to add to the current nice value.
+
+Return Value:
+
+    Returns the new nice value minus NZERO. Note that this can result in a
+    successful return value of -1. Callers checking for errors should set
+    errno to 0 before calling this function, then check errno after.
+
+    -1 on failure, and errno will be set to indicate more information. This may
+    fail with EPERM if the increment is negative and the caller does not have
+    appropriate privileges.
 
 --*/
 

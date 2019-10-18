@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2012 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2012 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -29,8 +34,8 @@ BUILD = yes
 BINPLACE = testbin
 
 TARGETLIBS = $(OBJROOT)/os/lib/rtl/base/build/basertl.a   \
-             $(OBJROOT)/os/lib/rtl/rtlc/build/rtlc.a      \
-             $(OBJROOT)/os/lib/im/build/im.a              \
+             $(OBJROOT)/os/lib/rtl/urtl/rtlc/build/rtlc.a \
+             $(OBJROOT)/os/lib/im/build/imu.a             \
 
 VPATH += $(SRCDIR)/..:
 

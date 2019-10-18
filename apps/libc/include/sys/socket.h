@@ -2,10 +2,9 @@
 
 Copyright (c) 2013 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -29,6 +28,7 @@ Author:
 //
 
 #include <sys/uio.h>
+#include <sys/ioctl.h>
 
 //
 // --------------------------------------------------------------------- Macros
@@ -104,6 +104,7 @@ extern "C" {
 #define AF_LOCAL  AF_UNIX
 #define AF_INET   2
 #define AF_INET6  3
+#define AF_LINK   5
 
 //
 // Define valid protocol families as the same as the address families.
@@ -114,6 +115,7 @@ extern "C" {
 #define PF_LOCAL  AF_LOCAL
 #define PF_INET   AF_INET
 #define PF_INET6  AF_INET6
+#define PF_LINK   AF_LINK
 
 //
 // Define the socket types.
@@ -448,6 +450,13 @@ extern "C" {
 //
 
 #define SIOCATMARK 0x7300
+
+//
+// This ioctl returns the amount of unread data in the receive buffer for
+// stream sockets.
+//
+
+#define SIOCINQ FIONREAD
 
 //
 // Define the maximum length of the connection backlog queue for listen calls

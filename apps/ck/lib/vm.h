@@ -35,13 +35,13 @@ Author:
 
 //
 // This macro determines whether or not the fiber has errored out. Users of
-// this macro must save the fiber frame count before attempting the operation
+// this macro must save the fiber try count before attempting the operation
 // that might have generated an exception.
 //
 
-#define CK_EXCEPTION_RAISED(_Vm, _Fiber, _FrameCount) \
-    (((_Vm)->Fiber == NULL) || ((_Vm)->Fiber != (_Fiber)) || \
-     ((_Vm)->Fiber->FrameCount < (_FrameCount)))
+#define CK_EXCEPTION_RAISED(_Vm, _Fiber, _TryCount, _FrameCount) \
+    (((_Vm)->Fiber != (_Fiber)) || ((_Fiber)->TryCount < (_TryCount)) || \
+     ((_Fiber)->FrameCount < (_FrameCount)))
 
 //
 // ---------------------------------------------------------------- Definitions
@@ -570,7 +570,8 @@ CkpInterpret (
     PCSTR ModulePath,
     PCSTR Source,
     UINTN Length,
-    LONG Line
+    LONG Line,
+    ULONG CompilerFlags
     );
 
 /*++
@@ -596,6 +597,9 @@ Arguments:
 
     Line - Supplies the line number this code starts on. Supply 1 to start at
         the beginning.
+
+    CompilerFlags - Supplies the bitfield of compiler flags to pass along.
+        See CK_COMPILER_* definitions.
 
 Return Value:
 
@@ -797,6 +801,7 @@ CkpModuleLoadSource (
     PCSTR Source,
     UINTN Length,
     LONG Line,
+    ULONG CompilerFlags,
     PBOOL WasPrecompiled
     );
 
@@ -822,6 +827,9 @@ Arguments:
 
     Line - Supplies the line number this code starts on. Supply 1 to start at
         the beginning.
+
+    CompilerFlags - Supplies the bitfield of compiler flags to pass along.
+        See CK_COMPILER_* definitions.
 
     WasPrecompiled - Supplies a pointer where a boolean will be returned
         indicating if this was precompiled code or not.

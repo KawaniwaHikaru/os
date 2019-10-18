@@ -27,145 +27,169 @@ Environment:
 
 --*/
 
+from menv import binplace, staticApplication, flattenedBinary, mconfig;
+
 function build() {
-    common_sources = [
+    var arch = mconfig.arch;
+    var baseRtl = "lib/rtl/base:basertl";
+    var bootmanPe;
+    var commonSources;
+    var efiApp;
+    var efiConfig;
+    var efiLibs;
+    var efiSources;
+    var elfconvConfig;
+    var entries;
+    var flattened;
+    var includes;
+    var linkerScript;
+    var pcatApp;
+    var pcatConfig = {};
+    var pcatLibs;
+    var pcatSources;
+    var sourcesConfig;
+    var x6432 = "";
+
+    commonSources = [
         "bootman.c",
         "bootim.c"
     ];
 
-    pcat_sources = [
+    pcatSources = [
         "pcat/x86/entry.S",
-        ":bootman.o",
-        ":bootim.o",
         "pcat/bootxfr.c",
         "pcat/main.c",
+        "pcat/paging.c"
     ];
 
-    efi_sources = [
+    efiSources = [
         "efi/bootxfr.c",
         "efi/main.c"
     ];
 
     includes = [
-        "$//boot/lib/include",
-        "$//boot/bootman"
+        "$S/boot/lib/include",
+        "$S/boot/bootman"
     ];
 
-    sources_config = {
+    sourcesConfig = {
         "CFLAGS": ["-fshort-wchar"],
     };
 
-    efi_link_ldflags = [
-        "-nostdlib",
-        "-pie",
-        "-static",
-    ];
+    efiConfig = {
+        "LDFLAGS": ["-pie"]
+    };
 
-    pcat_link_ldflags = [
-        "-nostdlib",
-        "-static"
-    ];
-
-    efi_libs = [
-        "//boot/lib:bootefi",
+    efiLibs = [
+        "kernel/kd:kdboot",
+        "kernel/hl:hlboot",
+        "lib/im:imu",
+        "lib/bconflib:bconf",
+        "kernel/kd/kdusb:kdnousb",
+        "boot/lib:bootefi",
+        "lib/basevid:basevid",
+        "lib/fatlib:fat",
+        "kernel/mm:mmboot"
     ];
 
     if ((arch == "armv7") || (arch == "armv6")) {
-        linker_script = "$//uefi/include/link_arm.x";
-        efi_link_ldflags += [
-            "-Wl,--no-wchar-size-warning"
-        ];
-
-        efi_libs = ["//kernel:archboot"] + efi_libs;
+        linkerScript = "$S/uefi/include/link_arm.x";
+        efiConfig["LDFLAGS"] += ["-Wl,--no-wchar-size-warning"];
+        baseRtl = "lib/rtl/base:basertlb";
+        efiLibs += ["kernel:archboot"];
 
     } else if (arch == "x86") {
-        linker_script = "$//uefi/include/link_x86.x";
+        linkerScript = "$S/uefi/include/link_x86.x";
+        pcatSources += [
+            "pcat/x86/xferc.c"
+        ];
+
+    } else if (arch == "x64") {
+        linkerScript = "$S/uefi/include/link_x64.x";
+        pcatSources += [
+            "pcat/x64/xfera.S",
+            "pcat/x64/xferc.c"
+        ];
     }
 
-    efi_link_config = {
-        "LDFLAGS": efi_link_ldflags
-    };
-
-    pcat_link_config = {
-        "LDFLAGS": pcat_link_ldflags
-    };
-
-    //
-    // These base libraries are relied upon by the boot library and so they
-    // must go after the boot library.
-    //
-
-    base_libs = [
-        "//lib/basevid:basevid",
-        "//lib/fatlib:fat",
-        "//kernel/mm:mmboot",
-        "//lib/rtl/kmode:krtl",
-        "//lib/rtl/base:basertlb"
+    efiLibs += [
+        baseRtl,
+        "lib/rtl/kmode:krtl"
     ];
 
-    common_libs = [
-        "//kernel/kd:kdboot",
-        "//kernel/hl:hlboot",
-        "//lib/im:im",
-        "//lib/bconflib:bconf",
-        "//kernel/kd/kdusb:kdnousb"
-    ];
-
-    pcat_libs = [
-        "//boot/lib:bootpcat",
-        "//lib/partlib:partlib"
-    ];
-
-    efi_app_libs = common_libs + efi_libs + base_libs;
-    efi_app = {
+    efiApp = {
         "label": "bootmefi.elf",
-        "inputs": common_sources + efi_sources + efi_app_libs,
-        "sources_config": sources_config,
+        "inputs": commonSources + efiSources + efiLibs,
+        "sources_config": sourcesConfig.copy(),
         "includes": includes,
-        "config": efi_link_config,
+        "config": efiConfig,
         "entry": "BmEfiApplicationMain",
-        "linker_script": linker_script
+        "linker_script": linkerScript
     };
 
-    entries = application(efi_app);
+    entries = staticApplication(efiApp);
 
     //
     // Convert the ELF image into an EFI PE image.
     //
 
-    elfconv_config = {
+    elfconvConfig = {
         "ELFCONV_FLAGS": "-t efiapp"
     };
 
-    bootman_pe = {
+    bootmanPe = {
         "type": "target",
         "label": "bootmefi.efi",
         "inputs": [":bootmefi.elf"],
-        "implicit": ["//uefi/tools/elfconv:elfconv"],
+        "implicit": ["uefi/tools/elfconv:elfconv"],
         "tool": "elfconv",
-        "config": elfconv_config,
-        "nostrip": TRUE
+        "config": elfconvConfig,
+        "nostrip": true
     };
 
-    entries += binplace(bootman_pe);
+    entries += binplace(bootmanPe);
 
     //
-    // On PC machines, build the BIOS library as well.
+    // On PC machines, build the BIOS version as well. The boot manager is
+    // 32-bits even on 64-bit machines so that both 32 and 64-bit OS loaders
+    // can be launched. This means that on x64 all the libraries need to be
+    // recompiled as 32-bit libraries.
     //
 
-    if (arch == "x86") {
-        pcat_app_libs = common_libs + pcat_libs + base_libs;
-        pcat_app = {
-            "label": "bootman.elf",
-            "inputs": pcat_sources + pcat_app_libs,
-            "sources_config": sources_config,
+    if ((arch == "x86") || (arch == "x64")) {
+        if (arch == "x64") {
+            x6432 = "32";
+            pcatConfig["LDFLAGS"] = ["-m32"];
+            sourcesConfig["CPPFLAGS"] = ["-m32"];
+        }
+
+        pcatLibs = [
+            "kernel/kd:kdboot" + x6432,
+            "kernel/hl:hlboot" + x6432,
+            "lib/im:imu" + x6432,
+            "lib/bconflib:bconf" + x6432,
+            "kernel/kd/kdusb:kdnousb" + x6432,
+            "boot/lib:bootpcat" + x6432,
+            "lib/partlib:partlib" + x6432,
+            "lib/basevid:basevid" + x6432,
+            "lib/fatlib:fat" + x6432,
+            "kernel/mm:mmboot" + x6432,
+            "lib/rtl/base:basertl" + x6432,
+            "lib/rtl/kmode:krtl" + x6432
+        ];
+
+        pcatApp = {
+            "label": "bootman",
+            "inputs": commonSources + pcatSources + pcatLibs,
+            "sources_config": sourcesConfig,
             "includes": includes,
-            "config": pcat_link_config,
+            "config": pcatConfig,
             "text_address": "0x100000",
-            "binplace": TRUE
+            "binplace": "bin",
+            "prefix": "pcat"
         };
 
-        entries += executable(pcat_app);
+        entries += staticApplication(pcatApp);
 
         //
         // Flatten the image so the VBR can load it directly into memory.
@@ -173,16 +197,15 @@ function build() {
 
         flattened = {
             "label": "bootman.bin",
-            "inputs": [":bootman.elf"],
-            "binplace": TRUE,
-            "nostrip": TRUE
+            "inputs": [":bootman"],
+            "binplace": "bin",
+            "nostrip": true
         };
 
-        flattened = flattened_binary(flattened);
+        flattened = flattenedBinary(flattened);
         entries += flattened;
     }
 
     return entries;
 }
 
-return build();

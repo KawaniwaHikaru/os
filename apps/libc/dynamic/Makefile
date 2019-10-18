@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2013 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2013 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Module Name:
 #
@@ -34,7 +39,7 @@ BINPLACE = bin
 ## Link in all object files of the included libraries as they are exported.
 ##
 
-EXTRA_LDFLAGS += -Wl,--whole-archive
+EXTRA_LDFLAGS += -Wl,--whole-archive -nostdlib
 
 ##
 ## Use the initial-exec TLS model, as it's faster for all those C library
@@ -43,8 +48,6 @@ EXTRA_LDFLAGS += -Wl,--whole-archive
 ##
 
 EXTRA_CFLAGS += -ftls-model=initial-exec
-
-ENTRY = ClInitialize
 
 INCLUDES += $(SRCROOT)/os/apps/libc/include;
 
@@ -76,24 +79,48 @@ OBJS = assert.o             \
        locale.o             \
        math/abs.o           \
        math/ceil.o          \
+       math/ceilf.o         \
        math/div.o           \
        math/exp.o           \
+       math/expf.o          \
+       math/exp2.o          \
+       math/exp2f.o         \
        math/expm1.o         \
+       math/expm1f.o        \
        math/floor.o         \
+       math/floorf.o        \
        math/fmod.o          \
+       math/fmodf.o         \
        math/hypot.o         \
+       math/hypotf.o        \
        math/log.o           \
+       math/logf.o          \
        math/log2.o          \
+       math/log2f.o         \
        math/log10.o         \
+       math/log10f.o        \
        math/lround.o        \
+       math/lroundf.o       \
+       math/minmax.o        \
+       math/minmaxf.o       \
        math/modf.o          \
+       math/modff.o         \
        math/pow.o           \
+       math/powf.o          \
        math/rint.o          \
+       math/rintf.o         \
        math/scalbn.o        \
+       math/scalbnf.o       \
        math/sqrt.o          \
+       math/sqrtf.o         \
        math/trig.o          \
+       math/trigf.o         \
        math/trigarc.o       \
+       math/trigarcf.o      \
        math/trighyp.o       \
+       math/trighypf.o      \
+       math/trunc.o         \
+       math/truncf.o        \
        math/util.o          \
        memory.o             \
        netaddr.o            \
@@ -172,13 +199,16 @@ X64_OBJS = x64/contexta.o \
            x64/contextc.o \
            x64/fenv.o     \
            x64/setjmpa.o  \
+           x64/tlsaddr.o  \
            x86/fenvc.o    \
 
 EXTRA_SRC_DIRS = x86 x64 armv7 math pthread
 
 DYNLIBS = $(BINROOT)/libminocaos.so.1           \
 
-TARGETLIBS = $(OBJROOT)/os/lib/rtl/base/intrins/intrins.a        \
+ifneq ($(ARCH),x64)
+TARGETLIBS = $(OBJROOT)/os/lib/rtl/base/intrins/intrins.a
+endif
 
 DIRS = wincsup pthread
 

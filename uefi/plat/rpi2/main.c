@@ -62,6 +62,29 @@ Environment:
 
 Structure Description:
 
+    This structure defines the data necessary to get a BCM2709's clock rate.
+
+Members:
+
+    Header - Stores a header that defines the total size of the messages being
+        sent to and received from the mailbox.
+
+    ClockRate - Stores a message getting the clock rate.
+
+    EndTag - Stores the tag to denote the end of the mailbox message.
+
+--*/
+
+typedef struct _EFI_BCM2709_GET_CLOCK_RATE {
+    BCM2709_MAILBOX_HEADER Header;
+    BCM2709_MAILBOX_GET_CLOCK_RATE ClockRate;
+    UINT32 EndTag;
+} EFI_BCM2709_GET_CLOCK_RATE, *PEFI_BCM2709_GET_CLOCK_RATE;
+
+/*++
+
+Structure Description:
+
     This structure defines the data necessary to set the BCM2709's ARM clock
     rate.
 
@@ -88,6 +111,11 @@ typedef struct _EFI_BCM2709_SET_CLOCK_RATE {
 
 EFI_STATUS
 EfipBcm2836InitializeUart (
+    VOID
+    );
+
+EFI_STATUS
+EfipBcm2836InitializePwm (
     VOID
     );
 
@@ -158,7 +186,7 @@ EFI_BCM2709_GET_CLOCK_RATE EfiRpi2GetClockTemplate = {
         {
             BCM2709_MAILBOX_TAG_GET_CLOCK_MAX_RATE,
             sizeof(UINT32) * 2,
-            sizeof(UINT32) * 2
+            sizeof(UINT32)
         },
 
         BCM2709_MAILBOX_CLOCK_ID_ARM,
@@ -172,6 +200,7 @@ EFI_BCM2709_GET_CLOCK_RATE EfiRpi2GetClockTemplate = {
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 VOID
 EfiRpi2Main (
     VOID *TopOfStack,
@@ -302,6 +331,11 @@ Return Value:
         }
 
         Status = EfipBcm2836InitializeCoreTimerClock();
+        if (EFI_ERROR(Status)) {
+            goto PlatformInitializeEnd;
+        }
+
+        Status = EfipBcm2709PwmInitialize();
         if (EFI_ERROR(Status)) {
             goto PlatformInitializeEnd;
         }
@@ -482,7 +516,7 @@ EfipBcm2836InitializeApbClock (
 
 Routine Description:
 
-    This routine initializes the APB clock. This is the video cores clock and
+    This routine initializes the APB clock. This is the video core's clock and
     can be configured via config.txt. Initialization simply consists of reading
     the clock and updating the BCM2 ACPI table if necessary.
 

@@ -27,33 +27,36 @@ Environment:
 
 --*/
 
+from menv import staticApplication, uefiRuntimeFfs;
+
 function build() {
+    var elf;
+    var entries;
+    var includes;
+    var libs;
+    var linkConfig;
+    var sources;
+    var sources_config;
+
     sources = [
         "runtime.c"
     ];
 
     libs = [
-        "//uefi/core/rtlib:rtlib",
-        "//uefi/archlib:uefiarch"
+        "uefi/core/rtlib:rtlib",
+        "uefi/archlib:uefiarch"
     ];
 
     includes = [
-        "$//uefi/include"
+        "$S/uefi/include"
     ];
 
     sources_config = {
         "CFLAGS": ["-fshort-wchar"],
     };
 
-    link_ldflags = [
-        "-pie",
-        "-nostdlib",
-        "-Wl,--no-wchar-size-warning",
-        "-static"
-    ];
-
-    link_config = {
-        "LDFLAGS": link_ldflags
+    linkConfig = {
+        "LDFLAGS": ["-pie", "-Wl,--no-wchar-size-warning"]
     };
 
     elf = {
@@ -62,13 +65,12 @@ function build() {
         "sources_config": sources_config,
         "includes": includes,
         "entry": "EfiRuntimeCoreEntry",
-        "linker_script": "$//uefi/include/link_arm.x",
-        "config": link_config
+        "linker_script": "$S/uefi/include/link_arm.x",
+        "config": linkConfig
     };
 
-    entries = executable(elf);
-    entries += uefi_runtime_ffs("rpi2rt");
+    entries = staticApplication(elf);
+    entries += uefiRuntimeFfs("rpi2rt");
     return entries;
 }
 
-return build();

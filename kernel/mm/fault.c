@@ -229,12 +229,12 @@ Return Value:
             if (!KSUCCESS(Status) && (Status != STATUS_TOO_LATE)) {
 
                 //
-                // If page in failed for a cache-backed section, then send the
+                // If page in failed for a backed section, then send the
                 // fault error to user mode. Otherwise crash.
                 //
 
                 Flags = ImageSection->Flags;
-                if ((Flags & IMAGE_SECTION_PAGE_CACHE_BACKED) != 0) {
+                if ((Flags & IMAGE_SECTION_BACKED) != 0) {
                     if (Status == STATUS_END_OF_FILE) {
                         FaultFlags = FAULT_FLAG_OUT_OF_BOUNDS;
                     }
@@ -331,8 +331,11 @@ HandleFaultEnd:
     // (such as perhaps a segmentation fault signal).
     //
 
-    PsCheckRuntimeTimers(Thread);
-    PsDispatchPendingSignals(Thread, TrapFrame);
+    if (ArIsTrapFrameFromPrivilegedMode(TrapFrame) == FALSE) {
+        PsCheckRuntimeTimers(Thread);
+        PsDispatchPendingSignals(Thread, TrapFrame);
+    }
+
     return;
 }
 

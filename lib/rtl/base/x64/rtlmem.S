@@ -13,7 +13,7 @@ Module Name:
 
 Abstract:
 
-    This module memory routines in assembly, for speed.
+    This module contains memory routines in assembly, for speed.
 
 Author:
 
@@ -25,27 +25,27 @@ Environment:
 
 --*/
 
-##
-## ------------------------------------------------------------------ Includes
-##
+//
+// ------------------------------------------------------------------ Includes
+//
 
 #include <minoca/kernel/x64.inc>
 
-##
-## ---------------------------------------------------------------------- Code
-##
+//
+// ---------------------------------------------------------------------- Code
+//
 
 ASSEMBLY_FILE_HEADER
 
-##
-## RTL_API
-## PVOID
-## RtlCopyMemory (
-##     PVOID Destination,
-##     PCVOID Source,
-##     ULONG ByteCount
-##     )
-##
+//
+// RTL_API
+// PVOID
+// RtlCopyMemory (
+//     PVOID Destination,
+//     PCVOID Source,
+//     ULONG ByteCount
+//     )
+//
 
 /*++
 
@@ -68,12 +68,12 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlCopyMemory)
+PROTECTED_FUNCTION(RtlCopyMemory)
 
-    ##
-    ## It just so happens that the destination is already in rdi, source in
-    ## rsi. Move count to rcx and copy.
-    ##
+    //
+    // It just so happens that the destination is already in rdi, source in
+    // rsi. Move count to rcx and copy.
+    //
 
     movq    %rdx, %rcx              # Move count to rcx.
     cld                             # Clear the direction flag.
@@ -82,14 +82,14 @@ FUNCTION(RtlCopyMemory)
 
 END_FUNCTION(RtlCopyMemory)
 
-##
-## RTL_API
-## VOID
-## RtlZeroMemory (
-##     PVOID Buffer,
-##     UINTN ByteCount
-##     )
-##
+//
+// RTL_API
+// VOID
+// RtlZeroMemory (
+//     PVOID Buffer,
+//     UINTN ByteCount
+//     )
+//
 
 /*++
 
@@ -109,12 +109,12 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlZeroMemory)
+PROTECTED_FUNCTION(RtlZeroMemory)
 
-    ##
-    ## The buffer address is already in rdi. Move the count to rcx, clear eax,
-    ## and zero bytes.
-    ##
+    //
+    // The buffer address is already in rdi. Move the count to rcx, clear eax,
+    // and zero bytes.
+    //
 
     movq    %rsi, %rcx              # Move the count to rcx.
     xorq    %rax, %rax              # Zero out rax.
@@ -124,15 +124,15 @@ FUNCTION(RtlZeroMemory)
 
 END_FUNCTION(RtlZeroMemory)
 
-##
-## RTL_API
-## VOID
-## RtlSetMemory (
-##     PVOID Buffer,
-##     INT Byte,
-##     UINTN Count
-##     )
-##
+//
+// RTL_API
+// VOID
+// RtlSetMemory (
+//     PVOID Buffer,
+//     INT Byte,
+//     UINTN Count
+//     )
+//
 
 /*++
 
@@ -154,12 +154,12 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlSetMemory)
+PROTECTED_FUNCTION(RtlSetMemory)
 
-    ##
-    ## The buffer address is already in rdi. Move the byte to rax and the count
-    ## to rcx, and blast off.
-    ##
+    //
+    // The buffer address is already in rdi. Move the byte to rax and the count
+    // to rcx, and blast off.
+    //
 
     movq    %rsi, %rax              # Move the byte to rax.
     movq    %rdx, %rcx              # Move the count.
@@ -169,15 +169,15 @@ FUNCTION(RtlSetMemory)
 
 END_FUNCTION(RtlSetMemory)
 
-##
-## RTL_API
-## BOOL
-## RtlCompareMemory (
-##     PCVOID FirstBuffer,
-##     PCVOID SecondBuffer,
-##     UINTN Size
-##     )
-##
+//
+// RTL_API
+// BOOL
+// RtlCompareMemory (
+//     PCVOID FirstBuffer,
+//     PCVOID SecondBuffer,
+//     UINTN Size
+//     )
+//
 
 /*++
 
@@ -201,12 +201,12 @@ Return Value:
 
 --*/
 
-FUNCTION(RtlCompareMemory)
+PROTECTED_FUNCTION(RtlCompareMemory)
 
-    ##
-    ## The first buffer pointer is already in rdi, the second is already in
-    ## rsi. Move the count to rcx and compare.
-    ##
+    //
+    // The first buffer pointer is already in rdi, the second is already in
+    // rsi. Move the count to rcx and compare.
+    //
 
     movq    %rdx, %rcx              # Move count to rcx.
     xorq    %rax, %rax              # Zero out the return value.
@@ -217,7 +217,7 @@ FUNCTION(RtlCompareMemory)
 
 END_FUNCTION(RtlCompareMemory)
 
-##
-## --------------------------------------------------------- Internal Functions
-##
+//
+// --------------------------------------------------------- Internal Functions
+//
 

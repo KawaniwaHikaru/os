@@ -2,10 +2,9 @@
 
 Copyright (c) 2015 Minoca Corp.
 
-    This file is licensed under the terms of the GNU General Public License
-    version 3. Alternative licensing terms are available. Contact
-    info@minocacorp.com for details. See the LICENSE file at the root of this
-    project for complete licensing information.
+    This file is licensed under the terms of the GNU Lesser General Public
+    License version 3. Alternative licensing terms are available. Contact
+    info@minocacorp.com for details.
 
 Module Name:
 
@@ -437,7 +436,37 @@ Return Value:
 --*/
 
 LIBC_API
-int
+void
+logwtmp (
+    const char *Terminal,
+    const char *User,
+    const char *Host
+    );
+
+/*++
+
+Routine Description:
+
+    This routine creates a new utmp entry with the given terminal line, user
+    name, host name, the current process ID, and current time. It appends the
+    new record using updwtmp to the wtmp file.
+
+Arguments:
+
+    Terminal - Supplies an optional pointer to the terminal.
+
+    User - Supplies an optional pointer to the user.
+
+    Host - Supplies a pointer to the host.
+
+Return Value:
+
+    None.
+
+--*/
+
+LIBC_API
+void
 updwtmp (
     const char *FileName,
     const struct utmp *Record
@@ -458,9 +487,7 @@ Arguments:
 
 Return Value:
 
-    0 on success.
-
-    -1 on failure, and errno will be set to contain more information.
+    None.
 
 --*/
 

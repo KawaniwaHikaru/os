@@ -30,8 +30,21 @@ Environment:
 
 --*/
 
+from menv import kernelLibrary, mconfig;
+
 function build() {
-    base_sources = [
+    var arch = mconfig.arch;
+    var archBootSources;
+    var archSources;
+    var baseSources;
+    var boot32Sources;
+    var boot32Lib;
+    var bootLib;
+    var bootSources;
+    var entries;
+    var lib;
+
+    baseSources = [
         "cache.c",
         "calendar.c",
         "clock.c",
@@ -50,14 +63,14 @@ function build() {
         "timer.c"
     ];
 
-    boot_sources = [
+    bootSources = [
         "boot/hmodapi.c",
         ":dbgdev.o",
         ":ns16550.o"
     ];
 
     if (arch == "armv7") {
-        arch_sources = [
+        archSources = [
             "armv7/am335int.c",
             "armv7/am335pwr.c",
             "armv7/am335tmr.c",
@@ -91,7 +104,7 @@ function build() {
             "armv7/b2709tmr.c"
         ];
 
-        arch_boot_sources = [
+        archBootSources = [
             ":armv7/archdbg.o",
             ":armv7/regacces.o",
             ":armv7/uartpl11.o",
@@ -99,7 +112,7 @@ function build() {
         ];
 
     } else if (arch == "armv6") {
-        arch_sources = [
+        archSources = [
             "armv6/archcach.c",
             "armv6/archdbg.c",
             "armv6/archintr.c",
@@ -115,51 +128,91 @@ function build() {
             "armv7/uartpl11.c",
         ];
 
-        arch_boot_sources = [
+        archBootSources = [
             ":armv6/archdbg.o",
             ":armv7/regacces.o",
             ":armv7/uartpl11.o",
         ];
 
     } else if ((arch == "x86") || (arch == "x64")) {
-        arch_sources = [
+        archSources = [
             "x86/apic.c",
             "x86/apictimr.c",
-            "x86/apinit.c",
-            "x86/apstart.S",
             "x86/archcach.c",
             "x86/archdbg.c",
             "x86/archintr.c",
-            "x86/archsup.S",
             "x86/archrst.c",
             "x86/archtimr.c",
-            "x86/ioport.c",
             "x86/pmtimer.c",
             "x86/regacces.c",
             "x86/rtc.c",
             "x86/tsc.c"
         ];
 
-        arch_boot_sources = [
+        archBootSources = [
             ":x86/archdbg.o",
-            ":x86/ioport.o",
             ":x86/regacces.o"
         ];
+
+        if (arch == "x64") {
+            boot32Sources = [
+                "boot/hmodapi.c",
+                "dbgdev.c",
+                "ns16550.c",
+                "x86/archdbg.c",
+                "x86/regacces.c"
+                "x86/ioport.S",
+            ];
+
+            archSources += [
+                "x64/apinit.c",
+                "x64/apstart.S",
+                "x64/archsup.S",
+                "x64/ioport.S",
+            ];
+
+            archBootSources += [
+                ":x64/ioport.o",
+            ];
+
+        } else {
+            archSources += [
+                "x86/apinit.c",
+                "x86/apstart.S",
+                "x86/archsup.S",
+                ":x86/ioport.o",
+            ];
+
+            archBootSources += [
+                "x86/ioport.S",
+            ];
+
+        }
     }
 
     lib = {
         "label": "hl",
-        "inputs": base_sources + arch_sources,
+        "inputs": baseSources + archSources,
     };
 
-    boot_lib = {
+    bootLib = {
         "label": "hlboot",
-        "inputs": boot_sources + arch_boot_sources
+        "inputs": bootSources + archBootSources
     };
 
-    entries = static_library(lib);
-    entries += static_library(boot_lib);
+    entries = kernelLibrary(lib);
+    entries += kernelLibrary(bootLib);
+    if (arch == "x64") {
+        boot32Lib = {
+            "label": "hlboot32",
+            "inputs": boot32Sources,
+            "prefix": "x6432",
+            "sources_config": {"CPPFLAGS": ["-m32"]}
+        };
+
+        entries += kernelLibrary(boot32Lib);
+    }
+
     return entries;
 }
 
-return build();

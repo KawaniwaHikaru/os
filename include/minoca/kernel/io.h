@@ -245,14 +245,6 @@ Author:
 #define OPEN_FLAG_ASYNCHRONOUS 0x00000800
 
 //
-// Set this flag if a file should be atomically unlinked after creation so that
-// it never appears in the namespace. The call will fail if the file already
-// exists or fails to be unlinked.
-//
-
-#define OPEN_FLAG_UNLINK_ON_CREATE 0x04000000
-
-//
 // Set this flag if mount points should not be followed on the final component.
 //
 
@@ -269,7 +261,7 @@ Author:
 // given file or device will bypass the page cache for all I/O operations.
 //
 
-#define OPEN_FLAG_NON_CACHED 0x20000000
+#define OPEN_FLAG_NO_PAGE_CACHE 0x20000000
 
 //
 // This flag is reserved for use only by the I/O manager. It indicates that the
@@ -313,6 +305,25 @@ Author:
 //
 
 #define IO_FLAG_SERVICING_FAULT 0x40000000
+
+//
+// This flag is reserved for use by the page cache. It indicates that a write
+// I/O operation should preserve the data because the page cache is about to
+// release its copy of the data. The backing device may have previously been
+// acknowledging writes without actually writing to persistant storage.
+//
+
+#define IO_FLAG_HARD_FLUSH 0x20000000
+
+//
+// This flag is reserved for use by the page cache thread. It indicates that
+// hard flushes are allowed. Normal threads cannot perform hard flushes because
+// a hard flush may fail (e.g. there is no page file to back a shared memory
+// object). This failure should not be reported back to user mode, as it is
+// non-fatal.
+//
+
+#define IO_FLAG_HARD_FLUSH_ALLOWED 0x10000000
 
 //
 // This flag indicates that a write I/O operation should flush all the file
@@ -515,19 +526,19 @@ Author:
 #define TERMINAL_INPUT_STRIP 0x00000020
 
 //
-// Set this flag to map newlines (\n) to carraige returns (\r) on input.
+// Set this flag to map newlines (\n) to carriage returns (\r) on input.
 //
 
 #define TERMINAL_INPUT_NEWLINE_TO_CR 0x00000040
 
 //
-// Set this flag to ignore carraige returns.
+// Set this flag to ignore carriage returns.
 //
 
 #define TERMINAL_INPUT_IGNORE_CR 0x00000080
 
 //
-// Set this flag to map carraige return (\r) characters to newlines (\n) on
+// Set this flag to map carriage return (\r) characters to newlines (\n) on
 // input.
 //
 
@@ -577,19 +588,19 @@ Author:
 #define TERMINAL_OUTPUT_NEWLINE_TO_CRLF 0x00000002
 
 //
-// Set this flag to map carraige returns (\r) to newlines (\n) on output.
+// Set this flag to map carriage returns (\r) to newlines (\n) on output.
 //
 
 #define TERMINAL_OUTPUT_CR_TO_NEWLINE 0x00000004
 
 //
-// Set this flag to avoid carraige return output at column 0.
+// Set this flag to avoid carriage return output at column 0.
 //
 
 #define TERMINAL_OUTPUT_NO_CR_AT_COLUMN_ZERO 0x00000008
 
 //
-// Set this flag to have newline perform carraige return functionality.
+// Set this flag to have newline perform carriage return functionality.
 //
 
 #define TERMINAL_OUTPUT_NEWLINE_IS_CR 0x00000010
@@ -607,7 +618,7 @@ Author:
 #define TERMINAL_OUTPUT_NEWLINE_DELAY 0x00000040
 
 //
-// Set this flag to select carraige return delays, types 0 through 3.
+// Set this flag to select carriage return delays, types 0 through 3.
 // Type 1 delays for an amount dependent on column position. Type 2 is about
 // 0.1 seconds, and type 3 is about 0.15 seconds. If OFILL is set, type 1
 // transmits two fill characters and type 2 transmits four fill characters.
@@ -790,22 +801,15 @@ Author:
 // Define the flags for each field that are currnetly unimplemented.
 //
 
-#define TERMINAL_UNIMPLEMENTED_INPUT_FLAGS          \
-    (TERMINAL_INPUT_ENABLE_PARITY_CHECK |           \
-     TERMINAL_INPUT_ANY_CHARACTER_RESTARTS_OUTPUT | \
-     TERMINAL_INPUT_MARK_PARITY_ERRORS)
-
 #define TERMINAL_UNIMPLEMENTED_OUTPUT_FLAGS         \
     (TERMINAL_OUTPUT_NO_CR_AT_COLUMN_ZERO |         \
-     TERMINAL_OUTPUT_NEWLINE_IS_CR |                \
      TERMINAL_OUTPUT_USE_FILL_CHARACTERS |          \
      TERMINAL_OUTPUT_VERTICAL_TAB_DELAY |           \
      TERMINAL_OUTPUT_FORM_FEED_DELAY)
 
 #define TERMINAL_UNIMPLEMENTED_CONTROL_FLAGS        \
     (TERMINAL_CONTROL_2_STOP_BITS |                 \
-     TERMINAL_CONTROL_ENABLE_PARITY |               \
-     TERMINAL_CONTROL_ODD_PARITY)
+     TERMINAL_CONTROL_ENABLE_PARITY)
 
 //
 // Define the number of control characters in the old terminal settings
@@ -848,11 +852,18 @@ Author:
 #define DIRECTORY_CONTENTS_OFFSET 2
 
 //
-// Set this flag in lookup if the device's data should not be cached. It is
-// intended for use with block devices.
+// Set this flag in lookup if the device's data should not be stored in the
+// page cache.
 //
 
-#define LOOKUP_FLAG_NON_CACHED 0x00000001
+#define LOOKUP_FLAG_NO_PAGE_CACHE 0x00000001
+
+//
+// Set this flag if the file's I/O state should be allocated from non-paged
+// pool. This is useful if the I/O state needs to be signaled from a DPC.
+//
+
+#define LOOKUP_FLAG_NON_PAGED_IO_STATE 0x00000002
 
 //
 // Define the version number for the I/O cache statistics.
@@ -914,6 +925,19 @@ Author:
 //
 
 #define LOADED_FILE_VERSION 1
+
+//
+// Define shared memory properties, stored in the permissions field of the
+// permissions structure.
+//
+
+//
+// Set this flag if the shared memory object is unlinked and will be destroyed
+// when the last reference is closed. This lines up with SHM_DEST in the C
+// library.
+//
+
+#define SHARED_MEMORY_PROPERTY_UNLINKED 0x00010000
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -1025,6 +1049,13 @@ typedef enum _IO_INFORMATION_TYPE {
     IoInformationCacheStatistics,
 } IO_INFORMATION_TYPE, *PIO_INFORMATION_TYPE;
 
+typedef enum _SHARED_MEMORY_COMMAND {
+    SharedMemoryCommandInvalid,
+    SharedMemoryCommandUnlink,
+    SharedMemoryCommandSet,
+    SharedMemoryCommandStat
+} SHARED_MEMORY_COMMAND, *PSHARED_MEMORY_COMMAND;
+
 /*++
 
 Structure Description:
@@ -1056,13 +1087,13 @@ Members:
 --*/
 
 typedef struct _TERMINAL_SETTINGS {
-    LONG InputFlags;
-    LONG OutputFlags;
-    LONG ControlFlags;
-    LONG LocalFlags;
-    CHAR ControlCharacters[TerminalCharacterCount];
-    INT InputSpeed;
-    INT OutputSpeed;
+    ULONG InputFlags;
+    ULONG OutputFlags;
+    ULONG ControlFlags;
+    ULONG LocalFlags;
+    UCHAR ControlCharacters[TerminalCharacterCount];
+    ULONG InputSpeed;
+    ULONG OutputSpeed;
 } TERMINAL_SETTINGS, *PTERMINAL_SETTINGS;
 
 /*++
@@ -1100,7 +1131,7 @@ typedef struct _TERMINAL_SETTINGS_OLD {
     USHORT LocalFlags;
     UCHAR LineDiscipline;
     CHAR ControlCharacters[TERMINAL_SETTINGS_OLD_CONTROL_COUNT];
-} TERMINAL_SETTINGS_OLD, *pTERMINAL_SETTINGS_OLD;
+} TERMINAL_SETTINGS_OLD, *PTERMINAL_SETTINGS_OLD;
 
 /*++
 
@@ -1513,12 +1544,16 @@ Members:
 
 --*/
 
+#pragma pack(push, 1)
+
 typedef struct _DIRECTORY_ENTRY {
     FILE_ID FileId;
     ULONGLONG NextOffset;
     USHORT Size;
     UCHAR Type;
 } PACKED DIRECTORY_ENTRY, *PDIRECTORY_ENTRY;
+
+#pragma pack(pop)
 
 /*++
 
@@ -1536,19 +1571,18 @@ Members:
 
     Type - Stores the type of file (regular file, directory, etc).
 
-    UserId - Stores the user ID of the file owner.
-
-    GroupId - Stores the group ID of the file owner.
-
     Permissions - Stores the file permissions.
 
     HardLinkCount - Stores the number of hard links that exist for this file.
 
-    FileSize - Stores the total file size of this file.
+    UserId - Stores the user ID of the file owner.
 
-    BlockSize - Stores the size of a block on this file system.
+    GroupId - Stores the group ID of the file owner.
 
-    BlockCount - Stores the number of blocks allocated for this file.
+    RelatedDevice - Stores the device ID of the related device for certain
+        special device types.
+
+    Size - Stores the size of this file entity, in bytes.
 
     AccessTime - Stores the last time this file was accessed.
 
@@ -1560,22 +1594,36 @@ Members:
         This includes a change in the file's ownership, permissions, or
         hard link count.
 
+    CreationTime - Stores the file creation time.
+
+    BlockSize - Stores the size of a block on this file system.
+
+    BlockCount - Stores the number of blocks allocated for this file.
+
+    Flags - Stores user defined flags.
+
+    Generation - Stores the file generation number.
+
 --*/
 
 typedef struct _FILE_PROPERTIES {
     DEVICE_ID DeviceId;
     FILE_ID FileId;
     IO_OBJECT_TYPE Type;
+    FILE_PERMISSIONS Permissions;
+    LONG HardLinkCount;
     USER_ID UserId;
     GROUP_ID GroupId;
-    FILE_PERMISSIONS Permissions;
-    ULONG HardLinkCount;
-    INT64_SYNC FileSize;
-    ULONG BlockSize;
-    ULONGLONG BlockCount;
+    DEVICE_ID RelatedDevice;
+    IO_OFFSET Size;
     SYSTEM_TIME AccessTime;
     SYSTEM_TIME ModifiedTime;
     SYSTEM_TIME StatusChangeTime;
+    SYSTEM_TIME CreationTime;
+    IO_OFFSET BlockSize;
+    IO_OFFSET BlockCount;
+    ULONG Flags;
+    ULONG Generation;
 } FILE_PROPERTIES, *PFILE_PROPERTIES;
 
 /*++
@@ -1590,14 +1638,13 @@ Members:
         FILE_PROPERY_FIELD_* definitions. If this value is zero, then all the
         fields will be retrieved rather than any being set.
 
-    FileProperties - Stores the file properties returned by the kernel on
-        success.
+    FileProperties - Stores a pointer to the file properties to get or set.
 
 --*/
 
 typedef struct _SET_FILE_INFORMATION {
     ULONG FieldsToSet;
-    FILE_PROPERTIES FileProperties;
+    PFILE_PROPERTIES FileProperties;
 } SET_FILE_INFORMATION, *PSET_FILE_INFORMATION;
 
 /*++
@@ -1955,6 +2002,9 @@ Members:
     IoBuffer - Stores a pointer to the read or write buffer supplied by the
         caller.
 
+    IoBufferState - Stoers a pointer to the internal state used for bounce
+        buffering.
+
     IoFlags - Stores flags governing the behavior of the I/O. See
         IO_FLAG_* definitions.
 
@@ -2022,6 +2072,10 @@ Members:
         the driver must not access the user buffer directly, but instead use
         MM copy routines to copy to and from user mode.
 
+    DeviceContext - Stores a pointer to the device context supplied by the
+        device driver upon opening the device. This is used to uniquely
+        identify the open file.
+
     UserBuffer - Supplies a pointer to the buffer containing the context for
         the user control IRP. This will be a user mode pointer and must be
         treated with caution.
@@ -2033,6 +2087,7 @@ Members:
 
 typedef struct _IRP_USER_CONTROL {
     BOOL FromKernelMode;
+    PVOID DeviceContext;
     PVOID UserBuffer;
     UINTN UserBufferSize;
 } IRP_USER_CONTROL, *PIRP_USER_CONTROL;
@@ -2067,6 +2122,11 @@ Members:
         use to store context for the completion callback routine. It will be
         passed to the completion routine.
 
+    ListEntry - Stores a list entry that the current driver processing the IRP
+        can use to put the IRP on a list. Drivers that have just gained control
+        of the IRP in either direction should not make assumptions about its
+        state.
+
     QueryResources - Stores the results from a Query Resources IRP.
 
     StartDevice - Stores the parameters to a Start Device IRP.
@@ -2100,6 +2160,7 @@ struct _IRP {
     KSTATUS Status;
     PIRP_COMPLETION_ROUTINE CompletionRoutine;
     PVOID CompletionContext;
+    LIST_ENTRY ListEntry;
     union {
         IRP_QUERY_RESOURCES QueryResources;
         IRP_START_DEVICE StartDevice;
@@ -2152,8 +2213,12 @@ Members:
     Flags - Stores a bitmask of flags returned by lookup. See LOOKUP_FLAGS_*
         for definitions.
 
-    Directory - Stores a pointer to the properties of the directory file that
-        is to be searched.
+    MapFlags - Supplies a bitmask of additional map flags to apply when mapping
+        physical addresses returned from doing I/O on this file object. See
+        MAP_FLAG_* definitions.
+
+    DirectoryProperties - Stores a pointer to the properties of the directory
+        file that is to be searched.
 
     FileName - Stores a pointer to the name of the file, which may not be
         null terminated.
@@ -2162,17 +2227,19 @@ Members:
         for a null terminator (which may be a null terminator or may be a
         garbage character).
 
-    Properties - Stores the file properties if the file was found.
+    Properties - Stores a pointer where the file properties are returned by the
+        driver upon success.
 
 --*/
 
 typedef struct _SYSTEM_CONTROL_LOOKUP {
     BOOL Root;
     ULONG Flags;
+    ULONG MapFlags;
     PFILE_PROPERTIES DirectoryProperties;
     PCSTR FileName;
     ULONG FileNameSize;
-    FILE_PROPERTIES Properties;
+    PFILE_PROPERTIES Properties;
 } SYSTEM_CONTROL_LOOKUP, *PSYSTEM_CONTROL_LOOKUP;
 
 /*++
@@ -2531,8 +2598,8 @@ Members:
 
 typedef struct _MOUNT_POINT_ENTRY {
     ULONG Flags;
-    ULONG MountPointPathOffset;
-    ULONG TargetPathOffset;
+    UINTN MountPointPathOffset;
+    UINTN TargetPathOffset;
 } MOUNT_POINT_ENTRY, *PMOUNT_POINT_ENTRY;
 
 /*++
@@ -2709,6 +2776,74 @@ Return Value:
 
 --*/
 
+/*++
+
+Structure Description:
+
+    This structure defines the permission set for a shared memory object. This
+    lines up with struct ipc_perm in the C library.
+
+Members:
+
+    OwnerUserId - Stores the user ID of the owner.
+
+    OwnerGroupId - Stores the group ID of the owner.
+
+    CreatorUserId - Stores the user ID of the creator.
+
+    CreatorGroupId - Stores the group ID of the creator.
+
+    Permissions - Stores the permission set for this object.
+
+--*/
+
+typedef struct _SHARED_MEMORY_PERMISSIONS {
+    USER_ID OwnerUserId;
+    GROUP_ID OwnerGroupId;
+    USER_ID CreatorUserId;
+    GROUP_ID CreatorGroupId;
+    ULONG Permissions;
+} SHARED_MEMORY_PERMISSIONS, *PSHARED_MEMORY_PERMISSIONS;
+
+/*++
+
+Structure Description:
+
+    This structure defines the properties of a shared memory object. This
+    structure lines up with struct shmid_ds in the C library.
+
+Members:
+
+    Permissions - Stores the permissions information for the object.
+
+    Size - Stores the size of the shared memory object in bytes.
+
+    AttachTime - Stores the last time an attach occurred.
+
+    DetachTime - Stores the last time a detach occurred.
+
+    ChangeTime - Stores the last time the object was changed (via a set).
+
+    CreatorPid - Stores the process ID of the process that created this object.
+
+    LastPid - Stores the process ID of the last process to operate on this
+        object.
+
+    AttachCount - Stores the number of active attachments.
+
+--*/
+
+typedef struct _SHARED_MEMORY_PROPERTIES {
+    SHARED_MEMORY_PERMISSIONS Permissions;
+    IO_OFFSET Size;
+    SYSTEM_TIME AttachTime;
+    SYSTEM_TIME DetachTime;
+    SYSTEM_TIME ChangeTime;
+    PROCESS_ID CreatorPid;
+    PROCESS_ID LastPid;
+    UINTN AttachCount;
+} SHARED_MEMORY_PROPERTIES, *PSHARED_MEMORY_PROPERTIES;
+
 //
 // -------------------------------------------------------------------- Globals
 //
@@ -2723,9 +2858,9 @@ IoCreateDevice (
     PDRIVER BusDriver,
     PVOID BusDriverContext,
     PDEVICE ParentDevice,
-    PSTR DeviceId,
-    PSTR ClassId,
-    PSTR CompatibleIds,
+    PCSTR DeviceId,
+    PCSTR ClassId,
+    PCSTR CompatibleIds,
     PDEVICE *NewDevice
     );
 
@@ -2994,7 +3129,7 @@ Return Value:
 --*/
 
 KERNEL_API
-PSTR
+PCSTR
 IoGetCompatibleDeviceIds (
     PDEVICE Device
     );
@@ -3020,7 +3155,7 @@ Return Value:
 --*/
 
 KERNEL_API
-PSTR
+PCSTR
 IoGetDeviceClassId (
     PDEVICE Device
     );
@@ -3046,7 +3181,7 @@ Return Value:
 KERNEL_API
 BOOL
 IoIsDeviceIdInCompatibleIdList (
-    PSTR DeviceId,
+    PCSTR DeviceId,
     PDEVICE Device
     );
 
@@ -3218,7 +3353,7 @@ IoSetDeviceDriverErrorEx (
     KSTATUS Status,
     PDRIVER Driver,
     ULONG DriverCode,
-    PSTR SourceFile,
+    PCSTR SourceFile,
     ULONG LineNumber
     );
 
@@ -4503,7 +4638,7 @@ KSTATUS
 IoCreateSymbolicLink (
     BOOL FromKernelMode,
     PIO_HANDLE Directory,
-    PSTR LinkName,
+    PCSTR LinkName,
     ULONG LinkNameSize,
     PSTR LinkTarget,
     ULONG LinkTargetSize
@@ -4949,7 +5084,7 @@ Return Value:
 KERNEL_API
 KSTATUS
 IoLoadFile (
-    PSTR Path,
+    PCSTR Path,
     ULONG PathLength,
     PLOAD_FILE_COMPLETION_ROUTINE CompletionRoutine,
     PVOID CompletionContext
@@ -5012,7 +5147,7 @@ KSTATUS
 IoCreatePipe (
     BOOL FromKernelMode,
     PIO_HANDLE Directory,
-    PSTR Path,
+    PCSTR Path,
     ULONG PathLength,
     ULONG OpenFlags,
     FILE_PERMISSIONS CreatePermissions,
@@ -5064,9 +5199,9 @@ IoCreateTerminal (
     BOOL FromKernelMode,
     PIO_HANDLE MasterDirectory,
     PIO_HANDLE SlaveDirectory,
-    PSTR MasterPath,
+    PCSTR MasterPath,
     UINTN MasterPathLength,
-    PSTR SlavePath,
+    PCSTR SlavePath,
     UINTN SlavePathLength,
     ULONG MasterAccess,
     ULONG MasterOpenFlags,
@@ -6384,7 +6519,8 @@ IoGetIoHandleAccessPermissions (
 
 Routine Description:
 
-    This routine returns the access permissions for the given I/O handle.
+    This routine returns the access permissions for the given I/O handle. For
+    directories, no access is always returned.
 
 Arguments:
 
@@ -6421,7 +6557,8 @@ Return Value:
 
 BOOL
 IoIoHandleIsCacheable (
-    PIO_HANDLE IoHandle
+    PIO_HANDLE IoHandle,
+    PULONG MapFlags
     );
 
 /*++
@@ -6435,9 +6572,14 @@ Arguments:
 
     IoHandle - Supplies a pointer to an I/O handle.
 
+    MapFlags - Supplies an optional pointer where any additional map flags
+        needed when mapping sections from this handle will be returned.
+        See MAP_FLAG_* definitions.
+
 Return Value:
 
-    Returns TRUE if the I/O handle's object is cached or FALSE otherwise.
+    Returns TRUE if the I/O handle's object uses the page cache, FALSE
+    otherwise.
 
 --*/
 
@@ -6516,7 +6658,7 @@ Return Value:
 
 KSTATUS
 IoOpenPageFile (
-    PSTR Path,
+    PCSTR Path,
     ULONG PathSize,
     ULONG Access,
     ULONG Flags,
@@ -6557,10 +6699,36 @@ Return Value:
 --*/
 
 KSTATUS
+IoNotifyFileMapping (
+    PIO_HANDLE Handle,
+    BOOL Mapping
+    );
+
+/*++
+
+Routine Description:
+
+    This routine is called to notify a file object that it is being mapped
+    into memory or unmapped.
+
+Arguments:
+
+    Handle - Supplies the handle being mapped.
+
+    Mapping - Supplies a boolean indicating if a new mapping is being created
+        (TRUE) or an old mapping is being destroyed (FALSE).
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KSTATUS
 IoPathAppend (
-    PSTR Prefix,
+    PCSTR Prefix,
     ULONG PrefixSize,
-    PSTR Component,
+    PCSTR Component,
     ULONG ComponentSize,
     ULONG AllocationTag,
     PSTR *AppendedPath,
@@ -6588,7 +6756,7 @@ Arguments:
     AllocationTag - Supplies the tag to use for the combined allocation.
 
     AppendedPath - Supplies a pointer where the new path will be returned. The
-        caller is responsible for freeing this memory..
+        caller is responsible for freeing this memory.
 
     AppendedPathSize - Supplies a pointer where the size of the appended bath
         buffer in bytes including the null terminator will be returned.
@@ -6666,8 +6834,49 @@ Return Value:
 --*/
 
 KSTATUS
+IoGetCurrentDirectory (
+    BOOL FromKernelMode,
+    BOOL Root,
+    PSTR *Path,
+    PUINTN PathSize
+    );
+
+/*++
+
+Routine Description:
+
+    This routine gets either the current working directory or the path of the
+    current chroot environment.
+
+Arguments:
+
+    FromKernelMode - Supplies a boolean indicating whether or not a kernel mode
+        caller is requesting the directory information. This dictates how the
+        given path buffer is treated.
+
+    Root - Supplies a boolean indicating whether to get the path to the current
+        working directory (FALSE) or to get the path of the current chroot
+        environment (TRUE). If the caller does not have permission to escape a
+        changed root, or the root has not been changed, then / is returned in
+        the path argument.
+
+    Path - Supplies a pointer to a buffer that will contain the desired path on
+        output. If the call is from kernel mode and the pointer is NULL, then
+        a buffer will be allocated.
+
+    PathSize - Supplies a pointer to the size of the path buffer on input. On
+        output it stores the required size of the path buffer. This includes
+        the null terminator.
+
+Return Value:
+
+    Status code.
+
+--*/
+
+KSTATUS
 IoLoadDriver (
-    PSTR DriverName,
+    PCSTR DriverName,
     PDRIVER *DriverOut
     );
 
@@ -6693,8 +6902,8 @@ Return Value:
 
 KSTATUS
 IoAddDeviceDatabaseEntry (
-    PSTR DeviceId,
-    PSTR DriverName
+    PCSTR DeviceId,
+    PCSTR DriverName
     );
 
 /*++
@@ -6729,8 +6938,8 @@ Return Value:
 
 KSTATUS
 IoAddDeviceClassDatabaseEntry (
-    PSTR ClassId,
-    PSTR DriverName
+    PCSTR ClassId,
+    PCSTR DriverName
     );
 
 /*++
@@ -7407,7 +7616,8 @@ Return Value:
 
 PHYSICAL_ADDRESS
 IoGetPageCacheEntryPhysicalAddress (
-    PPAGE_CACHE_ENTRY Entry
+    PPAGE_CACHE_ENTRY Entry,
+    PULONG MapFlags
     );
 
 /*++
@@ -7419,6 +7629,9 @@ Routine Description:
 Arguments:
 
     Entry - Supplies a pointer to a page cache entry.
+
+    MapFlags - Supplies an optional pointer to the additional mapping flags
+        mandated by the underlying file object.
 
 Return Value:
 
@@ -7617,7 +7830,8 @@ Return Value:
 KERNEL_API
 PIO_OBJECT_STATE
 IoCreateIoObjectState (
-    BOOL HighPriority
+    BOOL HighPriority,
+    BOOL NonPaged
     );
 
 /*++
@@ -7632,6 +7846,10 @@ Arguments:
     HighPriority - Supplies a boolean indicating whether or not the I/O object
         state should be prepared for high priority events.
 
+    NonPaged - Supplies a boolean indicating whether or not the I/O object
+        state should be allocated from non-paged pool. Default is paged pool
+        (FALSE).
+
 Return Value:
 
     Returns a pointer to the new state structure on success.
@@ -7643,7 +7861,8 @@ Return Value:
 KERNEL_API
 VOID
 IoDestroyIoObjectState (
-    PIO_OBJECT_STATE State
+    PIO_OBJECT_STATE State,
+    BOOL NonPaged
     );
 
 /*++
@@ -7655,6 +7874,9 @@ Routine Description:
 Arguments:
 
     State - Supplies a pointer to the I/O object state to destroy.
+
+    NonPaged - Supplies a boolean indicating whether or not the I/O object
+        was allocated from non-paged pool. Default is paged pool (FALSE).
 
 Return Value:
 

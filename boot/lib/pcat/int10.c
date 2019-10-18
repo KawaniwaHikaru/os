@@ -45,13 +45,30 @@ Environment:
 // structure into linear addresses that can be dereferenced in protected mode.
 //
 
-#define VESA_SEGMENTED_TO_LINEAR_ADDRESS(_Address) \
-    (PVOID)((((_Address) & 0xFFFF0000) >> 12) +    \
-            ((_Address) & 0x0000FFFF))
+#define VESA_SEGMENTED_TO_LINEAR_ADDRESS(_Address)      \
+    (PVOID)(UINTN)((((_Address) & 0xFFFF0000) >> 12) +  \
+                   ((_Address) & 0x0000FFFF))
+
+//
+// These macros convert a TrueColor 8-bit RGB 3:3:2 value into its VGA DAC
+// register value. This is breaking the color up into its components, and then
+// shifting it out to a max value of 0x3F.
+//
+
+#define TRUECOLOR_TO_PALETTE_RED(_Color) ((((_Color) >> 5) & 0x7) << 3)
+#define TRUECOLOR_TO_PALETTE_GREEN(_Color) ((((_Color) >> 2) & 0x7) << 3)
+#define TRUECOLOR_TO_PALETTE_BLUE(_Color) (((_Color) & 0x3) << 3)
 
 //
 // ---------------------------------------------------------------- Definitions
 //
+
+//
+// Define the INT 10 function for setting several DAC registers at once (the
+// color palette).
+//
+
+#define VIDEO_FUNCTION_SET_DAC_REGISTER_BLOCK 0x1012
 
 //
 // Define the maximum number of supported modes.
@@ -93,6 +110,25 @@ Environment:
 #define VESA_FUNCTION_GET_VESA_INFORMATION 0x4F00
 #define VESA_FUNCTION_GET_MODE_INFORMATION 0x4F01
 #define VESA_FUNCTION_SET_MODE             0x4F02
+#define VESA_FUNCTION_SET_PALETTE_CONTROL  0x4F08
+#define VESA_FUNCTION_SET_PALETTE_ENTRIES  0x4F09
+
+//
+// Define the values for BL in the get/set palette control call.
+//
+
+#define VESA_PALETTE_CONTROL_SET 0x00
+#define VESA_PALETTE_CONTROL_GET 0x01
+
+//
+// Define the values for BL in the get/set palette entries call.
+//
+
+#define VESA_PALETTE_SET_PRIMARY 0x00
+#define VESA_PALETTE_GET_PRIMARY 0x01
+#define VESA_PALETTE_SET_SECONDARY 0x02
+#define VESA_PALETTE_GET_SECONDARY 0x03
+#define VESA_PALETTE_SET_DURING_VERTICAL_TRACE 0x80
 
 //
 // ------------------------------------------------------ Data Type Definitions
@@ -157,6 +193,8 @@ Members:
     OemData - Stores a section of space reserved for OEM-specific information.
 
 --*/
+
+#pragma pack(push, 1)
 
 typedef struct _VESA_INFORMATION {
     ULONG Signature;
@@ -317,6 +355,30 @@ typedef struct _VESA_MODE_INFORMATION {
     //UCHAR Reserved2[206];
 } PACKED VESA_MODE_INFORMATION, *PVESA_MODE_INFORMATION;
 
+#pragma pack(pop)
+
+/*++
+
+Structure Description:
+
+    This structure stores the parameters for a requested video mode.
+
+Members:
+
+    XResolution - Stores the requested horizontal resolution in pixels.
+
+    YResolution - Stores the requested vertical resolution in pixels.
+
+    BitsPerPixel - Stores the requested pixel depth.
+
+--*/
+
+typedef struct _VIDEO_MODE_REQUEST {
+    USHORT XResolution;
+    USHORT YResolution;
+    USHORT BitsPerPixel;
+} VIDEO_MODE_REQUEST, *PVIDEO_MODE_REQUEST;
+
 //
 // ----------------------------------------------- Internal Function Prototypes
 //
@@ -344,6 +406,9 @@ FwpPcatFindVesaMode (
     ULONG Width,
     ULONG Height,
     ULONG BitsPerPixel,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask,
     PUSHORT ModeNumber,
     PPHYSICAL_ADDRESS FrameBufferAddress
     );
@@ -354,6 +419,9 @@ FwpPcatFindHighestResolutionVesaMode (
     PULONG Width,
     PULONG Height,
     PULONG BitsPerPixel,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask,
     PUSHORT ModeNumber,
     PPHYSICAL_ADDRESS FrameBufferAddress
     );
@@ -367,6 +435,25 @@ FwpPcatGetVesaModeInformation (
 KSTATUS
 FwpPcatSetVesaMode (
     USHORT ModeNumber
+    );
+
+VOID
+FwpPcatGetColorMasks (
+    PVESA_MODE_INFORMATION Mode,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask
+    );
+
+ULONG
+FwpPcatCreatePixelMask (
+    ULONG Position,
+    ULONG Size
+    );
+
+VOID
+FwpPcatSetPalette (
+    VOID
     );
 
 //
@@ -401,8 +488,27 @@ PHYSICAL_ADDRESS FwFrameBufferPhysical;
 ULONG FwFrameBufferWidth;
 ULONG FwFrameBufferHeight;
 ULONG FwFrameBufferBitsPerPixel;
+ULONG FwFrameBufferRedMask;
+ULONG FwFrameBufferGreenMask;
+ULONG FwFrameBufferBlueMask;
 
 BASE_VIDEO_CONTEXT FwVideoContext;
+
+const VIDEO_MODE_REQUEST FwModePreferences[] = {
+    {1024, 768, 32},
+    {1024, 768, 24},
+    {1024, 768, 16},
+    {1024, 768, 8},
+    {1024, 600, 24},
+    {1024, 600, 16},
+    {800, 600, 32},
+    {800, 600, 24},
+    {800, 600, 16},
+    {640, 480, 24},
+    {640, 480, 16},
+    {640, 480, 4},
+    {0, 0, 0}
+};
 
 //
 // ------------------------------------------------------------------ Functions
@@ -478,7 +584,7 @@ Return Value:
         if (ModeCount != 0) {
             Status = FwpPcatSetBestVesaMode(FwVesaModeList);
             if (!KSUCCESS(Status)) {
-                goto InitializeVideoEnd;
+                ModeCount = 0;
             }
         }
     }
@@ -521,9 +627,9 @@ Return Value:
                               (FrameBuffer.BitsPerPixel / BITS_PER_BYTE);
 
     if (FrameBuffer.Mode == BaseVideoModeFrameBuffer) {
-        FrameBuffer.RedMask = 0x00FF0000;
-        FrameBuffer.GreenMask = 0x0000FF00;
-        FrameBuffer.BlueMask = 0x000000FF;
+        FrameBuffer.RedMask = FwFrameBufferRedMask;
+        FrameBuffer.GreenMask = FwFrameBufferGreenMask;
+        FrameBuffer.BlueMask = FwFrameBufferBlueMask;
     }
 
     Status = VidInitialize(&FwVideoContext, &FrameBuffer);
@@ -578,7 +684,7 @@ Return Value:
 
     Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x10);
     if (!KSUCCESS(Status)) {
-        goto SetTextCursorEnd;
+        return;
     }
 
     //
@@ -594,8 +700,6 @@ Return Value:
     //
 
     FwpRealModeExecute(&RealModeContext);
-
-SetTextCursorEnd:
     FwpRealModeDestroyBiosCallContext(&RealModeContext);
     return;
 }
@@ -640,7 +744,7 @@ Return Value:
 
     Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x10);
     if (!KSUCCESS(Status)) {
-        goto GetVesaInformationEnd;
+        return Status;
     }
 
     //
@@ -713,18 +817,28 @@ Return Value:
 
 {
 
+    ULONG BlueMask;
     ULONG Depth;
+    ULONG GreenMask;
     ULONG Height;
     USHORT ModeNumber;
     PHYSICAL_ADDRESS PhysicalAddress;
+    ULONG RedMask;
+    const VIDEO_MODE_REQUEST *Request;
     KSTATUS Status;
     ULONG Width;
 
+    RedMask = 0;
+    GreenMask = 0;
+    BlueMask = 0;
     if (FwVesaUseHighestResolution != FALSE) {
         Status = FwpPcatFindHighestResolutionVesaMode(ModeList,
                                                       &Width,
                                                       &Height,
                                                       &Depth,
+                                                      &RedMask,
+                                                      &GreenMask,
+                                                      &BlueMask,
                                                       &ModeNumber,
                                                       &PhysicalAddress);
 
@@ -736,218 +850,32 @@ Return Value:
     }
 
     //
-    // Try for 1024x769 at 32bpp.
+    // Go down the list of requests trying to get one.
     //
 
-    Width = 1024;
-    Height = 768;
-    Depth = 32;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
+    Request = FwModePreferences;
+    while (Request->XResolution != 0) {
+        Width = Request->XResolution;
+        Height = Request->YResolution;
+        Depth = Request->BitsPerPixel;
+        Status = FwpPcatFindVesaMode(ModeList,
+                                     Width,
+                                     Height,
+                                     Depth,
+                                     &RedMask,
+                                     &GreenMask,
+                                     &BlueMask,
+                                     &ModeNumber,
+                                     &PhysicalAddress);
 
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
         if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
+            Status = FwpPcatSetVesaMode(ModeNumber);
+            if (KSUCCESS(Status)) {
+                goto SetBestVideoModeEnd;
+            }
         }
-    }
 
-    //
-    // Try for 1024x768 at 24bpp.
-    //
-
-    Depth = 24;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 1024x768 at 16bpp.
-    //
-
-    Depth = 16;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 1024x768 at 8bpp.
-    //
-
-    Depth = 8;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 1024x600 at 24bpp.
-    //
-
-    Width = 1024;
-    Height = 600;
-    Depth = 24;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 1024x600 at 16bpp.
-    //
-
-    Depth = 16;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 800x600 at 32bpp.
-    //
-
-    Width = 800;
-    Height = 600;
-    Depth = 32;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 800x600 at 24bpp.
-    //
-
-    Depth = 24;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 800x600 at 16bpp.
-    //
-
-    Depth = 16;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 800x600 at 8bpp.
-    //
-
-    Depth = 8;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
-    }
-
-    //
-    // Try for 800x600 at 4bpp.
-    //
-
-    Depth = 4;
-    Status = FwpPcatFindVesaMode(ModeList,
-                                 Width,
-                                 Height,
-                                 Depth,
-                                 &ModeNumber,
-                                 &PhysicalAddress);
-
-    if (KSUCCESS(Status)) {
-        Status = FwpPcatSetVesaMode(ModeNumber);
-        if (KSUCCESS(Status)) {
-            goto SetBestVideoModeEnd;
-        }
+        Request += 1;
     }
 
     Status = STATUS_NOT_FOUND;
@@ -959,6 +887,12 @@ SetBestVideoModeEnd:
         FwFrameBufferWidth = Width;
         FwFrameBufferHeight = Height;
         FwFrameBufferBitsPerPixel = Depth;
+        FwFrameBufferRedMask = RedMask;
+        FwFrameBufferGreenMask = GreenMask;
+        FwFrameBufferBlueMask = BlueMask;
+        if (Depth == 8) {
+            FwpPcatSetPalette();
+        }
     }
 
     return Status;
@@ -970,6 +904,9 @@ FwpPcatFindVesaMode (
     ULONG Width,
     ULONG Height,
     ULONG BitsPerPixel,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask,
     PUSHORT ModeNumber,
     PPHYSICAL_ADDRESS FrameBufferAddress
     )
@@ -993,6 +930,12 @@ Arguments:
         mode.
 
     BitsPerPixel - Supplies the desired color depth of the video mode.
+
+    RedMask - Supplies a pointer where the red pixel mask will be returned.
+
+    GreenMask - Supplies a pointer where the green pixel mask will be returned.
+
+    BlueMask - Supplies a pointer where the blue pixel mask will be returned.
 
     ModeNumber - Supplies a pointer where the mode number of the mode matching
         the characteristics will be returned.
@@ -1032,6 +975,11 @@ Return Value:
 
                 *ModeNumber = *ModeList;
                 *FrameBufferAddress = ModeInformation.PhysicalBasePointer;
+                FwpPcatGetColorMasks(&ModeInformation,
+                                     RedMask,
+                                     GreenMask,
+                                     BlueMask);
+
                 Status = STATUS_SUCCESS;
                 goto FindVesaModeEnd;
             }
@@ -1057,6 +1005,9 @@ FwpPcatFindHighestResolutionVesaMode (
     PULONG Width,
     PULONG Height,
     PULONG BitsPerPixel,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask,
     PUSHORT ModeNumber,
     PPHYSICAL_ADDRESS FrameBufferAddress
     )
@@ -1080,6 +1031,12 @@ Arguments:
 
     BitsPerPixel - Supplies a pointer where the color depth of the best mode
         will be returned.
+
+    RedMask - Supplies a pointer where the red pixel mask will be returned.
+
+    GreenMask - Supplies a pointer where the green pixel mask will be returned.
+
+    BlueMask - Supplies a pointer where the blue pixel mask will be returned.
 
     ModeNumber - Supplies a pointer where the mode number of the mode matching
         the characteristics will be returned.
@@ -1134,6 +1091,11 @@ Return Value:
                     *BitsPerPixel = ModeInformation.BitsPerPixel;
                     *ModeNumber = *ModeList;
                     *FrameBufferAddress = ModeInformation.PhysicalBasePointer;
+                    FwpPcatGetColorMasks(&ModeInformation,
+                                         RedMask,
+                                         GreenMask,
+                                         BlueMask);
+
                     Status = STATUS_SUCCESS;
                 }
             }
@@ -1191,7 +1153,7 @@ Return Value:
 
     Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x10);
     if (!KSUCCESS(Status)) {
-        goto GetVesaModeInformationEnd;
+        return Status;
     }
 
     //
@@ -1269,7 +1231,7 @@ Return Value:
 
     Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x10);
     if (!KSUCCESS(Status)) {
-        goto PcatSetVesaModeEnd;
+        return Status;
     }
 
     //
@@ -1303,5 +1265,203 @@ Return Value:
 PcatSetVesaModeEnd:
     FwpRealModeDestroyBiosCallContext(&RealModeContext);
     return Status;
+}
+
+VOID
+FwpPcatGetColorMasks (
+    PVESA_MODE_INFORMATION Mode,
+    PULONG RedMask,
+    PULONG GreenMask,
+    PULONG BlueMask
+    )
+
+/*++
+
+Routine Description:
+
+    This routine returns the pixel format masks for a given mode.
+
+Arguments:
+
+    Mode - Supplies a pointer to the VESA mode information being translated.
+
+    RedMask - Supplies a pointer where the red pixel mask will be returned.
+
+    GreenMask - Supplies a pointer where the green pixel mask will be returned.
+
+    BlueMask - Supplies a pointer where the blue pixel mask will be returned.
+
+Return Value:
+
+    None.
+
+--*/
+
+{
+
+    //
+    // In Packed Pixel format, 16 bit is 1:5:5:5, 24 bit is 8:8:8, and 32 bit
+    // is 8:8:8:8.
+    //
+
+    if ((Mode->MemoryModel == VesaMemoryModelPackedPixel) ||
+        (Mode->RedMaskSize == 0) ||
+        (Mode->GreenMaskSize == 0) ||
+        (Mode->BlueMaskSize == 0)) {
+
+        switch (Mode->BitsPerPixel) {
+
+        //
+        // Assume 8-bit TrueColor, which might not be right.
+        //
+
+        case 8:
+            *RedMask = 0x7 << 5;
+            *GreenMask = 0x7 << 3;
+            *BlueMask = 0x3;
+            break;
+
+        case 16:
+            *RedMask = 0x1F << 10;
+            *GreenMask = 0x1F << 5;
+            *BlueMask = 0x1F;
+            break;
+
+        case 24:
+        case 32:
+        default:
+            *RedMask = 0xFF << 16;
+            *GreenMask = 0xFF << 8;
+            *BlueMask = 0xFF;
+            break;
+        }
+
+    } else {
+        *RedMask = FwpPcatCreatePixelMask(Mode->RedFieldPosition,
+                                          Mode->RedMaskSize);
+
+        *GreenMask = FwpPcatCreatePixelMask(Mode->GreenFieldPosition,
+                                            Mode->GreenMaskSize);
+
+        *BlueMask = FwpPcatCreatePixelMask(Mode->BlueFieldPosition,
+                                           Mode->BlueMaskSize);
+    }
+
+    return;
+}
+
+ULONG
+FwpPcatCreatePixelMask (
+    ULONG Position,
+    ULONG Size
+    )
+
+/*++
+
+Routine Description:
+
+    This routine converts a bit position and size into a mask.
+
+Arguments:
+
+    Position - Supplies the bit position where this color's pixel bits start.
+
+    Size - Supplies the number of bits the color gets in the pixel.
+
+Return Value:
+
+    Returns a mask of the specified bits.
+
+--*/
+
+{
+
+    ULONG Index;
+    ULONG Mask;
+
+    Mask = 0;
+    for (Index = 0; Index < Size; Index += 1) {
+        Mask |= 1 << (Position + Index);
+    }
+
+    return Mask;
+}
+
+VOID
+FwpPcatSetPalette (
+    VOID
+    )
+
+/*++
+
+Routine Description:
+
+    This routine sets an 8-bit color palette equivalent to TrueColor. Note that
+    doing this will change the colors for Text mode too.
+
+Arguments:
+
+    None.
+
+Return Value:
+
+    None, as failure is not fatal.
+
+--*/
+
+{
+
+    ULONG Color;
+    PUCHAR Palette;
+    REAL_MODE_CONTEXT RealModeContext;
+    KSTATUS Status;
+
+    //
+    // Create a standard BIOS call context.
+    //
+
+    Status = FwpRealModeCreateBiosCallContext(&RealModeContext, 0x10);
+    if (!KSUCCESS(Status)) {
+        return;
+    }
+
+    //
+    // Set up a BIOS call to set a block of DAC registers. BX contains the
+    // first DAC register to set (0 - 0xFF) and CX contains the number of
+    // registers to set (0 - 0xFF). ES:DX points to the table to set, which
+    // should be 3 * (CX + 1).
+    //
+
+    RealModeContext.Eax = VIDEO_FUNCTION_SET_DAC_REGISTER_BLOCK;
+    RealModeContext.Ebx = 0;
+    RealModeContext.Ecx = 0x00FF;
+    RealModeContext.Es =
+                  ADDRESS_TO_SEGMENT(RealModeContext.DataPage.RealModeAddress);
+
+    RealModeContext.Edx = RealModeContext.DataPage.RealModeAddress & 0x0F;
+
+    //
+    // Set up a TrueColor palette, in which the 8 bits of color are broken up
+    // into 3 bits of red, 3 bits of green, and 2 bits of blue. The palette
+    // registers are 6 bits wide each.
+    //
+
+    Palette = RealModeContext.DataPage.Page;
+    for (Color = 0; Color < 256; Color += 1) {
+        *Palette = TRUECOLOR_TO_PALETTE_RED(Color);
+        Palette += 1;
+        *Palette = TRUECOLOR_TO_PALETTE_GREEN(Color);
+        Palette += 1;
+        *Palette = TRUECOLOR_TO_PALETTE_BLUE(Color);
+        Palette += 1;
+    }
+
+    //
+    // Execute the firmware call.
+    //
+
+    FwpRealModeExecute(&RealModeContext);
+    FwpRealModeDestroyBiosCallContext(&RealModeContext);
+    return;
 }
 

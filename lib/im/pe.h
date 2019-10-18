@@ -60,6 +60,7 @@ Author:
 #define IMAGE_FILE_MACHINE_AMD64 0x8664
 #define IMAGE_FILE_MACHINE_ARM 0x1C0
 #define IMAGE_FILE_MACHINE_ARMT 0x1C2
+#define IMAGE_FILE_MACHINE_ARM64    0xAA64
 
 //
 // Data directory definitions.
@@ -103,6 +104,8 @@ Author:
 //
 // PE Image header definitions.
 //
+
+#pragma pack(push, 1)
 
 typedef struct _IMAGE_SECTION_HEADER {
     BYTE Name[IMAGE_SIZEOF_SHORT_NAME];
@@ -208,6 +211,8 @@ typedef struct _PE_RELOCATION_BLOCK {
     ULONG BlockSizeInBytes;
 } PACKED PE_RELOCATION_BLOCK, *PPE_RELOCATION_BLOCK;
 
+#pragma pack(pop)
+
 typedef USHORT PE_RELOCATION, *PPE_RELOCATION;
 
 typedef enum _PE_RELOCATION_TYPE {
@@ -220,6 +225,8 @@ typedef enum _PE_RELOCATION_TYPE {
     PeRelocationMipsJumpAddress16 = 9,
     PeRelocation64 = 10
 } PE_RELOCATION_TYPE, *PPE_RELOCATION_TYPE;
+
+#pragma pack(push, 1)
 
 typedef struct _PE_EXPORT_DIRECTORY_TABLE {
     ULONG ExportFlags;
@@ -265,6 +272,8 @@ typedef struct _COFF_SYMBOL {
     UCHAR Class;
     UCHAR AuxCount;
 } PACKED COFF_SYMBOL, *PCOFF_SYMBOL;
+
+#pragma pack(pop)
 
 //
 // -------------------------------------------------------- Function Prototypes

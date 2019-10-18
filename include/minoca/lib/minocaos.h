@@ -68,20 +68,6 @@ extern "C" {
 #define OS_LOCK_DEFAULT_SPIN_COUNT 500
 
 //
-// Provide this handle to search for symbols in the executing program's global
-// scope.
-//
-
-#define OS_LIBRARY_DEFAULT ((HANDLE)NULL)
-
-//
-// Provide this handle to search for symbols in the executable after the
-// currently executing program. "Next" is defined in terms of load order.
-//
-
-#define OS_LIBRARY_NEXT ((HANDLE)-1)
-
-//
 // Set this flag when initializing a read-write lock to indicate the lock
 // should be shared across processes.
 //
@@ -112,7 +98,8 @@ typedef enum _OS_X86_PROCESSOR_FEATURE {
 typedef
 BOOL
 (*PSIGNAL_HANDLER_ROUTINE) (
-    PSIGNAL_PARAMETERS SignalInformation
+    PSIGNAL_PARAMETERS SignalInformation,
+    PSIGNAL_CONTEXT Context
     );
 
 /*++
@@ -127,6 +114,9 @@ Arguments:
     SignalInformation - Supplies a pointer to the signal information. This
         pointer may be stack allocated, and should not be referenced once the
         handler has returned.
+
+    Context - Supplies a pointer to the signal context, including the machine
+        state before the signal was applied.
 
 Return Value:
 
@@ -237,14 +227,14 @@ typedef struct _TLS_INDEX {
 
 Structure Description:
 
-    This structure defines a dynamic library's symbol.
+    This structure defines a loaded executable image symbol.
 
 Members:
 
-    LibraryName - Stores the name of the library that contains the symbol.
+    ImagePath - Stores the file path of the image that contains the symbol.
 
-    LibraryBaseAddress - Stores the base address of the library that contains
-        the symbol.
+    ImageBase - Stores the loaded base address of the image that contains the
+        symbol.
 
     SymbolName - Stores the name of the symbol.
 
@@ -252,12 +242,12 @@ Members:
 
 --*/
 
-typedef struct _OS_LIBRARY_SYMBOL {
-    PSTR LibraryName;
-    PVOID LibraryBaseAddress;
+typedef struct _OS_IMAGE_SYMBOL {
+    PSTR ImagePath;
+    PVOID ImageBase;
     PSTR SymbolName;
     PVOID SymbolAddress;
-} OS_LIBRARY_SYMBOL, *POS_LIBRARY_SYMBOL;
+} OS_IMAGE_SYMBOL, *POS_IMAGE_SYMBOL;
 
 //
 // -------------------------------------------------------------------- Globals
@@ -665,9 +655,10 @@ Return Value:
 --*/
 
 OS_API
-KSTATUS
+INTN
 OsForkProcess (
-    PPROCESS_ID NewProcessId
+    ULONG Flags,
+    PVOID FrameRestoreBase
     );
 
 /*++
@@ -679,9 +670,15 @@ Routine Description:
 
 Arguments:
 
-    NewProcessId - Supplies a pointer that on success contains the process ID
-        of the child process in the parent, and 0 in the child. This value
-        contains -1 if the new process failed to spawn.
+    Flags - Supplies a bitfield of flags governing the behavior of the newly
+        forked process. See FORK_FLAG_* definitions.
+
+    FrameRestoreBase - Supplies an optional pointer to a region of recent
+        stack. On vfork operations, the kernel will copy the stack region from
+        the supplied pointer up to the current stack pointer into a temporary
+        buffer. After the child execs or exits, the kernel will copy that
+        region back into the parent process' stack. This is needed so that the
+        stack can be used in between the C library and the final system call.
 
 Return Value:
 
@@ -1174,7 +1171,7 @@ Arguments:
 
     Status - Supplies the exit status, returned to the parent in the wait
         calls. Conventionally 0 indicates success, and non-zero indicates
-        failure. The C library only recieves the first eight bits of the return
+        failure. The C library only receives the first eight bits of the return
         status, portable applications should not set bits beyond that.
 
 Return Value:
@@ -2234,7 +2231,7 @@ Arguments:
     Set - Supplies a boolean indicating whether to set the new groups (TRUE) or
         just get the current list of supplementary groups.
 
-    Groups - Supplies a pointer that recieves the supplementary groups for a
+    Groups - Supplies a pointer that receives the supplementary groups for a
         get operation or contains the new group IDs to set for a set operation.
 
     Count - Supplies a pointer that on input contains the number of elements
@@ -3331,76 +3328,6 @@ Return Value:
 
 OS_API
 KSTATUS
-OsGetTimeZoneData (
-    BOOL AllZones,
-    PSTR ZoneName,
-    PVOID *ZoneData,
-    PULONG ZoneDataSize
-    );
-
-/*++
-
-Routine Description:
-
-    This routine returns time zone data for the given time zone.
-
-Arguments:
-
-    AllZones - Supplies a boolean indicating whether data for all time zones
-        should be returned (TRUE) or just the specified zone (FALSE). If this
-        parameter is TRUE, then the zone name parameter is ignored.
-
-    ZoneName - Supplies an optional pointer to the time zone to get information
-        for. If NULL, information for the current system time zone will be
-        returned.
-
-    ZoneData - Supplies a pointer where a pointer to the data buffer will be
-        returned on success. The caller is responsible for freeing this memory
-        from the heap when done.
-
-    ZoneDataSize - Supplies a pointer where the size of the zone data will be
-        returned on success.
-
-Return Value:
-
-    Status code.
-
---*/
-
-OS_API
-KSTATUS
-OsSetSystemTimeZone (
-    PSTR Zone,
-    PSTR OriginalZoneName,
-    PULONG OriginalZoneNameSize
-    );
-
-/*++
-
-Routine Description:
-
-    This routine attempts to set the system time zone.
-
-Arguments:
-
-    Zone - Supplies a pointer to the name of the new zone to set.
-
-    OriginalZoneName - Supplies an optional pointer that if supplied will
-        return the name of the original time zone. If this buffer is supplied
-        but not big enough, the time zone change will not take effect.
-
-    OriginalZoneNameSize - Supplies an optional pointer that on input contains
-        the size of the original zone name buffer. On output, returns the
-        needed size for the original zone name.
-
-Return Value:
-
-    Status code.
-
---*/
-
-OS_API
-KSTATUS
 OsCreateTimer (
     ULONG SignalNumber,
     PUINTN SignalValue,
@@ -3672,9 +3599,10 @@ Return Value:
 
 OS_API
 KSTATUS
-OsGetLibrarySymbolAddress (
+OsGetSymbolAddress (
     HANDLE Library,
     PSTR SymbolName,
+    HANDLE Skip,
     PVOID *Address
     );
 
@@ -3682,17 +3610,19 @@ OsGetLibrarySymbolAddress (
 
 Routine Description:
 
-    This routine returns the address of the given symbol in the given library.
-    Both the library and all of its imports will be searched.
+    This routine returns the address of the given symbol in the given image.
+    Both the image and all of its imports will be searched.
 
 Arguments:
 
-    Library - Supplies the library to look up. Use OS_LIBRARY_DEFAULT to search
-        the current executable or OS_LIBRARY_NEXT to start the search after the
-        current executable.
+    Library - Supplies the image to look up. Supply NULL to search the global
+        scope.
 
     SymbolName - Supplies a pointer to a null terminated string containing the
         name of the symbol to look up.
+
+    Skip - Supplies an optional pointer to a library to skip. Supply NULL or
+        INVALID_HANDLE here to not skip any libraries.
 
     Address - Supplies a pointer that on success receives the address of the
         symbol, or NULL on failure.
@@ -3709,24 +3639,19 @@ Return Value:
 
 OS_API
 KSTATUS
-OsGetLibrarySymbolForAddress (
-    HANDLE Library,
+OsGetImageSymbolForAddress (
     PVOID Address,
-    POS_LIBRARY_SYMBOL Symbol
+    POS_IMAGE_SYMBOL Symbol
     );
 
 /*++
 
 Routine Description:
 
-    This routine resolves the given address into a symbol by searching the
-    given library. Both the library and all its imports will be searched.
+    This routine resolves the given address into an image and closest symbol
+    whose address is less than or equal to the given address.
 
 Arguments:
-
-    Library - Supplies the library to look up. Use OS_LIBRARY_DEFAULT to search
-        the current executable or OS_LIBRARY_NEXT to start the search after the
-        current executable.
 
     Address - Supplies the address to look up.
 
@@ -3740,6 +3665,31 @@ Return Value:
     STATUS_INVALID_HANDLE if the library handle is not valid.
 
     STATUS_NOT_FOUND if the address could not be found.
+
+--*/
+
+OS_API
+HANDLE
+OsGetImageForAddress (
+    PVOID Address
+    );
+
+/*++
+
+Routine Description:
+
+    This routine returns a handle to the image that contains the given address.
+
+Arguments:
+
+    Address - Supplies the address to look up.
+
+Return Value:
+
+    INVALID_HANDLE if no image contains the given address.
+
+    On success, returns the dynamic image handle that contains the given
+    address.
 
 --*/
 

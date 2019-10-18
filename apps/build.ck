@@ -25,41 +25,53 @@ Environment:
 
 --*/
 
+from menv import group;
+
 function build() {
-    test_apps = [
-        "//apps/libc/dynamic/testc:build_testc",
-        "//apps/testapps:testapps",
+    var allApps;
+    var apps;
+    var entries;
+    var libc;
+    var testApps;
+
+    testApps = [
+        "apps/libc/dynamic/testc:build_testc",
+        "apps/testapps:testapps",
     ];
 
     libc = [
-        "//apps/libc/crypt:libcrypt",
-        "//apps/libc/dynamic/pthread/static:libpthread_nonshared",
-        "//apps/libc/static:libc_nonshared",
-    ];
-
-    mingen_build = [
-        "//apps/mingen:build_mingen"
+        "apps/libc/crypt:libcrypt",
+        "apps/libc/dynamic/pthread/static:libpthread_nonshared",
+        "apps/libc/static:libc_nonshared",
+        "kernel:kernel-version",
     ];
 
     apps = [
-        "//apps/debug:debug",
-        "//apps/efiboot:efiboot",
-        "//apps/mingen:mingen",
-        "//apps/mount:mount",
-        "//apps/netcon:netcon",
-        "//apps/profile:profile",
-        "//apps/setup:msetup",
-        "//apps/setup:build_msetup",
-        "//apps/swiss:swiss",
-        "//apps/swiss:build_swiss",
-        "//apps/tzcomp:tz_files",
-        "//apps/unmount:umount",
-        "//apps/vmstat:vmstat",
+        "apps/banner:banner",
+        "apps/ck:build_chalk",
+        "apps/ck:chalk",
+        "apps/debug:debug",
+        "apps/efiboot:efiboot",
+        "apps/lib/lzma/util:lzma",
+        "apps/lib/lzma/util:build_lzma",
+        "apps/mingen:bootstrap_stamp",
+        "apps/mount:mount",
+        "apps/netcon:netcon",
+        "apps/profile:profile",
+        "apps/setup:msetup",
+        "apps/setup:build_msetup",
+        "apps/santa:build_santa",
+        "apps/swiss:swiss",
+        "apps/swiss:build_swiss",
+        "apps/tzcomp:tz_files",
+        "apps/tzset:tzset",
+        "apps/unmount:umount",
+        "apps/vmstat:vmstat",
     ];
 
-    all_apps = test_apps + libc + mingen_build + apps;
-    entries = group("all_apps", all_apps);
+    allApps = testApps + libc + apps;
+    entries = group("all_apps", allApps);
+    entries += group("libc", libc);
     return entries;
 }
 
-return build();

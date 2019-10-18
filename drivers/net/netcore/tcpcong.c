@@ -131,8 +131,9 @@ Return Value:
 {
 
     Socket->SlowStartThreshold = Socket->SendWindowSize;
-
-    ASSERT(Socket->SendMaxSegmentSize != 0);
+    if (Socket->SendMaxSegmentSize == 0) {
+        Socket->SendMaxSegmentSize = TCP_DEFAULT_MAX_SEGMENT_SIZE;
+    }
 
     Socket->CongestionWindowSize = 2 * Socket->SendMaxSegmentSize;
     if (NetTcpDebugPrintCongestionControl != FALSE) {
@@ -559,7 +560,7 @@ NetpTcpTransmissionTimeout (
 
 Routine Description:
 
-    This routine is called when an acknowledge is not recieved for a sent
+    This routine is called when an acknowledge is not received for a sent
     packet in a timely manner (the packet timed out).
 
 Arguments:

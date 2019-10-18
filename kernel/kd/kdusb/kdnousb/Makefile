@@ -1,6 +1,11 @@
 ################################################################################
 #
-#   Copyright (c) 2014 Minoca Corp. All Rights Reserved
+#   Copyright (c) 2014 Minoca Corp.
+#
+#    This file is licensed under the terms of the GNU General Public License
+#    version 3. Alternative licensing terms are available. Contact
+#    info@minocacorp.com for details. See the LICENSE file at the root of this
+#    project for complete licensing information.
 #
 #   Binary Name:
 #
@@ -23,9 +28,13 @@
 
 BINARY = kdnousb.a
 
-BINARYTYPE = library
+BINARYTYPE = klibrary
 
 OBJS = stubs.o   \
+
+ifeq ($(ARCH),x64)
+DIRS += x6432
+endif
 
 include $(SRCROOT)/os/minoca.mk
 

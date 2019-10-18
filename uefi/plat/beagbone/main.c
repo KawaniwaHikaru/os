@@ -81,6 +81,7 @@ UINT32 EfiBootDeviceCode;
 // ------------------------------------------------------------------ Functions
 //
 
+__USED
 VOID
 EfiBeagleBoneMain (
     VOID *TopOfStack,
@@ -114,10 +115,6 @@ Return Value:
 {
 
     UINTN FirmwareSize;
-
-    //
-    // Initialize UEFI enough to get into the debugger.
-    //
 
     EfipBeagleBoneBlackSetLeds(4);
     FirmwareSize = (UINTN)&_end - (UINTN)&__executable_start;

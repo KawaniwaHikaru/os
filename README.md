@@ -70,10 +70,12 @@ Below is a brief orientation of a few of the directories in the repository. Chec
    * `usb` - USB support
      * `ehci` - EHCI host controller support
      * `usbcomp` - USB composite device support
+     * `usbhid` - USB HID support
      * `usbhub` - USB hub support
      * `usbkbd` - USB keyboard support
      * `usbmass` - USB mass storage support
-   * `usrinput` - User input device support
+     * `usbmouse` - USB mouse support
+   * `input` - User input drivers
    * `videocon` - Video terminal console driver
  * `images` - Recipes to create the final images for each supported platform
  * `include` - Public header files
@@ -108,7 +110,7 @@ Below is a brief orientation of a few of the directories in the repository. Chec
    * `tools` - Tools used in building final firmware images
 
 ## Contributing
-Submissions are welcome! See our [CONTRIBUTING.md](CONTRIBUTING.md) page for details, or our [WISHLIST.md](WISHLIST.md) page for suggestions. Bugs can be reported here on Github.
+Submissions are welcome! See our [CONTRIBUTING.md](CONTRIBUTING.md) page for details, or our [WISHLIST](docs/WISHLIST.md) page for suggestions. Bugs can be reported here on Github.
 
 ## License
 Minoca OS is licensed to the public under the terms of the GNU General Public License, version 3. Alternate licensing options are available. Contact info@minocacorp.com if your company is interested in licensing Minoca OS. For complete licensing information, see the [LICENSE](LICENSE) file in this repository.
@@ -120,3 +122,5 @@ Minoca OS is licensed to the public under the terms of the GNU General Public Li
  * Website: [http://www.minocacorp.com/](http://www.minocacorp.com)
  * Github: [https://github.com/minoca](https://github.com/minoca)
  * Gitlab: [https://gitlab.com/minoca](https://gitlab.com/minoca)
+ * IRC: [ircs://irc.oftc.net:6697/minoca-os](ircs://irc.oftc.net:6697/minoca-os)
+
